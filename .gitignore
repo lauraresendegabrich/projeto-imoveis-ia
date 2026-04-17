@@ -1,0 +1,19 @@
+# ambiente virtual
+.venv/
+
+# python
+__pycache__/
+*.pyc
+
+# sistema
+.DS_Store
+
+# configs locais
+.env
+
+# VS Code / Kiro
+.vscode/
+
+# dados grandes
+data/
+vectorstore/
