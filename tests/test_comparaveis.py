@@ -72,6 +72,7 @@ if __name__ == "__main__":
     )
 
     comparaveis = resultado.get("comparaveis", [])
+    terrenos = resultado.get("terrenos", [])
     resumo = resultado.get("resumo", {})
 
     print("\n" + "=" * 55)
@@ -112,10 +113,11 @@ if __name__ == "__main__":
 
         endereco = f"{IMOVEL_ALVO['rua']}, {IMOVEL_ALVO['numero']}, {IMOVEL_ALVO['bairro']}, {IMOVEL_ALVO['cidade']}, {IMOVEL_ALVO['estado']}"
 
-        # Usa o resultado do clustering (que ja tem cluster, ranking, score)
+        # Usa o resultado do clustering + terrenos (terrenos nao passaram pelo ranking
+        # mas precisam ser validados geograficamente na zona homogenea)
         zona_resultado = analisar_zona_homogenea(
             endereco_alvo=endereco,
-            imoveis=comparaveis,
+            imoveis=comparaveis + terrenos,
             cidade=IMOVEL_ALVO["cidade"],
             estado=IMOVEL_ALVO["estado"],
         )

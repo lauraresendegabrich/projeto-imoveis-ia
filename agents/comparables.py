@@ -28,7 +28,8 @@ usando 2 tecnicas combinadas:
 
   ETAPA 2 — CLUSTERING VIA LLM (Groq, llama-3.3-70b-versatile):
   ──────────────────────────────────────────────────────────────
-    Envia TODOS os imoveis (casas + terrenos) para a LLM com:
+    Envia apenas casas/apartamentos para a LLM (terrenos sao excluidos
+    antes — tipo incomparavel com imovel construido). Envia com:
       - Caracteristicas do imovel alvo
       - Caracteristicas completas de cada candidato (sem score, pra nao enviesar)
       - Criterios de avaliacao imobiliaria
@@ -49,11 +50,19 @@ usando 2 tecnicas combinadas:
 FLUXO COMPLETO:
 ───────────────
   1. Carrega imoveis_completos.json (saida do Agente 1, todos os tipos)
-  2. Calcula score numerico de similaridade pra todos (usado internamente)
-  3. Envia todos pra LLM (Groq) com caracteristicas completas (sem score)
-  4. LLM retorna JSON com cluster + ranking + justificativa
-  5. Ordena: Cluster A primeiro (por ranking), depois Cluster B (por ranking)
-  6. Salva em data/imoveis_comparaveis.json
+  2. Separa terrenos (propertyType == "Terrenos") do restante:
+       → Terrenos NAO entram no ranking nem no clustering via LLM
+         (score numerico seria distorcido — sem quartos, banheiros, vagas)
+       → Terrenos SIM sao enviados para a Etapa 3 (zona homogenea),
+         pois a validacao geografica por distancia e relevante
+         independente do tipo de imovel
+  3. Calcula score numerico de similaridade so para casas/apartamentos
+  4. LLM (Groq) clusteriza e ranqueia apenas casas/apartamentos:
+       → Cluster A: similares ao alvo
+       → Cluster B: nao similares
+  5. Ordena: Cluster A primeiro (por ranking_llm), depois Cluster B
+  6. Terrenos sao adicionados ao final com cluster="terreno", ranking_llm=null
+  7. Salva em data/imoveis_comparaveis.json
 
 FALLBACK (se LLM falhar):
 ─────────────────────────
@@ -83,14 +92,23 @@ SAIDA: data/imoveis_comparaveis.json
         ...campos do imovel...,
         "score_similaridade": 0.85,
         "ranking_llm": 1,
-        "cluster": "A",
+        "cluster": "A",              ← "A" (similar) ou "B" (nao similar)
         "justificativa": "Area e quartos proximos, mesmo bairro..."
+      },
+      {
+        ...campos do terreno...,
+        "score_similaridade": null,  ← terrenos nao tem score
+        "ranking_llm": null,         ← terrenos nao foram ranqueados
+        "cluster": "terreno",        ← identificados separadamente
+        "justificativa": "Terreno excluido do ranking — tipo incomparavel..."
       }
     ],
+    "terrenos": [...],               ← lista separada so com os terrenos
     "resumo": {
-      "total_analisados": 45,
-      "cluster_a": 20,
-      "cluster_b": 25,
+      "total_analisados": 28,        ← so casas/apartamentos
+      "cluster_a": 14,
+      "cluster_b": 14,
+      "terrenos_excluidos": 17,      ← contagem dos terrenos separados
       "metodo": "similaridade_numerica + clustering_llm"
     }
   }
@@ -98,7 +116,7 @@ SAIDA: data/imoveis_comparaveis.json
 ETAPA 3 — ZONA HOMOGENEA (Google Maps + Groq Vision):
 ──────────────────────────────────────────────────────
   Valida geograficamente os imoveis usando imagem de satelite + IA de visao.
-  1. Geocodifica endereco do alvo (Nominatim → lat/lng)
+  1. Geocodifica endereco do alvo (Nominatim → lat/lng; fallback: Google Geocoding API),
   2. Google Maps Static API gera imagem hybrid  1280x1280 scale=2 com marcador
   3. Groq Vision (Llama 4 Scout 17B) analisa a imagem e retorna:
      tipo_regiao, uso_predominante, padrao_construtivo, densidade_urbana,
@@ -421,10 +439,14 @@ def identificar_comparaveis(
         logger.info(f"Carregados: {len(imoveis_coletados)} imoveis de {caminho}")
 
     # ── FILTRA POR TIPO ───────────────────────────────────────────
-    # Envia TODOS os imoveis (casas + terrenos) pra LLM decidir
-    # A LLM e quem classifica se terreno e comparavel ou nao
-    filtrados = imoveis_coletados
-    logger.info(f"Total para analise: {len(filtrados)} imoveis (todos os tipos)")
+    # Terrenos sao separados antes do ranking/clustering:
+    #   - Nao faz sentido comparar terreno vazio com casa construida
+    #   - Score numerico seria distorcido (sem quartos, banheiros, vagas)
+    #   - LLM nao precisa gastar tokens avaliando algo que nao e comparavel
+    # Terrenos ficam no resultado final com cluster="terreno" (sem ranking)
+    terrenos = [i for i in imoveis_coletados if (i.get("propertyType") or "").lower() == "terrenos"]
+    filtrados = [i for i in imoveis_coletados if (i.get("propertyType") or "").lower() != "terrenos"]
+    logger.info(f"Total para analise: {len(filtrados)} imoveis (terrenos excluidos do ranking: {len(terrenos)})")
 
     # ── CALCULA SCORE NUMERICO ────────────────────────────────────
     for im in filtrados:
@@ -458,25 +480,32 @@ def identificar_comparaveis(
         candidatos_llm = _fallback_numerico(candidatos_llm)
 
     # ── ORDENA RESULTADO FINAL ────────────────────────────────────
-    # Cluster A primeiro (ordenado por ranking_llm), depois Cluster B
+    # Cluster A primeiro (ordenado por ranking_llm), depois Cluster B, terrenos por ultimo
     cluster_a = sorted(
         [c for c in candidatos_llm if c.get("cluster") == "A"],
         key=lambda x: x.get("ranking_llm") or 999
     )
     cluster_b = [c for c in candidatos_llm if c.get("cluster") != "A"]
 
-    resultado_final = cluster_a + cluster_b
+    # Terrenos nao passaram pelo ranking/clustering — marcados separadamente
+    for t in terrenos:
+        t["cluster"] = "terreno"
+        t["ranking_llm"] = None
+        t["justificativa"] = "Terreno excluido do ranking — tipo incomparavel com imovel construido"
+
+    resultado_final = cluster_a + cluster_b + terrenos
 
     # ── RESUMO ────────────────────────────────────────────────────
     resumo = {
         "total_analisados": len(candidatos_llm),
         "cluster_a": len(cluster_a),
         "cluster_b": len(cluster_b),
+        "terrenos_excluidos": len(terrenos),
         "metodo": "similaridade_numerica + clustering_llm" if usar_llm else "similaridade_numerica",
     }
 
     logger.info("=" * 55)
-    logger.info(f"RESULTADO: {resumo['cluster_a']} similares | {resumo['cluster_b']} nao similares")
+    logger.info(f"RESULTADO: {resumo['cluster_a']} similares | {resumo['cluster_b']} nao similares | {resumo['terrenos_excluidos']} terrenos excluidos")
     logger.info(f"  Total analisados: {resumo['total_analisados']}")
     logger.info(f"  Metodo: {resumo['metodo']}")
     logger.info("=" * 55)
@@ -485,6 +514,7 @@ def identificar_comparaveis(
     saida = {
         "imovel_alvo": imovel_alvo,
         "comparaveis": resultado_final,
+        "terrenos": terrenos,   # separados — nao passaram pelo ranking, mas vao para zona homogenea
         "resumo": resumo,
     }
 

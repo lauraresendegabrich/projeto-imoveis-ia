@@ -16,3 +16,11 @@ __pycache__/
 
 # dados grandes
 vectorstore/
+
+# dados coletados (imóveis reais — não versionar)
+data/imoveis_brutos_ocrad.json
+data/imoveis_coletados.json
+data/imoveis_completos.json
+data/imoveis_comparaveis.json
+data/zona_homogenea.json
+data/satelite_zona_homogenea.png

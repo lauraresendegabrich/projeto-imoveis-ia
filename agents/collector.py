@@ -16,7 +16,7 @@ FONTE: Apify (ocrad~brazil-real-estate-scraper)
   Token:   APIFY_TOKEN_2 (conta separada, $5/mes gratis)
   Como:    o actor abre cada URL, executa JS, e extrai os anuncios
   Retorna: ~15-50 imoveis (depende do bairro)
-  Limite:  30 resultados por URL (max_items_per_url=30)
+  Limite:  20 casas / 10 terrenos / 30 apartamentos por URL (maxItems por URL)
   NOTA:    ZAP removido (95% duplicata do VivaReal, mesmo grupo OLX Brasil)
 
 ENRIQUECIMENTO: publishedAt via requests.get + regex
@@ -95,21 +95,25 @@ APIFY_BASE_URL = "https://api.apify.com/v2"
 # URLs de listagem por portal para o ocrad/brazil-real-estate-scraper.
 # Cada portal recebe URLs com bairro/cidade/estado.
 # O actor abre cada URL, executa JS, e extrai os anuncios.
-# Limite: 30 resultados por URL (max_items_per_url=30).
+# Limite: 20 casas / 10 terrenos / 30 apartamentos por URL (maxItems por URL).
 #
 # OBSERVACOES:
-#   - ImovelWeb: URL funciona no navegador mas o ocrad nao retorna resultados.
-#     Motivo desconhecido (pode ser bloqueio do actor ou formato nao suportado).
-#   - MercadoLivre: mesmo problema — URL funciona mas ocrad nao extrai.
+#   - VivaReal e LugarCerto: funcionam corretamente (publishedAt + description extraidos).
+#   - OLX: removida — Cloudflare bloqueia requests.get (403), publishedAt nao disponivel.
+#   - ImovelWeb: comentada — URL funciona no navegador mas ocrad nao retorna resultados.
+#   - MercadoLivre: comentada — mesmo problema do ImovelWeb.
 #   - ZAP Imoveis: removido pois 95% dos anuncios sao duplicatas do VivaReal
 #     (mesmo grupo OLX Brasil, mesmo posting_id).
-#   - VivaReal, LugarCerto e OLX: funcionam corretamente.
+#   - VivaReal e LugarCerto: funcionam corretamente (publishedAt + description extraidos).
+#   - OLX: removida — Cloudflare bloqueia requests.get (403), publishedAt nao disponivel.
+#   - ImovelWeb: comentada — URL funciona no navegador mas ocrad nao retorna resultados.
+#   - MercadoLivre: comentada — mesmo problema do ImovelWeb.
 URLS_LISTAGEM_PORTAIS = {
-    "imovelweb":      "https://www.imovelweb.com.br/{tipo_slug}-venda-{bairro_slug}-{cidade_slug}.html",
+    # "imovelweb":    "https://www.imovelweb.com.br/{tipo_slug}-venda-{bairro_slug}-{cidade_slug}.html",
     "vivareal":       "https://www.vivareal.com.br/venda/{estado_nome}/{cidade_slug}/bairros/{bairro_slug}/{tipo_slug}/",
     "lugarcerto":     "https://www.lugarcerto.com.br/busca/compra-e-venda/{estado_sigla}/{cidade_slug}/{bairro_slug}/{tipo_slug}",
-    "olx":            "https://www.olx.com.br/imoveis/venda/estado-{estado_sigla}?q={tipo_slug}+a+venda+{bairro_slug}+{cidade_slug}+{estado_nome}",
-    "mercadolivre":   "https://imoveis.mercadolivre.com.br/{tipo_slug}/venda/{estado_nome}/{cidade_slug}/{bairro_slug}/",
+    # "olx":          "https://www.olx.com.br/imoveis/venda/estado-{estado_sigla}?q={tipo_slug}+a+venda+{bairro_slug}+{cidade_slug}+{estado_nome}",
+    # "mercadolivre": "https://imoveis.mercadolivre.com.br/{tipo_slug}/venda/{estado_nome}/{cidade_slug}/{bairro_slug}/",
 }
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -283,10 +287,15 @@ def _extrair_dados_pagina(url: str) -> dict:
 # BLOCO 2 - COLETA VIA APIFY (ocrad/brazil-real-estate-scraper)
 # =============================================================================
 
-def _montar_urls_listagem(tipo_imovel: str, bairro: str, cidade: str, estado: str = "MG") -> list[str]:
+def _montar_urls_listagem(tipo_imovel: str, bairro: str, cidade: str, estado: str = "MG") -> list[tuple]:
     """
     Monta URLs de listagem para cada portal suportado pelo ocrad.
     Funciona pra qualquer bairro, cidade e estado do Brasil.
+
+    Retorna lista de tuplas (url, max_items) com limites por tipo:
+      - casa/apartamento: 20 itens por URL
+      - terreno:          10 itens por URL
+      - apartamento:      30 itens por URL
     """
     # Mapeamento estado sigla -> nome completo (pra URL do VivaReal)
     ESTADOS_NOME = {
@@ -333,6 +342,18 @@ def _montar_urls_listagem(tipo_imovel: str, bairro: str, cidade: str, estado: st
 
     tipos_portais = TIPOS_POR_PORTAL.get(tipo_imovel, TIPOS_POR_PORTAL["house"])
 
+    # Slugs que indicam terreno (para aplicar limite menor)
+    SLUGS_TERRENO = {"terreno", "terrenos", "lote-terreno_residencial", "lote", "lotes"}
+
+    # Limite por tipo de URL
+    # apartment usa 30, terreno usa 10, casa usa 20
+    def _limite(tipo_slug: str) -> int:
+        if tipo_imovel == "apartment":
+            return 30
+        if tipo_slug in SLUGS_TERRENO:
+            return 10
+        return 20
+
     urls = []
     for portal, template in URLS_LISTAGEM_PORTAIS.items():
         slugs = tipos_portais.get(portal, ["imoveis"])
@@ -345,7 +366,7 @@ def _montar_urls_listagem(tipo_imovel: str, bairro: str, cidade: str, estado: st
                     estado_nome=estado_nome,
                     estado_sigla=estado_sigla.lower(),
                 )
-                urls.append(url)
+                urls.append((url, _limite(tipo_slug)))
             except Exception:
                 pass
 
@@ -633,16 +654,20 @@ def _coletar_ocrad(
         return []
 
     logger.info(f"ocrad: {len(urls)} URLs de listagem para raspar")
-    for u in urls:
-        logger.info(f"  {u}")
+    for url, limite in urls:
+        logger.info(f"  [{limite} itens] {url}")
 
     # Envia para o actor
     # NOTA: Apify Proxy (useApifyProxy) testado e NAO funciona no free tier.
     # Com proxy: 0 resultados. Sem proxy: funciona normalmente.
     # A documentacao recomenda proxy pra melhores resultados, mas e recurso pago.
+    #
+    # Limites por tipo de URL (definidos em _montar_urls_listagem):
+    #   - casa:        20 itens
+    #   - terreno:     10 itens
+    #   - apartamento: 30 itens
     payload = {
-        "urls": [{"url": u} for u in urls],
-        "max_items_per_url": 30,
+        "urls": [{"url": url, "maxItems": limite} for url, limite in urls],
         "max_retries_per_url": 2,
         "ignore_url_failures": True,
     }
