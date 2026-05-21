@@ -132,19 +132,21 @@ Decisão deliberada para evitar viés de ancoragem. Se a LLM recebe o score num�
    → Terrenos SIM entram na Etapa 3 (zona homogênea)
    → Terrenos recebem cluster="terreno" e ranking_llm=null no resultado final
 
-2. Monta prompt com características do alvo + todos os candidatos (sem score)
+2. Monta prompt com características do alvo + candidatos (sem score)
    → Inclui: tipo, área, quartos, banheiros, vagas, preço, preço/m², bairro, rua, descrição
    → Score numérico NÃO é incluído (evita viés de ancoragem)
 
-3. Envia prompt para Groq (llama-3.3-70b-versatile) em uma única chamada
-   → Modelo retorna JSON com classificação de todos os imóveis
+3. Envia candidatos para Groq (llama-3.3-70b-versatile) em lotes de 40
+   → Cada lote é processado separadamente
+   → Pausa de 3s entre lotes para não estourar o rate limit de tokens/min
+   → Resultados de todos os lotes são combinados no final
 
-4. Parseia resposta JSON da LLM:
+4. Parseia resposta JSON da LLM por lote:
    → cluster:      "A" (similar) ou "B" (não similar)
-   → ranking:      posição global 1–N (1 = mais similar ao alvo)
+   → ranking:      posição global 1–N dentro do lote (1 = mais similar ao alvo)
    → justificativa: 1 frase explicando a classificação
 
-5. Se LLM falhar ou retornar JSON inválido → fallback numérico:
+5. Se LLM falhar ou retornar JSON inválido → fallback numérico por lote:
    → Score ≥ 0.60 → Cluster A
    → Score < 0.60 → Cluster B
    → Ranking = posição no score
@@ -166,7 +168,14 @@ Testamos diferentes modelos para a tarefa de clustering:
 | llama-3.3-70b-versatile | ✅ Classificações coerentes | 70B parâmetros, melhor raciocínio contextual |
 | gemma2-9b-it | Não testado para clustering | Reservado como fallback do llm_service |
 
-O modelo 70B é mais lento (~6s vs ~0.5s do 8B), mas a tarefa de clustering é feita em **uma única chamada** com todos os imóveis — o tempo total é aceitável.
+O modelo 70B é mais lento (~6s vs ~0.5s do 8B), mas a tarefa de clustering é feita em **lotes de 40 candidatos** — o tempo total é aceitável.
+
+### Sistema de lotes (implementado em maio 2026)
+**Problema identificado:** Com a nova coleta trazendo 77 casas (antes eram 28), o prompt com todos os candidatos em uma única chamada atingiu 13.787 tokens — acima do limite de 12.000 tokens/min do modelo llama-3.3-70b-versatile no free tier do Groq, causando erro 413 "Payload Too Large".
+
+**Solução adotada:** Dividir os candidatos em lotes de 40, com pausa de 3s entre lotes. Os imóveis de cada lote são processados separadamente e os resultados combinados no final. O langchain faz retry automático em caso de rate limit residual.
+
+**Impacto:** Nenhuma perda de qualidade nas classificações — cada lote recebe o contexto completo do imóvel alvo e os critérios de avaliação. O tempo total aumenta proporcionalmente ao número de lotes.
 
 ### Decisão sobre terrenos: separar antes da LLM
 **Problema identificado:** Quando terrenos eram enviados junto com casas para a LLM, ela os classificava corretamente como Cluster B (não similar), mas gastava tokens e tempo avaliando algo que nunca seria comparável a uma casa construída.
@@ -188,6 +197,18 @@ O prompt foi iterado várias vezes. Problemas encontrados e soluções:
 
 **Problema 3:** Resposta fora do formato JSON esperado.
 **Solução:** Instrução explícita "RESPONDA EXATAMENTE neste formato JSON (sem texto antes ou depois)" + parser com regex para extrair o JSON mesmo se houver texto extra.
+
+### Etapa 3 — Prompt do Groq Vision simplificado (maio 2026)
+**Problema identificado:** O prompt original pedia 13 campos ao Groq Vision (tipo_regiao, uso_predominante, infraestrutura_aparente, elementos_que_influenciam_valor, elementos_que_podem_quebrar_homogeneidade, limitacoes, etc.). Esses campos não eram usados em nenhuma etapa posterior do pipeline e aumentavam o custo de tokens desnecessariamente.
+
+**Solução adotada:** Reduzir o JSON de resposta de 13 para 7 campos, focando apenas nos 3 fatores prioritários para definir a zona homogênea:
+- `padrao_construtivo` — tipo de edificações predominantes
+- `homogeneidade_visual` — uniformidade da região
+- `densidade_urbana` — ocupação da área
+
+Os outros 4 campos mantidos são: `raio_sugerido_metros`, `justificativa_raio`, `descricao_zona_homogenea`, `confianca`.
+
+**Impacto:** Redução de tokens no prompt de visão, sem perda de informação relevante para o pipeline.
 
 ### Fallback (se LLM falhar)
 Se a LLM não responder ou retornar JSON inválido, o sistema usa apenas o score numérico:
@@ -216,19 +237,15 @@ O threshold de 0.60 foi definido empiricamente — scores abaixo disso geralment
    → Gasta 1 chamada das 10.000/mês gratuitas
 
 3. Groq Vision (Llama 4 Scout 17B) analisa a imagem e retorna JSON:
-   → tipo_regiao          (centro_urbano, residencial, comercial, misto...)
-   → uso_predominante     (residencial, comercial, misto, institucional...)
    → padrao_construtivo   (casas, sobrados, predios_baixos, torres_altas, misto...)
-   → densidade_urbana     (baixa, media, alta)
    → homogeneidade_visual (alta, media, baixa)
-   → infraestrutura_aparente         (lista de elementos visíveis)
-   → elementos_que_influenciam_valor (lista)
-   → elementos_que_podem_quebrar_homogeneidade (lista)
+   → densidade_urbana     (baixa, media, alta)
    → raio_sugerido_metros (int — raio adequado para aquela região)
    → justificativa_raio   (1 frase explicando o raio)
-   → descricao_zona_homogenea (até 3 frases descrevendo a zona)
+   → descricao_zona_homogenea (até 2 frases descrevendo a zona)
    → confianca            (alta, media, baixa)
-   → limitacoes           (o que não pode ser confirmado só pela imagem)
+   Nota: prompt simplificado em maio 2026 — foca nos 3 fatores prioritários
+   (padrao_construtivo, homogeneidade_visual, densidade_urbana)
 
 4. Geocodifica cada imóvel (Nominatim, 1 req/s)
    → Calcula distância em metros via fórmula de Haversine
@@ -301,10 +318,17 @@ Classificação geográfica (62 imóveis):
     → Av. Ministro Victor Konder (1060m)
 ```
 
+> **Nota (maio 2026):** Com o prompt simplificado (7 campos em vez de 13), o Groq Vision
+> retorna apenas `padrao_construtivo`, `homogeneidade_visual`, `densidade_urbana`,
+> `raio_sugerido_metros`, `justificativa_raio`, `descricao_zona_homogenea` e `confianca`.
+> Os campos removidos (tipo_regiao, uso_predominante, infraestrutura_aparente, etc.)
+> não eram consumidos por nenhuma etapa posterior do pipeline.
+
 ---
 
 ## Resultado dos Testes (Centro de Itajaí/SC)
 
+### Teste original (antes de maio 2026)
 ```
 Imóveis carregados:        45
 Terrenos separados:        17  (não entram no clustering)
@@ -324,6 +348,24 @@ Clustering LLM (llama-3.3-70b-versatile, ~4s):
 Zona homogênea (raio 500m):
   Na zona:   45 imóveis
   Fora zona: 17 imóveis
+```
+
+### Teste com novo sistema de lotes (maio 2026)
+```
+Imóveis carregados:        77 casas + 18 terrenos
+Terrenos separados:        18  (não entram no clustering)
+Casas/aptos para análise:  77
+
+Clustering LLM em 2 lotes (40 + 37):
+  Cluster A (similares):     31 imóveis
+  Cluster B (não similares): 46 imóveis
+
+Zona homogênea (raio 400m):
+  Padrão:        misto
+  Homogeneidade: média
+  Densidade:     média
+  Na zona:       75 imóveis
+  Fora da zona:  38 imóveis
 ```
 
 ---

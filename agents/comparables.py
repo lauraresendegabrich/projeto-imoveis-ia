@@ -383,8 +383,8 @@ def _fallback_numerico(candidatos: list[dict]) -> list[dict]:
 def identificar_comparaveis(
     imovel_alvo: dict,
     imoveis_coletados: Optional[list[dict]] = None,
-    arquivo_entrada: str = "imoveis_completos.json",
-    arquivo_saida: str = "imoveis_comparaveis.json",
+    arquivo_entrada: str = "imoveis_completos_ag1.json",
+    arquivo_saida: str = "imoveis_comparaveis_ag2.json",
     usar_llm: bool = True,
 ) -> dict:
     """
@@ -428,8 +428,8 @@ def identificar_comparaveis(
     if imoveis_coletados is None:
         caminho = os.path.join(DATA_DIR, arquivo_entrada)
         if not os.path.exists(caminho):
-            # Fallback: tenta imoveis_coletados.json
-            caminho = os.path.join(DATA_DIR, "imoveis_coletados.json")
+            # Fallback: tenta agent1_imoveis_coletados.json
+            caminho = os.path.join(DATA_DIR, "imoveis_coletados_ag1.json")
         if not os.path.exists(caminho):
             logger.error("Nenhum arquivo de imoveis encontrado")
             return {"imovel_alvo": imovel_alvo, "comparaveis": [], "resumo": {}}
@@ -461,31 +461,50 @@ def identificar_comparaveis(
                     f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
 
     # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Envia todos os candidatos pra LLM
-    candidatos_llm = filtrados
+    # Envia todos os candidatos para a LLM em lotes de 40
+    # (llama-3.3-70b-versatile: limite de ~12.000 tokens/min no free tier)
+    # Cada lote e processado separadamente e os resultados sao combinados
+    TAMANHO_LOTE = 40
 
     if usar_llm:
-        logger.info(f"Enviando {len(candidatos_llm)} candidatos para LLM clusterizar...")
-        prompt = _montar_prompt_clustering(imovel_alvo, candidatos_llm)
-        resposta = _chamar_llm(prompt)
+        todos_classificados = []
+        lotes = [filtrados[i:i+TAMANHO_LOTE] for i in range(0, len(filtrados), TAMANHO_LOTE)]
+        logger.info(f"Enviando {len(filtrados)} candidatos para LLM em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}...")
 
-        if resposta:
-            logger.info(f"LLM respondeu ({len(resposta)} chars)")
-            candidatos_llm = _parsear_resposta_llm(resposta, candidatos_llm)
-        else:
-            logger.warning("LLM sem resposta — usando fallback numerico")
-            candidatos_llm = _fallback_numerico(candidatos_llm)
+        for num_lote, lote in enumerate(lotes, 1):
+            logger.info(f"  Lote {num_lote}/{len(lotes)}: {len(lote)} candidatos...")
+            prompt = _montar_prompt_clustering(imovel_alvo, lote)
+            resposta = _chamar_llm(prompt)
+
+            if resposta:
+                logger.info(f"  Lote {num_lote}: LLM respondeu ({len(resposta)} chars)")
+                lote = _parsear_resposta_llm(resposta, lote)
+            else:
+                logger.warning(f"  Lote {num_lote}: LLM sem resposta — fallback numerico")
+                lote = _fallback_numerico(lote)
+
+            todos_classificados.extend(lote)
+
+            # Pausa entre lotes para nao estourar o rate limit de tokens/min
+            if num_lote < len(lotes):
+                import time
+                time.sleep(3)
+
+        candidatos_llm = todos_classificados
     else:
         logger.info("LLM desativada — usando apenas score numerico")
-        candidatos_llm = _fallback_numerico(candidatos_llm)
+        candidatos_llm = _fallback_numerico(filtrados)
+
+    excluidos_llm = []  # todos foram processados (por lote ou fallback)
 
     # ── ORDENA RESULTADO FINAL ────────────────────────────────────
     # Cluster A primeiro (ordenado por ranking_llm), depois Cluster B, terrenos por ultimo
+    todos = candidatos_llm + excluidos_llm
     cluster_a = sorted(
-        [c for c in candidatos_llm if c.get("cluster") == "A"],
+        [c for c in todos if c.get("cluster") == "A"],
         key=lambda x: x.get("ranking_llm") or 999
     )
-    cluster_b = [c for c in candidatos_llm if c.get("cluster") != "A"]
+    cluster_b = [c for c in todos if c.get("cluster") != "A"]
 
     # Terrenos nao passaram pelo ranking/clustering — marcados separadamente
     for t in terrenos:
@@ -578,18 +597,19 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     Envia imagem de satelite pro Groq Vision (Llama 4 Scout 17B)
     e pede pra analisar a regiao e identificar a zona homogenea.
 
-    O modelo de visao analisa:
-      - Uso predominante (residencial, comercial, misto)
-      - Padrao construtivo aparente (casas, predios, terrenos)
-      - Densidade urbana (alta, media, baixa)
-      - Grau de homogeneidade visual
+    Foca nos tres fatores prioritarios para definir a zona:
+      - Padrao construtivo aparente (casas, sobrados, predios, misto)
+      - Homogeneidade visual (alta, media, baixa)
+      - Densidade urbana (baixa, media, alta)
 
     Retorna dict com:
       - padrao_construtivo: str
-      - uso_solo: str
-      - densidade: str
-      - raio_metros: int
-      - descricao: str
+      - homogeneidade_visual: str
+      - densidade_urbana: str
+      - raio_sugerido_metros: int
+      - justificativa_raio: str
+      - descricao_zona_homogenea: str
+      - confianca: str
     """
     import base64
     from openai import OpenAI
@@ -607,46 +627,27 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
 
     prompt = f"""Voce e um assistente especializado em analise urbana para avaliacao imobiliaria.
 Analise a imagem de satelite/mapa hibrido da regiao de um imovel marcado no mapa.
-O objetivo e identificar o perfil da zona homogenea ao redor do imovel alvo, considerando caracteristicas visuais da regiao para apoiar a selecao de imoveis comparaveis.
 
 Endereco do imovel alvo (marcador vermelho): {endereco_alvo}
 
-Analise apenas o que pode ser observado na imagem. Nao invente informacoes que nao aparecem visualmente.
+Analise apenas o que pode ser observado na imagem. Nao invente informacoes.
 
-Considere:
-- uso predominante do solo;
-- padrao construtivo aparente;
-- presenca de casas, sobrados, predios baixos, predios medios ou torres;
-- densidade urbana;
-- regularidade das quadras;
-- presenca de comercio, servicos, hospitais, escolas, universidade, estadio ou grandes equipamentos urbanos;
-- elementos que podem quebrar a homogeneidade da regiao;
-- se a area ao redor do imovel parece adequada para comparacao imobiliaria.
+Foque nos tres aspectos mais importantes para definir a zona homogenea:
+1. PADRAO CONSTRUTIVO APARENTE — que tipo de edificacoes predominam visualmente
+2. HOMOGENEIDADE VISUAL — o quanto a regiao e uniforme em padrao e uso
+3. DENSIDADE URBANA — quao ocupada e a regiao
+
+Com base nesses tres fatores, sugira o raio adequado para a zona homogenea.
 
 Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
 {{
-  "tipo_regiao": "centro_urbano | residencial | comercial | misto | industrial | indefinido",
-  "uso_predominante": "residencial | comercial | misto | institucional | indefinido",
   "padrao_construtivo": "casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido",
-  "densidade_urbana": "baixa | media | alta | indefinida",
   "homogeneidade_visual": "alta | media | baixa | indefinida",
-  "infraestrutura_aparente": [
-    "exemplo: ruas pavimentadas",
-    "exemplo: comercios proximos"
-  ],
-  "elementos_que_influenciam_valor": [
-    "exemplo: proximidade de hospital",
-    "exemplo: vias principais"
-  ],
-  "elementos_que_podem_quebrar_homogeneidade": [
-    "exemplo: estadio",
-    "exemplo: grandes areas verdes"
-  ],
+  "densidade_urbana": "baixa | media | alta | indefinida",
   "raio_sugerido_metros": 700,
-  "justificativa_raio": "Explique em uma frase por que esse raio e adequado para esta regiao.",
-  "descricao_zona_homogenea": "Descreva em ate 3 frases o perfil da zona homogenea.",
-  "confianca": "alta | media | baixa",
-  "limitacoes": "Explique o que nao pode ser confirmado apenas pela imagem."
+  "justificativa_raio": "Explique em uma frase por que esse raio e adequado, baseando-se nos tres fatores acima.",
+  "descricao_zona_homogenea": "Descreva em ate 2 frases o perfil da zona com base no padrao construtivo, homogeneidade e densidade.",
+  "confianca": "alta | media | baixa"
 }}"""
 
     try:
@@ -824,7 +825,7 @@ def analisar_zona_homogenea(
     imagem = _obter_imagem_satelite(endereco_alvo, lat=lat_alvo, lon=lon_alvo)
     img_path = None
     if imagem:
-        img_path = os.path.join(DATA_DIR, "satelite_zona_homogenea.png")
+        img_path = os.path.join(DATA_DIR, "satelite_zona_homogenea_ag2.png")
         with open(img_path, "wb") as f:
             f.write(imagem)
         logger.info(f"Imagem salva: {img_path} ({len(imagem)//1024}KB)")
@@ -836,8 +837,8 @@ def analisar_zona_homogenea(
     if imagem:
         logger.info("Enviando imagem para Groq Vision (Llama 4 Scout)...")
         zona = _analisar_zona_homogenea(imagem, endereco_alvo)
-        logger.info(f"Zona: tipo={zona.get('tipo_regiao','?')} | "
-                    f"uso={zona.get('uso_predominante','?')} | "
+        logger.info(f"Zona: padrao={zona.get('padrao_construtivo','?')} | "
+                    f"homogeneidade={zona.get('homogeneidade_visual','?')} | "
                     f"densidade={zona.get('densidade_urbana','?')} | "
                     f"raio={zona.get('raio_sugerido_metros', zona.get('raio_metros','?'))}m")
         if zona.get("descricao_zona_homogenea"):
@@ -908,7 +909,7 @@ def analisar_zona_homogenea(
     }
 
     # Salva resultado em JSON
-    caminho_saida = os.path.join(DATA_DIR, "zona_homogenea.json")
+    caminho_saida = os.path.join(DATA_DIR, "zona_homogenea_ag2.json")
     with open(caminho_saida, "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=2, default=str)
     logger.info(f"Salvo em: {caminho_saida}")

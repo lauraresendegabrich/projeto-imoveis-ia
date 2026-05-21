@@ -5,20 +5,36 @@ Orquestrador do Pipeline Multiagente
 RESPONSABILIDADE:
     Conecta e orquestra os agentes implementados do pipeline.
     Recebe o imóvel alvo e retorna os comparáveis ranqueados
-    com validação de zona homogênea.
+    com análise qualitativa e de infraestrutura.
 
-PIPELINE ATUAL (Agentes 1 e 2 implementados):
-    Agente 1 — Coletor
+PIPELINE:
+    Agente 1 — Coletor (sequencial)
         → Coleta imóveis via Apify (VivaReal, LugarCerto)
-        → Enriquece com publishedAt e description via requests.get
-        ↓  data/imoveis_completos.json
-    Agente 2 — Comparáveis
+        → Enriquece com publishedAt, description e URLs de imagens
+        ↓  data/imoveis_completos_ag1.json
+
+    Agente 2 — Comparáveis (sequencial, depende do Ag. 1)
         → Separa terrenos do clustering
         → Score numérico de similaridade
         → Clustering via LLM (Groq, llama-3.3-70b-versatile)
         → Zona homogênea (Google Maps + Groq Vision)
-        ↓  data/imoveis_comparaveis.json
-        ↓  data/zona_homogenea.json
+        ↓  data/imoveis_comparaveis_ag2.json
+        ↓  data/zona_homogenea_ag2.json
+
+    Agente 3 — Analisador Qualitativo (PARALELO, depende do Ag. 2)
+        → Analisa texto + 8 fotos via NVIDIA NIM (ministral-14b)
+        → Score qualitativo por imóvel
+        ↓  data/imoveis_analisados_ag3.json
+
+    Agente 4 — Infraestrutura (PARALELO, depende do Ag. 2)
+        → Busca POIs via osmnx (OpenStreetMap) em 3 faixas
+        → Score de infraestrutura multifaixa
+        ↓  data/infra_avaliada_ag4.json
+
+    Agente 5 — Estimador de Preço (sequencial, depende dos Ag. 3 e 4)
+        → Consolida tudo e estima preço
+        ↓  pendente
+        ↓  data/zona_homogenea_ag2.json
 
 PENDENTE:
     Agente 3 — Analisador Textual  → extrai padrão, conservação, diferenciais
@@ -162,30 +178,42 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
         logger.info("GOOGLE_MAPS_KEY não configurada — zona homogênea pulada")
 
     # ------------------------------------------------------------------
-    # AGENTE 3 — Análise textual (pendente)
+    # AGENTES 3 e 4 — PARALELO (ambos dependem do Ag. 2, não entre si)
     # ------------------------------------------------------------------
-    # TODO: from agents.text_analyzer import analisar_descricao
-    # analise_textual = analisar_descricao(imovel_alvo.get("description", ""))
+    from agents.text_analyzer import analisar_comparaveis
+    from agents.infra_evaluator import avaliar_infraestrutura
+    from concurrent.futures import ThreadPoolExecutor
 
-    # ------------------------------------------------------------------
-    # AGENTE 4 — Avaliação de infraestrutura (pendente)
-    # ------------------------------------------------------------------
-    # TODO: from agents.infra_evaluator import avaliar_infraestrutura
-    # infra = avaliar_infraestrutura(imovel_alvo)
+    logger.info("Agentes 3 e 4: rodando em paralelo...")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        # Agente 3 — Análise qualitativa (texto + fotos)
+        future_ag3 = executor.submit(analisar_comparaveis)
+
+        # Agente 4 — Infraestrutura (POIs do entorno)
+        future_ag4 = executor.submit(avaliar_infraestrutura)
+
+        resultado_ag3 = future_ag3.result()
+        resultado_ag4 = future_ag4.result()
+
+    logger.info(f"Agente 3 concluído: score médio = {resultado_ag3.get('resumo', {}).get('score_qualitativo_medio', '?')}")
+    logger.info(f"Agente 4 concluído: score infra = {resultado_ag4.get('scores', {}).get('score_final', '?')}")
 
     # ------------------------------------------------------------------
     # AGENTE 5 — Estimativa de preço e liquidez (pendente)
     # ------------------------------------------------------------------
     # TODO: from agents.price_liquidity import estimar_preco
-    # estimativa = estimar_preco(imovel_alvo, comparaveis, analise_textual, infra)
+    # estimativa = estimar_preco(imovel_alvo, resultado_ag3, resultado_ag4)
 
     return {
-        "status":         "parcial — Agentes 1 e 2 implementados",
-        "imovel_alvo":    f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
-        "comparaveis":    comparaveis,
-        "terrenos":       terrenos,
-        "zona_homogenea": zona_resultado,
-        "resumo":         resumo,
-        "preco_estimado": None,   # preenchido pelo Agente 5
-        "liquidez":       None,   # preenchido pelo Agente 5
+        "status":           "Agentes 1, 2, 3 e 4 implementados",
+        "imovel_alvo":      f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
+        "comparaveis":      comparaveis,
+        "terrenos":         terrenos,
+        "zona_homogenea":   zona_resultado,
+        "analise_qualitativa": resultado_ag3,
+        "infraestrutura":   resultado_ag4,
+        "resumo":           resumo,
+        "preco_estimado":   None,
+        "liquidez":         None,
     }

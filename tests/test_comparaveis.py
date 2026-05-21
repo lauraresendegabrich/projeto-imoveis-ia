@@ -101,7 +101,7 @@ if __name__ == "__main__":
             if c.get("justificativa"):
                 print(f"       {c['justificativa']}")
 
-    print(f"\nArquivo salvo: data/imoveis_comparaveis.json")
+    print(f"\nArquivo salvo: data/imoveis_comparaveis_ag2.json")
     print(f"Metodo: {resumo.get('metodo', '?')}")
 
     # ── ZONA HOMOGENEA (opcional — requer GOOGLE_MAPS_KEY) ────────
@@ -127,19 +127,15 @@ if __name__ == "__main__":
         fora_zona = zona_resultado.get("fora_zona", [])
 
         print(f"\nAnalise visual da regiao:")
-        print(f"  Tipo: {zona.get('tipo_regiao', '?')}")
-        print(f"  Uso: {zona.get('uso_predominante', '?')}")
-        print(f"  Padrao: {zona.get('padrao_construtivo', '?')}")
-        print(f"  Densidade: {zona.get('densidade_urbana', '?')}")
-        print(f"  Homogeneidade: {zona.get('homogeneidade_visual', '?')}")
+        print(f"  Padrao construtivo: {zona.get('padrao_construtivo', '?')}")
+        print(f"  Homogeneidade:      {zona.get('homogeneidade_visual', '?')}")
+        print(f"  Densidade urbana:   {zona.get('densidade_urbana', '?')}")
         print(f"  Raio sugerido: {zona.get('raio_sugerido_metros', '?')}m")
         print(f"  Confianca: {zona.get('confianca', '?')}")
         if zona.get("descricao_zona_homogenea"):
             print(f"  Descricao: {zona['descricao_zona_homogenea']}")
         if zona.get("justificativa_raio"):
             print(f"  Justificativa raio: {zona['justificativa_raio']}")
-        if zona.get("limitacoes"):
-            print(f"  Limitacoes: {zona['limitacoes']}")
 
         print(f"\n  NA ZONA HOMOGENEA: {len(confirmados)}")
         for c in confirmados[:10]:

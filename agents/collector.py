@@ -277,6 +277,25 @@ def _extrair_dados_pagina(url: str) -> dict:
         if m:
             resultado["streetNumber"] = m.group(1)
 
+        # ── URLs das imagens (VivaReal: resizedimgs.vivareal.com)
+        # Extrai hashes unicos das imagens e monta URLs canonicas
+        # Cada hash diferente = foto diferente do imovel
+        hashes = re.findall(
+            r'resizedimgs\.vivareal\.com/img/vr-listing/([a-f0-9]{32})/',
+            html
+        )
+        if hashes:
+            # Remove duplicatas mantendo ordem
+            hashes_unicos = list(dict.fromkeys(hashes))
+            # Monta URL canonica de cada imagem (tamanho padrao 870x653)
+            urls_imagens = [
+                f"https://resizedimgs.vivareal.com/img/vr-listing/{h}/"
+                f"imovel.webp?action=fit-in&dimension=870x653"
+                for h in hashes_unicos
+            ]
+            resultado["images"] = urls_imagens
+            resultado["imageCount"] = len(urls_imagens)
+
     except Exception:
         pass
 
@@ -707,7 +726,7 @@ def _coletar_ocrad(
         return []
 
     logger.info(f"ocrad: {len(brutos)} brutos coletados")
-    salvar_dados(brutos, "imoveis_brutos_ocrad.json")
+    salvar_dados(brutos, "imoveis_brutos_ocrad_ag1.json")
 
     # Normaliza e filtra
     normalizados = [_normalizar_ocrad(i) for i in brutos]
@@ -738,6 +757,10 @@ def _coletar_ocrad(
             if dados_pagina.get("streetNumber"):
                 street += ", " + dados_pagina["streetNumber"]
             im["street"] = street
+        # Atualiza imagens se encontradas na pagina (mais completo que o ocrad)
+        if dados_pagina.get("images"):
+            im["images"] = dados_pagina["images"]
+            im["imageCount"] = dados_pagina["imageCount"]
         time.sleep(1)
     logger.info(f"publishedAt extraido: {pub_ok}/{len(filtrados)}")
 
@@ -822,7 +845,7 @@ def coletar_imoveis(
     bairro: str = "",
     rua: str = "",
     usar_cache: bool = False,
-    arquivo_processados: str = "imoveis_coletados.json",
+    arquivo_processados: str = "imoveis_coletados_ag1.json",
 ) -> list[dict]:
     """
     Coleta imoveis comparaveis usando Apify (ocrad).
@@ -927,7 +950,7 @@ def coletar_imoveis(
     # Salva separado: so imoveis com publishedAt (dados completos pra analise)
     completos = [i for i in combinados if i.get("publishedAt")]
     if completos:
-        salvar_dados(completos, "imoveis_completos.json")
+        salvar_dados(completos, "imoveis_completos_ag1.json")
     
     return combinados
 

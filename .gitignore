@@ -14,13 +14,18 @@ __pycache__/
 # VS Code / Kiro
 .vscode/
 
+# cache do osmnx
+cache/
+
 # dados grandes
 vectorstore/
 
 # dados coletados (imóveis reais — não versionar)
-data/imoveis_brutos_ocrad.json
-data/imoveis_coletados.json
-data/imoveis_completos.json
-data/imoveis_comparaveis.json
-data/zona_homogenea.json
-data/satelite_zona_homogenea.png
+data/imoveis_brutos_ocrad_ag1.json
+data/imoveis_coletados_ag1.json
+data/imoveis_completos_ag1.json
+data/imoveis_comparaveis_ag2.json
+data/zona_homogenea_ag2.json
+data/satelite_zona_homogenea_ag2.png
+data/imoveis_analisados_ag3.json
+data/infra_avaliada_ag4.json

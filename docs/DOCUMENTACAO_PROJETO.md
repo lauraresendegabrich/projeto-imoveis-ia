@@ -13,33 +13,44 @@ Sistema multiagente que coleta imóveis comparáveis, identifica os mais similar
 | Agente 1 — Coletor | ✅ Implementado e testado | `python -m tests.test_coleta` |
 | Agente 2 — Comparáveis | ✅ Implementado e testado | `python -m tests.test_comparaveis` |
 | Pipeline (Ag. 1 + 2) | ✅ Conectado em `app/graph.py` | `python app/main.py` |
-| Agente 3 — Analisador Textual | ⚠️ Implementado, pendente integração | `python app/main.py` (isolado) |
-| Agente 4 — Infraestrutura | ❌ Pendente | — |
+| Agente 3 — Analisador Textual | ✅ Implementado e testado | `python -m tests.test_text_analyzer` |
+| Agente 4 — Infraestrutura | ✅ Implementado e testado | `python -m tests.test_infra_evaluator` |
 | Agente 5 — Preço e Liquidez | ❌ Pendente | — |
 
 ### Fluxo funcionando hoje
 
 ```
-app/main.py
-    │
-    ▼
 app/graph.py → executar_pipeline(imovel_alvo)
     │
-    ├── Agente 1 (agents/collector.py)
+    ├── Agente 1 (agents/collector.py) — SEQUENCIAL
     │       Apify ocrad → VivaReal + LugarCerto
-    │       requests.get → publishedAt + description
-    │       ↓ imoveis_completos.json
+    │       requests.get → publishedAt + description + URLs de imagens
+    │       ↓ imoveis_completos_ag1.json
     │
-    ├── Agente 2 (agents/comparables.py)
+    ├── Agente 2 (agents/comparables.py) — SEQUENCIAL (depende do Ag. 1)
     │       Separa terrenos
     │       Score numérico de similaridade
-    │       Groq LLM → Cluster A / B + ranking
+    │       Groq LLM → Cluster A / B + ranking (lotes de 40)
     │       Google Maps + Groq Vision → zona homogênea
-    │       ↓ imoveis_comparaveis.json
-    │       ↓ zona_homogenea.json
-    │       ↓ satelite_zona_homogenea.png
+    │       ↓ imoveis_comparaveis_ag2.json
+    │       ↓ zona_homogenea_ag2.json
+    │       ↓ satelite_zona_homogenea_ag2.png
     │
-    └── retorna dict com comparaveis, terrenos, zona_homogenea, resumo
+    ├── Agente 3 (agents/text_analyzer.py) — PARALELO (depende do Ag. 2)
+    │       Lê zona_homogenea_ag2.json
+    │       Filtra: Cluster A + classificacao_zona="na_zona"
+    │       NVIDIA NIM (ministral-14b) → análise multimodal (texto + 8 fotos)
+    │       Python calcula score qualitativo
+    │       ↓ imoveis_analisados_ag3.json
+    │
+    ├── Agente 4 (agents/infra_evaluator.py) — PARALELO (depende do Ag. 2)
+    │       osmnx → POIs em 3 faixas (400m / 800m / 1500m)
+    │       Transporte com tags expandidas
+    │       Groq LLM → classificação do perfil
+    │       ↓ infra_avaliada_ag4.json
+    │
+    └── Agente 5 (pendente) — SEQUENCIAL (depende dos Ag. 3 e 4)
+            Consolida tudo → estimativa de preço
 ```
 
 ### Resultado real (Centro de Itajaí/SC — maio 2026)
@@ -50,10 +61,16 @@ Agente 1:
   Tempo: ~4.7 minutos
 
 Agente 2:
-  28 casas analisadas (17 terrenos separados)
-  14 Cluster A (similares) | 14 Cluster B (não similares)
-  Zona homogênea: raio 500m sugerido pelo Groq Vision
-  45 na zona | 17 fora da zona
+  77 casas analisadas em 2 lotes (40 + 37)
+  31 Cluster A (similares) | 46 Cluster B (não similares)
+  Zona homogênea: padrão=misto, homogeneidade=média, densidade=média, raio=400m
+  75 na zona | 38 fora da zona
+
+Agente 3:
+  14 imóveis analisados via LLM (Cluster A + na_zona)
+  14 via LLM | 0 fallback | 0 neutro
+  Score valor médio: 0.743
+  Score liquidez médio: 0.857
 ```
 
 ---
@@ -63,7 +80,9 @@ Agente 2:
 | Arquivo | Conteúdo |
 |---|---|
 | `docs/AGENT1_DOCUMENTACAO_COLETOR.md` | Agente 1 — portais testados, ferramentas descartadas, enriquecimento, limites por URL |
-| `docs/AGENT2_DOCUMENTACAO_COMPARAVEIS.md` | Agente 2 — score numérico, clustering LLM, zona homogênea, decisão sobre terrenos |
+| `docs/AGENT2_DOCUMENTACAO_COMPARAVEIS.md` | Agente 2 — score numérico, clustering LLM (lotes), zona homogênea, prompt simplificado |
+| `docs/AGENT3_DOCUMENTACAO_ANALISADOR_TEXTUAL.md` | Agente 3 — arquitetura simplificada, modelo 70B, score qualitativo, regra de neutro |
+| `docs/AGENT4_DOCUMENTACAO_INFRAESTRUTURA.md` | Agente 4 — multifaixa, osmnx, transporte expandido, classificação de perfil |
 
 ---
 
@@ -210,14 +229,17 @@ Analisa a descrição do anúncio com LLM e extrai fatores qualitativos:
 - Padrão construtivo (baixo / médio / alto)
 - Estado de conservação (ruim / regular / bom / excelente)
 - Diferenciais (piscina, varanda, reformado, etc.)
-- Impacto estimado no valor e na liquidez
+- Score numérico de impacto no valor (0.0–1.0) e na liquidez (0.0–1.0)
+
+### Fonte de dados
+Lê `zona_homogenea.json` (Agente 2 — Etapa 3) e filtra apenas imóveis com `cluster="A"` E `classificacao_zona="na_zona"` — os comparáveis de maior qualidade para a avaliação.
 
 ### Status
-Implementado e funcional de forma isolada. Pendente integração no pipeline principal (`app/graph.py`).
+Implementado e testado de forma isolada. Pendente integração no pipeline principal (`app/graph.py`).
 
 ### Como rodar
 ```bash
-.venv/Scripts/python.exe app/main.py
+.venv/Scripts/python.exe -m tests.test_text_analyzer
 ```
 
 ---
@@ -280,17 +302,20 @@ projeto-imoveis-ia/
 │   ├── imoveis_completos.json          # Com publishedAt
 │   ├── imoveis_comparaveis.json        # Ranking + clusters
 │   ├── zona_homogenea.json             # Validação geográfica
-│   └── satelite_zona_homogenea.png     # Imagem de satélite
+│   ├── satelite_zona_homogenea.png     # Imagem de satélite
+│   └── imoveis_analisados.json         # Análise textual (Agente 3)
 ├── docs/
 │   ├── DOCUMENTACAO_PROJETO.md              # Este arquivo — visão geral e estado atual
 │   ├── AGENT1_DOCUMENTACAO_COLETOR.md       # Agente 1 — detalhes técnicos e decisões
-│   └── AGENT2_DOCUMENTACAO_COMPARAVEIS.md   # Agente 2 — detalhes técnicos e decisões
+│   ├── AGENT2_DOCUMENTACAO_COMPARAVEIS.md   # Agente 2 — detalhes técnicos e decisões
+│   └── AGENT3_DOCUMENTACAO_ANALISADOR_TEXTUAL.md  # Agente 3 — detalhes técnicos e decisões
 ├── services/
 │   ├── llm_service.py      # Configuração do LLM (Groq → Gemini → Ollama)
 │   └── chroma_service.py   # Serviço de embeddings (pendente)
 ├── tests/
 │   ├── test_coleta.py      # Teste do Agente 1
-│   └── test_comparaveis.py # Teste do Agente 2
+│   ├── test_comparaveis.py # Teste do Agente 2
+│   └── test_text_analyzer.py # Teste do Agente 3
 ├── visuals/
 │   └── dashboard.py        # Dashboard de visualização (pendente)
 ├── .env                    # Chaves de API (não versionar)

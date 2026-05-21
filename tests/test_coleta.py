@@ -91,5 +91,5 @@ if __name__ == "__main__":
             print(f"  {k}: {v}")
 
     print(f"\nArquivos salvos:")
-    print(f"  data/imoveis_brutos_ocrad.json -> brutos ocrad")
-    print(f"  data/imoveis_coletados.json    -> {len(comparaveis)} comparaveis")
+    print(f"  data/imoveis_brutos_ocrad_ag1.json -> brutos ocrad")
+    print(f"  data/imoveis_coletados_ag1.json    -> {len(comparaveis)} comparaveis")
