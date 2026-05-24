@@ -33,6 +33,7 @@ IMOVEL_ALVO = {
     # Características do imóvel (para Agente 2 — score de similaridade)
     "propertyType":  "Casas",
     "area":          170,
+    "area_terreno":  200,       # área do terreno em m² (para Agente 5)
     "bedrooms":      3,
     "bathrooms":     4,
     "parkingSpaces": 2,

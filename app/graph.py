@@ -32,14 +32,13 @@ PIPELINE:
         ↓  data/infra_avaliada_ag4.json
 
     Agente 5 — Estimador de Preço (sequencial, depende dos Ag. 3 e 4)
-        → Consolida tudo e estima preço
-        ↓  pendente
-        ↓  data/zona_homogenea_ag2.json
+        → Calcula valor m² da zona (terreno + construção por padrão)
+        → Estima valor mínimo, médio e de liquidez
+        → Estima tempo de venda
+        ↓  data/preco_liquidez_ag5.json
 
 PENDENTE:
-    Agente 3 — Analisador Textual  → extrai padrão, conservação, diferenciais
-    Agente 4 — Infraestrutura      → avalia entorno (OSM, Google Places)
-    Agente 5 — Preço e Liquidez    → consolida e estima preço com liquidez
+    Nenhum — pipeline completo (5 agentes implementados)
 
 COMO USAR:
     from app.graph import executar_pipeline
@@ -200,20 +199,24 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     logger.info(f"Agente 4 concluído: score infra = {resultado_ag4.get('scores', {}).get('score_final', '?')}")
 
     # ------------------------------------------------------------------
-    # AGENTE 5 — Estimativa de preço e liquidez (pendente)
+    # AGENTE 5 — Estimativa de preço e liquidez
     # ------------------------------------------------------------------
-    # TODO: from agents.price_liquidity import estimar_preco
-    # estimativa = estimar_preco(imovel_alvo, resultado_ag3, resultado_ag4)
+    from agents.price_liquidity import estimar_preco
+
+    logger.info("Agente 5: estimando preço e liquidez...")
+    resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
+    logger.info(
+        f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao', {}).get('valor_medio_imovel', '?'):,.2f}"
+    )
 
     return {
-        "status":           "Agentes 1, 2, 3 e 4 implementados",
-        "imovel_alvo":      f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
-        "comparaveis":      comparaveis,
-        "terrenos":         terrenos,
-        "zona_homogenea":   zona_resultado,
+        "status":              "completo — Agentes 1 a 5 executados",
+        "imovel_alvo":         f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
+        "comparaveis":         comparaveis,
+        "terrenos":            terrenos,
+        "zona_homogenea":      zona_resultado,
         "analise_qualitativa": resultado_ag3,
-        "infraestrutura":   resultado_ag4,
-        "resumo":           resumo,
-        "preco_estimado":   None,
-        "liquidez":         None,
+        "infraestrutura":      resultado_ag4,
+        "preco_estimado":      resultado_ag5,
+        "resumo":              resumo,
     }

@@ -715,6 +715,7 @@ Responda exatamente neste formato JSON:
   "pontos_de_atencao": ["categorias com pontuacao mais baixa"],
   "limitacoes": ["Nenhuma limitacao critica foi identificada no teste, mas os resultados dependem da completude dos dados disponiveis no OpenStreetMap."],
   "impacto_estimado_no_valor": "...",
+  "tempo_liquidez_regional": "estimativa do tempo medio de venda de um imovel nesta regiao (ex: 30 a 60 dias, 60 a 90 dias, 90 a 150 dias, acima de 150 dias). Considere a infraestrutura, acessibilidade e atratividade da regiao.",
   "justificativa": "paragrafo explicando o impacto considerando as tres faixas, os pontos fortes, os pontos de atencao e as limitacoes do OSM",
   "conclusao": "O Agente 4 utiliza OpenStreetMap, Nominatim e osmnx para identificar pontos de interesse no entorno do imovel. A analise multirraio considera educacao, saude, hospitais, transporte, comercio, lazer e grandes equipamentos urbanos. [complete com o resultado especifico deste imovel]"
 }}"""
@@ -856,6 +857,7 @@ def avaliar_infraestrutura(
             "classificacao_infraestrutura": classificacao,
             "perfil_regiao":                analise.get("perfil_regiao"),
             "impacto_estimado_no_valor":    analise.get("impacto_estimado_no_valor"),
+            "tempo_liquidez_regional":      analise.get("tempo_liquidez_regional"),
             "pontos_fortes":                analise.get("pontos_fortes", []),
             "pontos_de_atencao":            analise.get("pontos_de_atencao", []),
             "limitacoes":                   analise.get("limitacoes", []),
