@@ -137,42 +137,75 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     import os
 
     logger.info("Agente 2: identificando comparáveis...")
-    resultado_ag2 = identificar_comparaveis(
-        imovel_alvo=imovel_alvo,
-        imoveis_coletados=imoveis_coletados,
-        usar_llm=True,
-    )
 
-    comparaveis = resultado_ag2.get("comparaveis", [])
-    terrenos    = resultado_ag2.get("terrenos", [])
-    resumo      = resultado_ag2.get("resumo", {})
-    logger.info(
-        f"Agente 2 concluído: "
-        f"{resumo.get('cluster_a', 0)} similares | "
-        f"{resumo.get('cluster_b', 0)} não similares | "
-        f"{resumo.get('terrenos_excluidos', 0)} terrenos"
-    )
+    comparaveis = []
+    terrenos = []
+    resumo = {}
+    zona_resultado = None
 
+    try:
+        resultado_ag2 = identificar_comparaveis(
+            imovel_alvo=imovel_alvo,
+            imoveis_coletados=imoveis_coletados,
+            usar_llm=True,
+        )
+
+        comparaveis = resultado_ag2.get("comparaveis", [])
+        terrenos    = resultado_ag2.get("terrenos", [])
+        resumo      = resultado_ag2.get("resumo", {})
+        logger.info(
+            f"Agente 2 concluído: "
+            f"{resumo.get('cluster_a', 0)} similares | "
+            f"{resumo.get('cluster_b', 0)} não similares | "
+            f"{resumo.get('terrenos_excluidos', 0)} terrenos"
+        )
+    except Exception as e:
+        logger.error(f"Agente 2 falhou: {e}")
+        return {
+            "status":         f"erro — Agente 2 falhou: {str(e)}",
+            "imovel_alvo":    f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
+            "comparaveis":    [],
+            "terrenos":       [],
+            "zona_homogenea": None,
+            "resumo":         {},
+            "preco_estimado": None,
+        }
+
+    if not comparaveis:
+        logger.warning("Agente 2 não encontrou comparáveis — pipeline não pode continuar")
+        return {
+            "status":         "erro — Agente 2 sem comparáveis (LLM não classificou nenhum como similar)",
+            "imovel_alvo":    f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
+            "comparaveis":    [],
+            "terrenos":       terrenos,
+            "zona_homogenea": None,
+            "resumo":         resumo,
+            "preco_estimado": None,
+        }
     # Zona homogênea (opcional — requer GOOGLE_MAPS_KEY)
     zona_resultado = None
     if os.getenv("GOOGLE_MAPS_KEY"):
-        logger.info("Agente 2 — Zona homogênea: validando geograficamente...")
-        endereco = (
-            f"{imovel_alvo.get('rua', '')}, "
-            f"{imovel_alvo.get('numero', '')}, "
-            f"{imovel_alvo.get('bairro', '')}, "
-            f"{imovel_alvo.get('cidade', '')}, "
-            f"{imovel_alvo.get('estado', '')}"
-        )
-        zona_resultado = analisar_zona_homogenea(
-            endereco_alvo=endereco,
-            imoveis=comparaveis + terrenos,
-            cidade=imovel_alvo.get("cidade", ""),
-            estado=imovel_alvo.get("estado", ""),
-        )
-        confirmados = zona_resultado.get("comparaveis_confirmados", [])
-        fora        = zona_resultado.get("fora_zona", [])
-        logger.info(f"Zona homogênea: {len(confirmados)} na zona | {len(fora)} fora")
+        try:
+            logger.info("Agente 2 — Zona homogênea: validando geograficamente...")
+            endereco = (
+                f"{imovel_alvo.get('rua', '')}, "
+                f"{imovel_alvo.get('numero', '')}, "
+                f"{imovel_alvo.get('bairro', '')}, "
+                f"{imovel_alvo.get('cidade', '')}, "
+                f"{imovel_alvo.get('estado', '')}"
+            )
+            zona_resultado = analisar_zona_homogenea(
+                endereco_alvo=endereco,
+                imoveis=comparaveis + terrenos,
+                cidade=imovel_alvo.get("cidade", ""),
+                estado=imovel_alvo.get("estado", ""),
+            )
+            confirmados = zona_resultado.get("comparaveis_confirmados", [])
+            fora        = zona_resultado.get("fora_zona", [])
+            logger.info(f"Zona homogênea: {len(confirmados)} na zona | {len(fora)} fora")
+        except Exception as e:
+            logger.error(f"Zona homogênea falhou: {e} — continuando sem ela")
+            zona_resultado = None
     else:
         logger.info("GOOGLE_MAPS_KEY não configurada — zona homogênea pulada")
 
@@ -185,6 +218,10 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
 
     logger.info("Agentes 3 e 4: rodando em paralelo...")
 
+    resultado_ag3 = {}
+    resultado_ag4 = {}
+    falhas = []
+
     with ThreadPoolExecutor(max_workers=2) as executor:
         # Agente 3 — Análise qualitativa (texto + fotos)
         future_ag3 = executor.submit(analisar_comparaveis)
@@ -192,25 +229,61 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
         # Agente 4 — Infraestrutura (POIs do entorno)
         future_ag4 = executor.submit(avaliar_infraestrutura)
 
-        resultado_ag3 = future_ag3.result()
-        resultado_ag4 = future_ag4.result()
+        # Coleta resultado do Agente 3 com tratamento de erro
+        try:
+            resultado_ag3 = future_ag3.result()
+            if not resultado_ag3:
+                falhas.append("Agente 3 retornou vazio — analise qualitativa indisponivel")
+                logger.warning("Agente 3 retornou resultado vazio")
+            else:
+                logger.info(f"Agente 3 concluído: score médio = {resultado_ag3.get('resumo', {}).get('score_qualitativo_medio', '?')}")
+        except Exception as e:
+            falhas.append(f"Agente 3 falhou: {str(e)}")
+            logger.error(f"Agente 3 falhou com erro: {e}")
 
-    logger.info(f"Agente 3 concluído: score médio = {resultado_ag3.get('resumo', {}).get('score_qualitativo_medio', '?')}")
-    logger.info(f"Agente 4 concluído: score infra = {resultado_ag4.get('scores', {}).get('score_final', '?')}")
+        # Coleta resultado do Agente 4 com tratamento de erro
+        try:
+            resultado_ag4 = future_ag4.result()
+            if not resultado_ag4:
+                falhas.append("Agente 4 retornou vazio — analise de infraestrutura indisponivel")
+                logger.warning("Agente 4 retornou resultado vazio")
+            else:
+                logger.info(f"Agente 4 concluído: score infra = {resultado_ag4.get('scores', {}).get('score_final', '?')}")
+        except Exception as e:
+            falhas.append(f"Agente 4 falhou: {str(e)}")
+            logger.error(f"Agente 4 falhou com erro: {e}")
 
     # ------------------------------------------------------------------
     # AGENTE 5 — Estimativa de preço e liquidez
+    # Depende dos Ag. 3 e 4, mas funciona com dados parciais
     # ------------------------------------------------------------------
     from agents.price_liquidity import estimar_preco
 
-    logger.info("Agente 5: estimando preço e liquidez...")
-    resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
-    logger.info(
-        f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao', {}).get('valor_medio_imovel', '?'):,.2f}"
-    )
+    resultado_ag5 = {}
+    try:
+        logger.info("Agente 5: estimando preço e liquidez...")
+        resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
+        logger.info(
+            f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao', {}).get('valor_medio_imovel', '?'):,.2f}"
+        )
+    except Exception as e:
+        falhas.append(f"Agente 5 falhou: {str(e)}")
+        logger.error(f"Agente 5 falhou com erro: {e}")
+
+    # ------------------------------------------------------------------
+    # RESULTADO FINAL
+    # ------------------------------------------------------------------
+    if falhas:
+        logger.warning(f"Pipeline concluído com {len(falhas)} falha(s):")
+        for f in falhas:
+            logger.warning(f"  - {f}")
+
+    status = "completo — Agentes 1 a 5 executados"
+    if falhas:
+        status = f"parcial — {len(falhas)} falha(s): {'; '.join(falhas)}"
 
     return {
-        "status":              "completo — Agentes 1 a 5 executados",
+        "status":              status,
         "imovel_alvo":         f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
         "comparaveis":         comparaveis,
         "terrenos":            terrenos,

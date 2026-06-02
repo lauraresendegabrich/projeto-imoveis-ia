@@ -469,20 +469,18 @@ def executar_agente5(
     comparaveis_zona: List[Dict[str, Any]],
     dados_ag3: Dict[str, Any],
     dados_ag4: Dict[str, Any],
-    metodo_media: str = "mediana",
     desconto_liquidez: float = 0.10
 ) -> Dict[str, Any]:
     """
     Agente 5 - Estimador de Preco e Liquidez.
+    Segue a logica da planilha do professor (celulas C62-C70).
 
-    1. Calcula valor m2 do terreno na zona homogenea
-    2. Calcula valor m2 da construcao por padrao
-    3. Para o imovel alvo, escolhe o padrao construtivo
-    4. Calcula valor minimo e medio
-    5. Calcula liquidez com desconto de 10%
-    6. Estima tempo de liquidez
+    Usa TRIMMEAN(0.5) para calcular medias — remove 25% menores e 25% maiores,
+    eliminando anuncios com precos fora da realidade.
+    Equivalente ao campo "Excluir extremos: Sim" da planilha.
     """
     avisos = []
+    metodo_media = "media_aparada"
 
     # Tipo do imovel alvo
     tipo_alvo = normalizar_tipo(
@@ -643,6 +641,8 @@ def executar_agente5(
     resultado = {
         "agente": "Agente 5 - Estimador de Preco e Liquidez",
         "metodo": "Valor m2 da zona homogenea (terreno + construcao por padrao)",
+        "excluir_extremos": True,
+        "metodo_estatistico": "TRIMMEAN(0.5) — remove 25% menores e 25% maiores",
         "imovel_alvo": {
             "tipo": tipo_alvo,
             "area_terreno_m2": area_terreno_alvo,
@@ -776,7 +776,6 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
         comparaveis_zona=comparaveis_zona,
         dados_ag3=dados_ag3,
         dados_ag4=dados_ag4,
-        metodo_media="mediana",
         desconto_liquidez=0.10,
     )
 

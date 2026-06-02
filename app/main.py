@@ -20,29 +20,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 IMOVEL_ALVO = {
     # Localização (obrigatório para Agente 1)
-    "rua":           "Rua Franklin Maximo Pereira",
-    "numero":        "188",
-    "bairro":        "Centro",
-    "cidade":        "Itajai",
-    "estado":        "SC",
-    "localizacao":   "Itajai, SC",
+    "rua":           "Rua Frederico Soares",
+    "numero":        "499",
+    "bairro":        "Santa Fe",
+    "cidade":        "Campo Grande",
+    "estado":        "MS",
+    "localizacao":   "Campo Grande, MS",
 
     # Tipo (obrigatório para Agente 1)
     "tipo":          "house",   # "house" (casas + terrenos) ou "apartment"
 
     # Características do imóvel (para Agente 2 — score de similaridade)
     "propertyType":  "Casas",
-    "area":          170,
-    "area_terreno":  200,       # área do terreno em m² (para Agente 5)
+    "area":          230,
+    "area_terreno":  360,       # área do terreno em m² (para Agente 5)
     "bedrooms":      3,
-    "bathrooms":     4,
-    "parkingSpaces": 2,
-    "pricePerSqm":   8205.88,
-    "price":         1395000,
-    "priceFormatted": "R$ 1.395.000",
-    "neighborhood":  "Centro",
-    "street":        "Rua Franklin Máximo Pereira",
-    "description":   "Casa com 170m², 3 quartos, 4 banheiros, 2 vagas, Centro de Itajaí",
+    "bathrooms":     2,
+    "parkingSpaces": 1,
+    "neighborhood":  "Santa Fe",
+    "street":        "Rua Frederico Soares",
+    "description":   "Casa com 3 quartos, 1 vaga na garagem, varanda/sacada, área de serviço, 2 WC, sala, lavabo, cozinha. Equipamento de segurança, espaço com churrasqueira. Área privativa 230m², terreno 360m². Bairro Santa Fé, Campo Grande/MS.",
+    "images": [],
 }
 
 # =============================================================================

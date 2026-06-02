@@ -10,12 +10,13 @@ Sistema multiagente que coleta imóveis comparáveis, identifica os mais similar
 
 | Agente | Status | Como rodar |
 |---|---|---|
-| Agente 1 — Coletor | ✅ Implementado e testado | `python -m tests.test_coleta` |
-| Agente 2 — Comparáveis | ✅ Implementado e testado | `python -m tests.test_comparaveis` |
-| Pipeline (Ag. 1 + 2) | ✅ Conectado em `app/graph.py` | `python app/main.py` |
-| Agente 3 — Analisador Textual | ✅ Implementado e testado | `python -m tests.test_text_analyzer` |
-| Agente 4 — Infraestrutura | ✅ Implementado e testado | `python -m tests.test_infra_evaluator` |
-| Agente 5 — Preço e Liquidez | ❌ Pendente | — |
+| Agente 1 — Coletor de Dados | ✅ Implementado e testado | `python -m tests.test_coleta` |
+| Agente 2 — Identificador de Comparáveis | ✅ Implementado e testado | `python -m tests.test_comparaveis` |
+| Agente 3 — Analisador Qualitativo | ✅ Implementado e testado | `python -m tests.test_text_analyzer` |
+| Agente 4 — Avaliador de Infraestrutura | ✅ Implementado e testado | `python -m tests.test_infra_evaluator` |
+| Agente 5 — Estimador de Preço e Liquidez | ✅ Implementado e testado | `python -m tests.test_price_liquidity` |
+| Pipeline completo (Orquestrador) | ✅ Implementado e testado | `python -m tests.test_pipeline` |
+| Interface Web (Streamlit) | ✅ Implementada | `streamlit run app/interface.py` |
 
 ### Fluxo funcionando hoje
 
@@ -49,8 +50,14 @@ app/graph.py → executar_pipeline(imovel_alvo)
     │       Groq LLM → classificação do perfil
     │       ↓ infra_avaliada_ag4.json
     │
-    └── Agente 5 (pendente) — SEQUENCIAL (depende dos Ag. 3 e 4)
-            Consolida tudo → estimativa de preço
+    └── Agente 5 (agents/price_liquidity.py) — SEQUENCIAL (depende dos Ag. 3 e 4)
+            Lê terrenos + comparáveis da zona homogênea
+            Calcula m² terreno (TRIMMEAN 0.5)
+            Calcula m² construção por padrão
+            Valor = terreno + construção (lógica da planilha)
+            Liquidez = valor médio × 0.90
+            Tempo de venda (scores Ag.3 + Ag.4)
+            ↓ preco_liquidez_ag5.json
 ```
 
 ### Resultado real (Centro de Itajaí/SC — maio 2026)
