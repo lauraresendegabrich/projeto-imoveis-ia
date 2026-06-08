@@ -71,6 +71,29 @@ with st.form("imovel_form"):
 # ============================================================
 
 if submitted:
+    # Validação dos campos obrigatórios
+    erros_validacao = []
+    if not rua.strip():
+        erros_validacao.append("Rua é obrigatória")
+    if not bairro.strip():
+        erros_validacao.append("Bairro é obrigatório")
+    if not cidade.strip():
+        erros_validacao.append("Cidade é obrigatória")
+    if not estado.strip():
+        erros_validacao.append("Estado é obrigatório")
+    if area <= 0 and tipo != "Terreno":
+        erros_validacao.append("Área construída deve ser maior que zero")
+    if area_terreno <= 0 and tipo == "Terreno":
+        erros_validacao.append("Área do terreno deve ser maior que zero para terrenos")
+    if quartos <= 0 and tipo != "Terreno":
+        erros_validacao.append("Número de quartos deve ser maior que zero")
+
+    if erros_validacao:
+        st.error("❌ **Preencha todos os campos obrigatórios para iniciar a avaliação:**")
+        for erro in erros_validacao:
+            st.warning(f"• {erro}")
+        st.stop()
+
     # Monta o dict do imóvel alvo
     tipo_map = {"Casa": "house", "Apartamento": "apartment", "Terreno": "house"}
     property_type_map = {"Casa": "Casas", "Apartamento": "Apartamentos", "Terreno": "Terrenos"}
