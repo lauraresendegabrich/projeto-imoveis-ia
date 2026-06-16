@@ -253,7 +253,7 @@ if submitted:
                 st.success(f"✅ Vizinhança validada — {len(fora)} imóveis descartados por estarem longe demais")
         except Exception as e:
             with log_area:
-                st.warning(f"⚠️ Validação geográfica indisponível — continuando sem ela")
+                st.warning(f"⚠️ Validação geográfica indisponível — continuando sem ela ({type(e).__name__}: {e})")
 
     progress.progress(45)
 
