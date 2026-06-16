@@ -28,6 +28,7 @@ LOGICA:
 """
 
 import json
+import os
 import re
 from pathlib import Path
 from statistics import mean, median
@@ -51,6 +52,8 @@ CAMINHO_ZONA = "data/zona_homogenea_ag2.json"
 CAMINHO_AG3 = "data/imoveis_analisados_ag3.json"
 CAMINHO_AG4 = "data/infra_avaliada_ag4.json"
 CAMINHO_SAIDA = "data/preco_liquidez_ag5.json"
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 # ============================================================
