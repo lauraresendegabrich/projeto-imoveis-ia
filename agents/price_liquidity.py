@@ -153,9 +153,12 @@ def arredondar_mil(valor: float) -> int:
 # ============================================================
 
 def carregar_json(caminho: str) -> Any:
-    """Carrega um arquivo JSON."""
-    with open(caminho, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Carrega um arquivo JSON. Retorna {} se nao existir."""
+    try:
+        with open(caminho, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 def salvar_json(dados: Any, caminho: str) -> None:
