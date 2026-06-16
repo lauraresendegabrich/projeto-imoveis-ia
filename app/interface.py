@@ -17,6 +17,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+# Streamlit Cloud: carrega secrets como variáveis de ambiente
+try:
+    for key, value in st.secrets.items():
+        if isinstance(value, str):
+            os.environ[key] = value
+except Exception:
+    pass  # Roda local sem secrets
+
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
