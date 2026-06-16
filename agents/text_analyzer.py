@@ -426,18 +426,30 @@ def analisar_comparaveis(
 
     if comparaveis is None:
         caminho_zona = os.path.join(DATA_DIR, arquivo_entrada)
-        if not os.path.exists(caminho_zona):
-            logger.error(f"Arquivo nao encontrado: {caminho_zona}")
-            return {}
-        with open(caminho_zona, "r", encoding="utf-8") as f:
-            dados_zona = json.load(f)
-        confirmados = dados_zona.get("comparaveis_confirmados", [])
-        comparaveis = [
-            c for c in confirmados
-            if c.get("cluster") == "A" and c.get("classificacao_zona") == "na_zona"
-        ]
-        logger.info(f"zona_homogenea_ag2.json: {len(confirmados)} confirmados -> "
-                    f"{len(comparaveis)} com Cluster A + na_zona")
+        if os.path.exists(caminho_zona):
+            with open(caminho_zona, "r", encoding="utf-8") as f:
+                dados_zona = json.load(f)
+            confirmados = dados_zona.get("comparaveis_confirmados", [])
+            comparaveis = [
+                c for c in confirmados
+                if c.get("cluster") == "A" and c.get("classificacao_zona") == "na_zona"
+            ]
+            logger.info(f"zona_homogenea_ag2.json: {len(confirmados)} confirmados -> "
+                        f"{len(comparaveis)} com Cluster A + na_zona")
+        else:
+            logger.warning(f"Zona homogenea nao disponivel — usando comparaveis do Ag. 2 direto")
+            caminho_comp = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
+            if os.path.exists(caminho_comp):
+                with open(caminho_comp, "r", encoding="utf-8") as f:
+                    dados_comp = json.load(f)
+                comparaveis = [
+                    c for c in dados_comp.get("comparaveis", [])
+                    if c.get("cluster") == "A"
+                ]
+                logger.info(f"Fallback: {len(comparaveis)} comparaveis do Cluster A (sem filtro de zona)")
+            else:
+                logger.error(f"Nenhum arquivo de comparaveis encontrado")
+                return {}
 
     if imovel_alvo is None:
         caminho_comp = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
