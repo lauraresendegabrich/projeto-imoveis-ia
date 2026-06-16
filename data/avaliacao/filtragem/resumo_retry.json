@@ -1,0 +1,50 @@
+[
+  {
+    "id": 8,
+    "status": "ok",
+    "total_csv": 1,
+    "cluster_a": 1,
+    "cluster_b": 0,
+    "tempo_s": 57.2
+  },
+  {
+    "id": 10,
+    "status": "ok",
+    "total_csv": 55,
+    "cluster_a": 14,
+    "cluster_b": 39,
+    "tempo_s": 217.6
+  },
+  {
+    "id": 11,
+    "status": "ok",
+    "total_csv": 4,
+    "cluster_a": 0,
+    "cluster_b": 4,
+    "tempo_s": 41.5
+  },
+  {
+    "id": 13,
+    "status": "ok",
+    "total_csv": 88,
+    "cluster_a": 48,
+    "cluster_b": 32,
+    "tempo_s": 328.2
+  },
+  {
+    "id": 14,
+    "status": "ok",
+    "total_csv": 4,
+    "cluster_a": 0,
+    "cluster_b": 4,
+    "tempo_s": 55.0
+  },
+  {
+    "id": 15,
+    "status": "ok",
+    "total_csv": 54,
+    "cluster_a": 24,
+    "cluster_b": 12,
+    "tempo_s": 187.3
+  }
+]

@@ -1,0 +1,68 @@
+{
+  "imovel_alvo": {
+    "rua": "Rua Buenos Aires",
+    "numero": "280",
+    "bairro": "Jardim Botânico",
+    "cidade": "Porto Alegre",
+    "estado": "RS",
+    "localizacao": "Porto Alegre, RS",
+    "tipo": "apartment",
+    "propertyType": "Apartamentos",
+    "area": 64,
+    "area_terreno": null,
+    "bedrooms": 2,
+    "bathrooms": 2,
+    "parkingSpaces": 2,
+    "neighborhood": "Jardim Botânico",
+    "street": "Rua Buenos Aires",
+    "description": "Apartamento à venda localizado na Rua Buenos Aires, no bairro Jardim Botânico em Porto Alegre. Este imóvel conta com área construída de 64m², oferecendo 2 quartos, sendo 1 suíte, 2 banheiros e 2 vagas de garagem. Aproveite para visitar esta oportunidade e agende uma visita com um de nossos corretores.",
+    "images": [
+      "https://resizedimgs.vivareal.com/img/vr-listing/46e2e67ee183f203bd74212f057cd51e/apartamento-com-2-quartos-a-venda-64m-no-jardim-botanico-porto-alegre.webp?action=fit-in&dimension=870x707",
+      "https://resizedimgs.vivareal.com/img/vr-listing/f02f14e175ceae335ef8cf1d0ce19b36/apartamento-com-2-quartos-a-venda-64m-no-jardim-botanico-porto-alegre.webp?action=fit-in&dimension=870x707&seo=false"
+    ]
+  },
+  "comparaveis": [
+    {
+      "id": "353637440",
+      "title": "Apartamento, 2 Quartos, 2 Vagas, 1 Suite  Jardim Botânico, Porto Alegre, RS",
+      "description": "Apartamento 2 quartos à venda no bairro Jardim Botânico em Porto Alegre. Apartamento com 99m², 1 suíte, 2 banheiros e 2 vagas por R$550.000,00. ID 353637440. Confira agora o apartamento!",
+      "price": 550000,
+      "priceFormatted": "R$ 550.000",
+      "condominiumFee": null,
+      "iptu": null,
+      "transactionType": "sale",
+      "propertyType": "Apartamentos",
+      "propertySubType": null,
+      "area": 99,
+      "bedrooms": 2,
+      "bathrooms": null,
+      "parkingSpaces": 2,
+      "amenities": null,
+      "complexAmenities": null,
+      "street": null,
+      "neighborhood": "Jardim Botanico",
+      "city": "Porto Alegre",
+      "state": "RS",
+      "images": [],
+      "imageCount": 0,
+      "url": "https://www.lugarcerto.com.br/imovel/apartamento-2-quartos-jardim-botanico-porto-alegre-com-garagem-99m2-compra-e-venda-rs550000-id-353637440",
+      "publishedAt": "2025-10-03T23:59:00Z",
+      "pricePerSqm": 5555.56,
+      "source": "Lugar Certo",
+      "scrapedAt": "2026-06-09T18:00:14.432725",
+      "data_coleta": "2026-06-09T18:00:14.432753",
+      "score_similaridade": 0.7189,
+      "cluster": "A",
+      "ranking_llm": 1,
+      "justificativa": "Imóvel com características semelhantes ao imóvel alvo, como mesmo tipo, área na mesma faixa, número de quartos próximo e mesmo bairro."
+    }
+  ],
+  "terrenos": [],
+  "resumo": {
+    "total_analisados": 1,
+    "cluster_a": 1,
+    "cluster_b": 0,
+    "terrenos_excluidos": 0,
+    "metodo": "similaridade_numerica + clustering_llm"
+  }
+}

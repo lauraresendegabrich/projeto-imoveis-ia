@@ -1,0 +1,22 @@
+{
+  "rua": "Avenida Perimetral",
+  "numero": "S/N",
+  "bairro": "Promorar",
+  "cidade": "Teresina",
+  "estado": "PI",
+  "localizacao": "Teresina, PI",
+  "tipo": "house",
+  "propertyType": "Casas",
+  "area": 130,
+  "area_terreno": null,
+  "bedrooms": 4,
+  "bathrooms": 4,
+  "parkingSpaces": 2,
+  "neighborhood": "Promorar",
+  "street": "Avenida Perimetral",
+  "description": "Casa com 2 salas, 4 quartos sendo 3 suítes, copa/cozinha, banheiro social, área de serviço e 2 vagas de garagem cobertas. 130m², 2 andares.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/78467e91bfa9f94413281d0401f8d483/casa-com-4-quartos-a-venda-130m-no-promorar-teresina.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.vivareal.com/img/vr-listing/d4eb678ed81cd03ab8989313bf8747db/casa-com-4-quartos-a-venda-130m-no-promorar-teresina.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

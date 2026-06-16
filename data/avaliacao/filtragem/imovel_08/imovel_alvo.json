@@ -1,0 +1,22 @@
+{
+  "rua": "Rua Buenos Aires",
+  "numero": "280",
+  "bairro": "Jardim Botânico",
+  "cidade": "Porto Alegre",
+  "estado": "RS",
+  "localizacao": "Porto Alegre, RS",
+  "tipo": "apartment",
+  "propertyType": "Apartamentos",
+  "area": 64,
+  "area_terreno": null,
+  "bedrooms": 2,
+  "bathrooms": 2,
+  "parkingSpaces": 2,
+  "neighborhood": "Jardim Botânico",
+  "street": "Rua Buenos Aires",
+  "description": "Apartamento à venda localizado na Rua Buenos Aires, no bairro Jardim Botânico em Porto Alegre. Este imóvel conta com área construída de 64m², oferecendo 2 quartos, sendo 1 suíte, 2 banheiros e 2 vagas de garagem. Aproveite para visitar esta oportunidade e agende uma visita com um de nossos corretores.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/46e2e67ee183f203bd74212f057cd51e/apartamento-com-2-quartos-a-venda-64m-no-jardim-botanico-porto-alegre.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.vivareal.com/img/vr-listing/f02f14e175ceae335ef8cf1d0ce19b36/apartamento-com-2-quartos-a-venda-64m-no-jardim-botanico-porto-alegre.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

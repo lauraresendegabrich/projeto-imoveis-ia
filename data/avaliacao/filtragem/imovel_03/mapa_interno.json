@@ -1,0 +1,200 @@
+[
+  {
+    "numero_csv": 1,
+    "id_original": "352104481",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.5225
+  },
+  {
+    "numero_csv": 2,
+    "id_original": "343057324",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.3692
+  },
+  {
+    "numero_csv": 3,
+    "id_original": "350819879",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4183
+  },
+  {
+    "numero_csv": 4,
+    "id_original": "339724149",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.4625
+  },
+  {
+    "numero_csv": 5,
+    "id_original": "351136528",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4858
+  },
+  {
+    "numero_csv": 6,
+    "id_original": "352104479",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.4875
+  },
+  {
+    "numero_csv": 7,
+    "id_original": "353716004",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4583
+  },
+  {
+    "numero_csv": 8,
+    "id_original": "352955136",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4367
+  },
+  {
+    "numero_csv": 9,
+    "id_original": "350930039",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4208
+  },
+  {
+    "numero_csv": 10,
+    "id_original": "352312388",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.3783
+  },
+  {
+    "numero_csv": 11,
+    "id_original": "353484603",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.7417
+  },
+  {
+    "numero_csv": 12,
+    "id_original": "352062001",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.4942
+  },
+  {
+    "numero_csv": 13,
+    "id_original": "348880720",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 14,
+    "id_original": "352107335",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5667
+  },
+  {
+    "numero_csv": 15,
+    "id_original": "352104478",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 16,
+    "id_original": "352127748",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.4533
+  },
+  {
+    "numero_csv": 17,
+    "id_original": "340549820",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.38
+  },
+  {
+    "numero_csv": 18,
+    "id_original": "353640645",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.425
+  },
+  {
+    "numero_csv": 19,
+    "id_original": "352081725",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.4792
+  },
+  {
+    "numero_csv": 20,
+    "id_original": "353716063",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.5208
+  },
+  {
+    "numero_csv": 21,
+    "id_original": "344639798",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 22,
+    "id_original": "352092436",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 23,
+    "id_original": "353716117",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.5008
+  },
+  {
+    "numero_csv": 24,
+    "id_original": "353716178",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.385
+  },
+  {
+    "numero_csv": 25,
+    "id_original": "352104478",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 26,
+    "id_original": "344639798",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 27,
+    "id_original": "352092436",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 28,
+    "id_original": "339724537",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4458
+  },
+  {
+    "numero_csv": 29,
+    "id_original": "353716007",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.4958
+  },
+  {
+    "numero_csv": 30,
+    "id_original": "352127778",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4042
+  },
+  {
+    "numero_csv": 31,
+    "id_original": "352107337",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.4875
+  },
+  {
+    "numero_csv": 32,
+    "id_original": "348880720",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 33,
+    "id_original": "353716118",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.5133
+  }
+]

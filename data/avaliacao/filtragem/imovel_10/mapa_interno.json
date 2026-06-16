@@ -1,0 +1,332 @@
+[
+  {
+    "numero_csv": 1,
+    "id_original": "342271161",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.3706
+  },
+  {
+    "numero_csv": 2,
+    "id_original": "353667279",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5464
+  },
+  {
+    "numero_csv": 3,
+    "id_original": "353662799",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6374
+  },
+  {
+    "numero_csv": 4,
+    "id_original": "353667570",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5867
+  },
+  {
+    "numero_csv": 5,
+    "id_original": "10289900722",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6223
+  },
+  {
+    "numero_csv": 6,
+    "id_original": "352140124",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4407
+  },
+  {
+    "numero_csv": 7,
+    "id_original": "353454676",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5777
+  },
+  {
+    "numero_csv": 8,
+    "id_original": "353665135",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5208
+  },
+  {
+    "numero_csv": 9,
+    "id_original": "353652950",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.581
+  },
+  {
+    "numero_csv": 10,
+    "id_original": "353662826",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5492
+  },
+  {
+    "numero_csv": 11,
+    "id_original": "353669851",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4568
+  },
+  {
+    "numero_csv": 12,
+    "id_original": "353666790",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5208
+  },
+  {
+    "numero_csv": 13,
+    "id_original": "353666649",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6287
+  },
+  {
+    "numero_csv": 14,
+    "id_original": "10190806380",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5781
+  },
+  {
+    "numero_csv": 15,
+    "id_original": "353646696",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6292
+  },
+  {
+    "numero_csv": 16,
+    "id_original": "10235450369",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4631
+  },
+  {
+    "numero_csv": 17,
+    "id_original": "353471443",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.691
+  },
+  {
+    "numero_csv": 18,
+    "id_original": "353543007",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6258
+  },
+  {
+    "numero_csv": 19,
+    "id_original": "353670273",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.7535
+  },
+  {
+    "numero_csv": 20,
+    "id_original": "353698228",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.3544
+  },
+  {
+    "numero_csv": 21,
+    "id_original": "353635551",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4169
+  },
+  {
+    "numero_csv": 22,
+    "id_original": "353669605",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4931
+  },
+  {
+    "numero_csv": 23,
+    "id_original": "353670235",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5279
+  },
+  {
+    "numero_csv": 24,
+    "id_original": "10235445620",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.359
+  },
+  {
+    "numero_csv": 25,
+    "id_original": "353591828",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6562
+  },
+  {
+    "numero_csv": 26,
+    "id_original": "353666375",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5859
+  },
+  {
+    "numero_csv": 27,
+    "id_original": "353547863",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4642
+  },
+  {
+    "numero_csv": 28,
+    "id_original": "353668200",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6678
+  },
+  {
+    "numero_csv": 29,
+    "id_original": "353668892",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5193
+  },
+  {
+    "numero_csv": 30,
+    "id_original": "353666479",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6656
+  },
+  {
+    "numero_csv": 31,
+    "id_original": "353558751",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.53
+  },
+  {
+    "numero_csv": 32,
+    "id_original": "353667959",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4683
+  },
+  {
+    "numero_csv": 33,
+    "id_original": "353669854",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4709
+  },
+  {
+    "numero_csv": 34,
+    "id_original": "353667255",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.419
+  },
+  {
+    "numero_csv": 35,
+    "id_original": "353671810",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.3508
+  },
+  {
+    "numero_csv": 36,
+    "id_original": "353665157",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5279
+  },
+  {
+    "numero_csv": 37,
+    "id_original": "353712358",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5563
+  },
+  {
+    "numero_csv": 38,
+    "id_original": "353701229",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5
+  },
+  {
+    "numero_csv": 39,
+    "id_original": "353668003",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6423
+  },
+  {
+    "numero_csv": 40,
+    "id_original": "353687409",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4123
+  },
+  {
+    "numero_csv": 41,
+    "id_original": "353665508",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5193
+  },
+  {
+    "numero_csv": 42,
+    "id_original": "353468769",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5696
+  },
+  {
+    "numero_csv": 43,
+    "id_original": "353665973",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5161
+  },
+  {
+    "numero_csv": 44,
+    "id_original": "353646723",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 45,
+    "id_original": "353548106",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6482
+  },
+  {
+    "numero_csv": 46,
+    "id_original": "353590991",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4024
+  },
+  {
+    "numero_csv": 47,
+    "id_original": "353646723",
+    "cluster_sistema": "terreno",
+    "score_similaridade": 0
+  },
+  {
+    "numero_csv": 48,
+    "id_original": "353194267",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4262
+  },
+  {
+    "numero_csv": 49,
+    "id_original": "353543698",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.6482
+  },
+  {
+    "numero_csv": 50,
+    "id_original": "353668398",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5415
+  },
+  {
+    "numero_csv": 51,
+    "id_original": "353646981",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5808
+  },
+  {
+    "numero_csv": 52,
+    "id_original": "353668935",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5492
+  },
+  {
+    "numero_csv": 53,
+    "id_original": "353667538",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.3579
+  },
+  {
+    "numero_csv": 54,
+    "id_original": "353665913",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.4232
+  },
+  {
+    "numero_csv": 55,
+    "id_original": "353666951",
+    "cluster_sistema": "A",
+    "score_similaridade": 0.7208
+  }
+]

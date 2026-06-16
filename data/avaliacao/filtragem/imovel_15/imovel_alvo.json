@@ -1,0 +1,22 @@
+{
+  "rua": "Rua Professora Felismina Cheks",
+  "numero": "1",
+  "bairro": "Cidade Nova",
+  "cidade": "Manaus",
+  "estado": "AM",
+  "localizacao": "Manaus, AM",
+  "tipo": "house",
+  "propertyType": "Casas",
+  "area": 190,
+  "area_terreno": null,
+  "bedrooms": 3,
+  "bathrooms": 3,
+  "parkingSpaces": 2,
+  "neighborhood": "Cidade Nova",
+  "street": "Rua Professora Felismina Cheks",
+  "description": "Casa reformada, próximo ao Shopping Sumaúma. 3 dormitórios sendo 1 suíte, 2 banheiros + lavabo, garagem para 2 carros. Piso em porcelanato polido alto brilho, área de serviço, quintal amplo com plantas frutíferas e horta. Caixa d'água de 1.000 litros. Documentada para financiamento.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/557b5033c64ff2a823849e29bf88f629/casa-com-3-quartos-a-venda-190m-no-cidade-nova-manaus.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.vivareal.com/img/vr-listing/779e13b13790598c3cc7cebd9af52c61/casa-com-3-quartos-a-venda-190m-no-cidade-nova-manaus.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

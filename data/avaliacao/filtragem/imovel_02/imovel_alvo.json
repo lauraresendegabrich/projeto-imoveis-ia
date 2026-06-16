@@ -1,0 +1,23 @@
+{
+  "rua": "Avenida Luís Viana Filho",
+  "numero": "134",
+  "bairro": "Alphaville",
+  "cidade": "Salvador",
+  "estado": "BA",
+  "localizacao": "Salvador, BA",
+  "tipo": "apartment",
+  "propertyType": "Apartamentos",
+  "area": 145,
+  "area_terreno": null,
+  "bedrooms": 4,
+  "bathrooms": 5,
+  "parkingSpaces": 2,
+  "neighborhood": "Alphaville",
+  "street": "Avenida Luís Viana Filho",
+  "description": "Apartamento com 4 Quartos à venda, 145m² - Alphaville (Código do anunciante: 6SS5RJ | Código no Zap: 2874087093) Alphaville I | 142 m2 | 4 Quartos 💵 Apartamento à Venda 🏛️ Condomínio Morada dos Príncipes 3 Suítes 2 Vagas de Garagem 1 Depósito Nascente Total Andar Intermediário Condomínio: R$ 1.650,00/mês IPTU: R$ 430,00/mês R$ 2.280.000,00",
+  "images": [
+    "https://resizedimgs.zapimoveis.com.br/img/vr-listing/0a3429c012636fd2ec900776ff611b53/apartamento-com-4-quartos-a-venda-145m-no-alphaville-salvador.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.zapimoveis.com.br/img/vr-listing/368ac0d756a9445b5b8c3e0a293b0f3f/apartamento-com-4-quartos-a-venda-145m-no-alphaville-salvador.webp?action=fit-in&dimension=870x707&seo=false",
+    "https://resizedimgs.zapimoveis.com.br/img/vr-listing/64ebdecaca21e27ade3acb0189d941c6/apartamento-com-4-quartos-a-venda-145m-no-alphaville-salvador.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

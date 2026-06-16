@@ -1,0 +1,77 @@
+[
+  {
+    "id": 1,
+    "status": "ok",
+    "total_csv": 29,
+    "cluster_a": 2,
+    "cluster_b": 25,
+    "terrenos": 1,
+    "tempo_s": 156.0
+  },
+  {
+    "id": 2,
+    "status": "ok",
+    "total_csv": 37,
+    "cluster_a": 9,
+    "cluster_b": 28,
+    "terrenos": 0,
+    "tempo_s": 131.3
+  },
+  {
+    "id": 3,
+    "status": "ok",
+    "total_csv": 33,
+    "cluster_a": 12,
+    "cluster_b": 13,
+    "terrenos": 4,
+    "tempo_s": 153.8
+  },
+  {
+    "id": 5,
+    "status": "ok",
+    "total_csv": 224,
+    "cluster_a": 31,
+    "cluster_b": 83,
+    "terrenos": 55,
+    "tempo_s": 474.6
+  },
+  {
+    "id": 7,
+    "status": "ok",
+    "total_csv": 43,
+    "cluster_a": 37,
+    "cluster_b": 6,
+    "terrenos": 0,
+    "tempo_s": 147.2
+  },
+  {
+    "id": 8,
+    "status": "erro",
+    "motivo": "Agente 1 sem resultados"
+  },
+  {
+    "id": 10,
+    "status": "erro",
+    "motivo": "Agente 1 sem resultados"
+  },
+  {
+    "id": 11,
+    "status": "erro",
+    "motivo": "Agente 1 sem resultados"
+  },
+  {
+    "id": 13,
+    "status": "erro",
+    "motivo": "Agente 1 sem resultados"
+  },
+  {
+    "id": 14,
+    "status": "erro",
+    "motivo": "Agente 1 sem resultados"
+  },
+  {
+    "id": 15,
+    "status": "erro",
+    "motivo": "Agente 1 sem resultados"
+  }
+]

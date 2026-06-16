@@ -1,0 +1,34 @@
+numero,tipo,area_m2,quartos,banheiros,vagas,preco,preco_m2,bairro,rua,descricao,rotulo_manual
+1,Casas,112,3,,2,"R$ 490,000","R$ 4,375.00",Bom Jesus,,Casa 3 quartos à venda no bairro Industrial Americano em Santa Luzia. Casa com 112m²; 1 suíte; 2 banheiros e 2 vagas por R$490.000;00. ID 352104481. Confira agora a casa!,0
+2,Apartamentos,43,2,,1,"R$ 120,000","R$ 2,790.70",Bom Jesus,,Apartamento 2 quartos à venda no bairro Belo Vale em Santa Luzia. Apartamento com 43m²; 1 banheiro e 1 vaga por R$120.000;00. ID 343057324. Confira agora o apartamento!,0
+3,Casas,62,2,,2,"R$ 295,000","R$ 4,758.06",Bom Jesus,,Casa 2 quartos à venda no bairro Frimisa em Santa Luzia. Casa com 62m²; 2 banheiros e 2 vagas por R$295.000;00. ID 350819879. Confira agora a casa!,0
+4,Casas,80,3,,1,"R$ 260,000","R$ 3,250.00",Bom Jesus,,Casa 3 quartos à venda no bairro São Benedito em Santa Luzia. Casa com 80m²; 1 banheiro e 1 vaga por R$260.000;00. ID 339724149. Confira agora a casa!,0
+5,,68,3,,2,"R$ 599,000","R$ 8,808.82",Bom Jesus,,Cobertura 3 quartos à venda no bairro Boa Esperança em Santa Luzia. Cobertura com 68m²; 3 suítes; 2 banheiros e 2 vagas por R$599.000;00. ID 351136528. Confira agora a cobertura!,0
+6,Casas,70,3,,2,"R$ 420,000","R$ 6,000.00",Bom Jesus,,Casa 3 quartos à venda no bairro Industrial Americano em Santa Luzia. Casa com 70m²; 1 suíte; 2 banheiros e 2 vagas por R$420.000;00. ID 352104479. Confira agora a casa!,0
+7,Casas,150,2,,1,"R$ 260,000","R$ 1,733.33",Bom Jesus,,Casa 2 quartos à venda no bairro Petrópolis em Santa Luzia. Casa com 150m²; 1 suíte; 2 banheiros e 1 vaga por R$260.000;00. ID 353716004. Confira agora a casa!,0
+8,Casas,84,2,,2,"R$ 380,000","R$ 4,523.81",Bom Jesus,,Casa 2 quartos à venda no bairro Novo Centro em Santa Luzia. Casa com 84m²; 2 suítes; 3 banheiros e 2 vagas por R$380.000;00. ID 352955136. Confira agora a casa!,0
+9,Casas,65,2,,2,"R$ 325,000","R$ 5,000.00",Bom Jesus,,Casa 2 quartos à venda no bairro Novo Centro em Santa Luzia. Casa com 65m²; 1 suíte; 2 banheiros e 2 vagas por R$325.000;00. ID 350930039. Confira agora a casa!,0
+10,Casas,54,2,,1,"R$ 197,000","R$ 3,648.15",Bom Jesus,,Casa 2 quartos à venda no bairro São Benedito em Santa Luzia. Casa com 54m²; 1 banheiro e 1 vaga por R$197.000;00. ID 352312388. Confira agora a casa!,0
+11,Casas,300,4,,2,"R$ 550,000","R$ 1,833.33",Bom Jesus,,Casa 4 quartos à venda no bairro Padre Miguel em Santa Luzia. Casa com 300m²; 1 suíte; 2 banheiros e 2 vagas por R$550.000;00. ID 353484603. Confira agora a casa!,1
+12,Casas,78,3,,2,"R$ 330,000","R$ 4,230.77",Bom Jesus,,Casa 3 quartos à venda no bairro São Benedito em Santa Luzia. Casa com 78m²; 1 banheiro e 2 vagas por R$330.000;00. ID 352062001. Confira agora a casa!,0
+13,Terrenos,,,,,"R$ 230,000",?,Bom Jesus,,Lote à venda no bairro São Benedito em Santa Luzia. Lote por R$230.000;00. ID 348880720. Confira agora o lote!,0
+14,Casas,90,4,,2,"R$ 650,000","R$ 7,222.22",Bom Jesus,,Casa 4 quartos à venda no bairro Industrial Americano em Santa Luzia. Casa com 90m²; 3 suítes; 3 banheiros e 2 vagas por R$650.000;00. ID 352107335. Confira agora a casa!,0
+15,Terrenos,,,,,"R$ 180,000",?,Bom Jesus,,Lote à venda no bairro Monte Carlo em Santa Luzia. Lote por R$180.000;00. ID 352104478. Confira agora o lote!,0
+16,Casas,69,3,,1,"R$ 450,000","R$ 6,521.74",Bom Jesus,,Casa 3 quartos à venda no bairro Novo Centro em Santa Luzia. Casa com 69m²; 1 suíte; 3 banheiros e 1 vaga por R$450.000;00. ID 352127748. Confira agora a casa!,0
+17,Apartamentos,56,2,,1,"R$ 120,000","R$ 2,142.86",Bom Jesus,,Apartamento 2 quartos à venda no bairro São Benedito em Santa Luzia. Apartamento com 56m²; 1 banheiro e 1 vaga por R$120.000;00. ID 340549820. Confira agora o apartamento!,0
+18,Casas,110,2,,1,"R$ 420,000","R$ 3,818.18",Bom Jesus,,Casa 2 quartos à venda no bairro Liberdade em Santa Luzia. Casa com 110m²; 1 banheiro e 1 vaga por R$420.000;00. ID 353640645. Confira agora a casa!,0
+19,Casas,104,3,,10,"R$ 520,000","R$ 5,000.00",Bom Jesus,,Casa 3 quartos à venda no bairro São Benedito em Santa Luzia. Casa com 104m²; 1 suíte; 3 banheiros e 10 vagas por R$520.000;00. ID 352081725. Confira agora a casa!,1
+20,Casas,110,3,,2,"R$ 580,000","R$ 5,272.73",Bom Jesus,,Casa 3 quartos à venda no bairro Novo Centro em Santa Luzia. Casa com 110m²; 1 suíte; 1 banheiro e 2 vagas por R$580.000;00. ID 353716063. Confira agora a casa!,1
+21,Terrenos,,,,,"R$ 165,000",?,Bom Jesus,,Lote à venda no bairro Novo Centro em Santa Luzia. Lote por R$165.000;00. ID 344639798. Confira agora o lote!,0
+22,Terrenos,,,,,"R$ 130,000",?,Bom Jesus,,Lote à venda no bairro São Cosme de Baixo (são Benedito) em Santa Luzia. Lote por R$130.000;00. ID 352092436. Confira agora o lote!,0
+23,Casas,86,3,,2,"R$ 540,000","R$ 6,279.07",Bom Jesus,,Casa 3 quartos à venda no bairro Novo Centro em Santa Luzia. Casa com 86m²; 1 banheiro e 2 vagas por R$540.000;00. ID 353716117. Confira agora a casa!,0
+24,Casas,62,2,,1,"R$ 330,000","R$ 5,322.58",Bom Jesus,,Casa 2 quartos à venda no bairro Imperial em Santa Luzia. Casa com 62m²; 1 banheiro e 1 vaga por R$330.000;00. ID 353716178. Confira agora a casa!,0
+25,Terrenos,,,,,"R$ 180,000",?,Bom Jesus,,Lote à venda no bairro Monte Carlo em Santa Luzia. Lote por R$180.000;00. ID 352104478. Confira agora o lote!,0
+26,Terrenos,,,,,"R$ 165,000",?,Bom Jesus,,Lote à venda no bairro Novo Centro em Santa Luzia. Lote por R$165.000;00. ID 344639798. Confira agora o lote!,0
+27,Terrenos,,,,,"R$ 130,000",?,Bom Jesus,,Lote à venda no bairro São Cosme de Baixo (são Benedito) em Santa Luzia. Lote por R$130.000;00. ID 352092436. Confira agora o lote!,0
+28,Apartamentos,60,3,,1,"R$ 150,000","R$ 2,500.00",Bom Jesus,,Apartamento 3 quartos à venda no bairro Belo Vale em Santa Luzia. Apartamento com 60m²; 1 banheiro e 1 vaga por R$150.000;00. ID 339724537. Confira agora o apartamento!,0
+29,Casas,120,3,,1,"R$ 700,000","R$ 5,833.33",Bom Jesus,,Casa 3 quartos à venda no bairro Barreiro do Amaral em Santa Luzia. Casa com 120m²; 1 suíte; 1 banheiro e 1 vaga por R$700.000;00. ID 353716007. Confira agora a casa!,0
+30,,80,2,,8,"R$ 320,000","R$ 4,000.00",Bom Jesus,,Chácara à venda no bairro Bonanza em Santa Luzia. Chácara com 80m²; 1 banheiro e 8 vagas por R$320.000;00. ID 352127778. Confira agora a chácara!,0
+31,Casas,70,3,,2,"R$ 420,000","R$ 6,000.00",Bom Jesus,,Casa 3 quartos à venda no bairro Novo Centro em Santa Luzia. Casa com 70m²; 1 suíte; 2 banheiros e 2 vagas por R$420.000;00. ID 352107337. Confira agora a casa!,0
+32,Terrenos,,,,,"R$ 230,000",?,Bom Jesus,,Lote à venda no bairro São Benedito em Santa Luzia. Lote por R$230.000;00. ID 348880720. Confira agora o lote!,0
+33,Casas,101,3,,2,"R$ 475,000","R$ 4,702.97",Bom Jesus,,Casa 3 quartos à venda no bairro Novo Centro em Santa Luzia. Casa com 101m²; 1 suíte; 2 banheiros e 2 vagas por R$475.000;00. ID 353716118. Confira agora a casa!,1

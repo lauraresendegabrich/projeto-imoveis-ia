@@ -534,6 +534,13 @@ def _normalizar_ocrad(imovel: dict) -> dict:
             m = re.search(r"/bairros/([\w-]+)/", from_lower)
             if m:
                 neighborhood = " ".join(w.capitalize() for w in m.group(1).split("-"))
+        # LugarCerto: /compra-e-venda/{estado}/{cidade}/{bairro}/{tipo}
+        if not neighborhood:
+            m = re.search(r"/compra-e-venda/\w{2}/([\w-]+)/([\w-]+)/(?:casa|terreno|apartamento)", from_lower)
+            if m:
+                if not city:
+                    city = " ".join(w.capitalize() for w in m.group(1).split("-"))
+                neighborhood = " ".join(w.capitalize() for w in m.group(2).split("-"))
         # VivaReal: /venda/{estado-nome}/{cidade}/bairros/{bairro}/
         if not city:
             m = re.search(r"/venda/([\w-]+)/([\w-]+)/bairros/", from_lower)
@@ -578,6 +585,11 @@ def _normalizar_ocrad(imovel: dict) -> dict:
             m = re.search(r"/(mg|sp|rj|pr|rs|ba|sc|go|df|pe|ce|es)\+", from_lower)
             if m:
                 state = m.group(1).upper()
+        # Fallback: LugarCerto usa /compra-e-venda/{estado_sigla}/{cidade}/
+        if not state:
+            m = re.search(r"/compra-e-venda/(mg|sp|rj|pr|rs|ba|sc|go|df|pe|ce|es|pa|am|ms|mt|al|se|pb|rn|pi|to|ro|ac|ap|rr)/", from_lower)
+            if m:
+                state = m.group(1).upper()
 
     # ── IPTU e CONDOMINIO (do price_raw)
     iptu = None
@@ -605,6 +617,21 @@ def _normalizar_ocrad(imovel: dict) -> dict:
         "mercado-livre": "Mercado Livre",
     }
     source = source_map.get(imovel.get("source_site", ""), imovel.get("source_site", "ocrad"))
+
+    # ── FALLBACK: extrai bairro/cidade/rua do titulo do LugarCerto
+    # Formato: "Casa, 3 Quartos, 2 Vagas  Rua Lírica, Santa Mônica, Belo Horizonte, MG"
+    if not neighborhood and source == "Lugar Certo":
+        title = imovel.get("title", "") or ""
+        # Busca padrão: "  {Rua}, {Bairro}, {Cidade}, {Estado}" no final do título
+        m = re.search(r"  (?:(.+?), )?(.+?), (.+?), ([A-Z]{2})$", title)
+        if m:
+            if m.group(1) and not street:
+                street = m.group(1).strip()
+            neighborhood = m.group(2).strip()
+            if not city:
+                city = m.group(3).strip()
+            if not state:
+                state = m.group(4).strip()
 
     price_per_sqm = round(price / area, 2) if price and area and area > 0 else None
     price_fmt = f"R$ {price:,.0f}".replace(",", ".") if price else None

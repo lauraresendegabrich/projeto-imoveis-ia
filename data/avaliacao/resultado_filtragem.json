@@ -1,0 +1,61 @@
+{
+  "data_avaliacao": "2026-06-09",
+  "descricao": "Avaliação final da qualidade de filtragem do Agente 2 — 11 imóveis, 3 avaliadores (Laura, Lívia, Kiro), ~570 candidatos rotulados por avaliador.",
+  "total_imoveis_avaliados": 11,
+  "total_candidatos_por_avaliador": 570,
+  "resultado_global_micro_average": {
+    "laura": {
+      "total_rotulados": 571,
+      "matriz_confusao": {"VP": 97, "FP": 81, "FN": 51, "VN": 342},
+      "precisao": 0.5449,
+      "revocacao": 0.6554,
+      "f1_score": 0.5952,
+      "acuracia": 0.7689
+    },
+    "livia": {
+      "total_rotulados": 569,
+      "matriz_confusao": {"VP": 96, "FP": 81, "FN": 53, "VN": 339},
+      "precisao": 0.5424,
+      "revocacao": 0.6443,
+      "f1_score": 0.5890,
+      "acuracia": 0.7644
+    },
+    "kiro": {
+      "total_rotulados": 572,
+      "matriz_confusao": {"VP": 85, "FP": 93, "FN": 30, "VN": 364},
+      "precisao": 0.4775,
+      "revocacao": 0.7391,
+      "f1_score": 0.5804,
+      "acuracia": 0.7850
+    }
+  },
+  "media_avaliadores": {
+    "precisao_media": 0.5216,
+    "revocacao_media": 0.6796,
+    "f1_media": 0.5882,
+    "acuracia_media": 0.7728
+  },
+  "concordancia_entre_avaliadores": {
+    "laura_vs_livia": 85.0,
+    "laura_vs_kiro": 83.2,
+    "livia_vs_kiro": 84.4
+  },
+  "explicacao_metricas": {
+    "precisao": "Dos imóveis que o sistema classificou como comparáveis (Cluster A), qual proporção é realmente comparável segundo rotulação humana. Fórmula: Precisão = VP / (VP + FP). Exemplo Laura: 97 / (97 + 81) = 97/178 = 0.545 (54.5%)",
+    "revocacao": "De todos os imóveis que realmente são comparáveis (segundo rotulação humana), qual proporção o sistema conseguiu identificar. Fórmula: Revocação = VP / (VP + FN). Exemplo Laura: 97 / (97 + 51) = 97/148 = 0.655 (65.5%)",
+    "f1_score": "Média harmônica entre precisão e revocação. Penaliza quando uma métrica é alta e outra baixa. Fórmula: F1 = 2 × P × R / (P + R). Exemplo Laura: 2 × 0.545 × 0.655 / (0.545 + 0.655) = 0.714 / 1.200 = 0.595 (59.5%)",
+    "acuracia": "Proporção total de classificações corretas. Fórmula: Acurácia = (VP + VN) / Total. Exemplo Laura: (97 + 342) / 571 = 439/571 = 0.769 (76.9%)",
+    "concordancia": "Percentual de imóveis onde dois avaliadores deram a mesma classificação. Alta concordância (>80%) indica que os critérios são bem definidos e o resultado é reprodutível."
+  },
+  "explicacao_matriz_confusao": {
+    "VP_verdadeiro_positivo": "Sistema classificou como Cluster A (comparável) E o avaliador humano concorda que é comparável. Imóveis corretamente incluídos.",
+    "FP_falso_positivo": "Sistema classificou como Cluster A (comparável) MAS o avaliador humano diz que NÃO é comparável. Imóveis incorretamente incluídos — sistema generoso demais.",
+    "FN_falso_negativo": "Sistema classificou como Cluster B (não comparável) MAS o avaliador humano diz que É comparável. Imóveis incorretamente excluídos — sistema perde comparáveis válidos.",
+    "VN_verdadeiro_negativo": "Sistema classificou como Cluster B (não comparável) E o avaliador humano concorda que não é comparável. Imóveis corretamente excluídos."
+  },
+  "interpretacao": {
+    "perfil_sistema": "O sistema é mais generoso que restritivo (revocação > precisão). Prefere incluir imóveis possivelmente irrelevantes do que perder comparáveis válidos. Para avaliação imobiliária, isso é uma estratégia razoável — melhor ter candidatos demais e filtrar depois (TRIMMEAN no Agente 5) do que perder informação.",
+    "f1_medio": "F1 de 58.8% é um resultado moderado para classificação de comparáveis. Considerando que a concordância entre humanos é de 85% (teto prático), o sistema atinge ~69% do máximo teórico.",
+    "impacto_no_preco": "Apesar da precisão de ~54%, o impacto no preço final é atenuado pelo TRIMMEAN (média aparada de 50% no Agente 5) que remove os 25% mais altos e 25% mais baixos — eliminando automaticamente comparáveis inconsistentes incluídos por engano."
+  }
+}
