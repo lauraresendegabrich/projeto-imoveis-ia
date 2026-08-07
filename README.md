@@ -2,6 +2,8 @@
 
 Sistema que estima o valor de mercado e liquidez de imóveis usando 5 agentes inteligentes em pipeline.
 
+**🌐 Acesse a aplicação online:** https://projeto-imoveis-ia-sd5kashfzhslavnmflkcyq.streamlit.app/
+
 ## Como Rodar
 
 ### Pré-requisitos
