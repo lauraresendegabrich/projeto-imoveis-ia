@@ -612,18 +612,32 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
       - confianca: str
     """
     import base64
-    from openai import OpenAI
 
-    groq_key = os.getenv("GROQ_API_KEY", "")
-    if not groq_key:
-        return {}
+    nvidia_key = os.getenv("NVIDIA_API_KEY", "")
+    if not nvidia_key:
+        logger.warning("NVIDIA_API_KEY nao configurada — usando raio padrao")
+        return {"raio_metros": 500}
 
-    img_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
+    # Redimensiona imagem para no maximo 800x800 (reduz tamanho do base64)
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(imagem_bytes))
+        max_size = 800
+        if img.width > max_size or img.height > max_size:
+            img.thumbnail((max_size, max_size), Image.LANCZOS)
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=70)
+        imagem_comprimida = buffer.getvalue()
+        img_b64 = base64.b64encode(imagem_comprimida).decode("utf-8")
+        img_mime = "image/jpeg"
+        logger.info(f"Imagem comprimida: {len(imagem_bytes)//1024}KB -> {len(imagem_comprimida)//1024}KB")
+    except Exception:
+        img_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
+        img_mime = "image/png"
 
-    client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=groq_key,
-    )
+    # Removido — Groq Vision nao esta mais disponivel
+    # Agora usa NVIDIA NIM (mistral-small-3.1-24b-instruct)
 
     prompt = f"""Voce e um assistente especializado em analise urbana para avaliacao imobiliaria.
 Analise a imagem de satelite/mapa hibrido da regiao de um imovel marcado no mapa.
@@ -651,8 +665,20 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
 }}"""
 
     try:
+        from openai import OpenAI as NvidiaClient
+
+        nvidia_key = os.getenv("NVIDIA_API_KEY", "")
+        if not nvidia_key:
+            logger.warning("NVIDIA_API_KEY nao configurada — usando raio padrao")
+            return {"raio_metros": 500}
+
+        client = NvidiaClient(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=nvidia_key,
+        )
+
         response = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="meta/llama-3.2-11b-vision-instruct",
             messages=[
                 {
                     "role": "user",
@@ -660,7 +686,7 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+                            "image_url": {"url": f"data:{img_mime};base64,{img_b64}"}
                         }
                     ]
                 }

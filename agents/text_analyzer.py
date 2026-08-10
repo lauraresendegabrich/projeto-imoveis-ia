@@ -5,7 +5,7 @@ Agente 3 - Analisador Qualitativo de Descricao e Imagens
 ARQUITETURA:
     Titulo + Descricao + 8 Fotos espaçadas -> NVIDIA NIM (uma unica chamada) -> Python (valida + calcula) -> JSON
 
-MODELO: mistralai/ministral-14b-instruct-2512 via NVIDIA NIM
+MODELO: meta/llama-3.2-11b-vision-instruct via NVIDIA NIM
     Multimodal (texto + imagem). Gratuito, sem limite diario. ~11s por imovel.
     Limite: 8 imagens por prompt. Fotos selecionadas de forma espaçada.
 
@@ -163,7 +163,7 @@ Retorne exatamente este JSON:
             content.append({"type": "image_url", "image_url": {"url": url}})
 
         response = client.chat.completions.create(
-            model="mistralai/ministral-14b-instruct-2512",
+            model="meta/llama-3.2-11b-vision-instruct",
             messages=[{"role": "user", "content": content}],
             max_tokens=512,
             temperature=0,
@@ -316,13 +316,18 @@ def _analisar_imovel(imovel: dict) -> dict:
 
     # Fallback se falhar
     if not dados:
+        obs_fallback = []
+        if not images:
+            obs_fallback.append("Nenhuma foto disponivel para analise visual. A avaliacao foi feita apenas com base no texto do anuncio.")
+        else:
+            obs_fallback.append("Nao foi possivel analisar as fotos neste momento. A avaliacao foi feita apenas com base no texto do anuncio.")
         dados = {
             "estado_conservacao": "desconhecido",
             "padrao_acabamento": "desconhecido",
             "pontos_positivos": [],
             "pontos_negativos": [],
             "confianca_extracao": "baixa",
-            "observacoes": ["LLM Vision indisponivel."],
+            "observacoes": obs_fallback,
         }
 
     # Normaliza

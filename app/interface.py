@@ -390,6 +390,25 @@ if submitted:
             tempo = liquidez_info.get("tempo_estimado", "?")
             st.metric("⏱️ Tempo Estimado de Venda", tempo)
 
+        # Zona homogênea
+        with st.expander("📍 Zona Homogênea"):
+            zona = resultado.get("zona_homogenea", {})
+            if zona:
+                zh = zona.get("zona_homogenea", {})
+                raio = zh.get("raio_metros") or zh.get("raio_sugerido_metros") or 400
+                st.write(f"- Raio utilizado: **{raio} metros**")
+                st.write(f"- Padrão construtivo: {zh.get('padrao_construtivo', 'não disponível')}")
+                st.write(f"- Homogeneidade visual: {zh.get('homogeneidade_visual', 'não disponível')}")
+                st.write(f"- Densidade urbana: {zh.get('densidade_urbana', 'não disponível')}")
+                if zh.get("justificativa_raio"):
+                    st.write(f"- Justificativa: {zh.get('justificativa_raio')}")
+                confirmados = zona.get("comparaveis_confirmados", [])
+                fora = zona.get("fora_zona", [])
+                st.write(f"- Imóveis dentro da zona: **{len(confirmados)}**")
+                st.write(f"- Imóveis descartados (fora do raio): {len(fora)}")
+            else:
+                st.write("Zona homogênea não disponível nesta execução")
+
         # Detalhes
         with st.expander("📐 Detalhes do Cálculo"):
             col_d, col_e = st.columns(2)
@@ -456,6 +475,107 @@ if submitted:
 
         # Justificativa
         st.info(preco.get("justificativa", ""))
+
+        # ==============================================================
+        # SEÇÕES EXTRAS
+        # ==============================================================
+
+        # 1. Análise do Imóvel Alvo
+        with st.expander("🏠 Análise do Seu Imóvel"):
+            ag3_data = resultado.get("analise_qualitativa", {})
+            alvo_data = ag3_data.get("imovel_alvo", {}) if ag3_data else {}
+            analise_alvo = alvo_data.get("analise_qualitativa", {})
+            if analise_alvo:
+                st.write(f"- Estado de conservação: **{analise_alvo.get('estado_conservacao', 'não avaliado')}**")
+                st.write(f"- Padrão de acabamento: **{analise_alvo.get('padrao_acabamento', 'não avaliado')}**")
+                st.write(f"- Score qualitativo: **{analise_alvo.get('scores', {}).get('score_qualitativo', '?')}**")
+                st.write(f"- Classificação: **{analise_alvo.get('classificacao_qualitativa', '?')}**")
+                positivos = analise_alvo.get("pontos_positivos", [])
+                if positivos:
+                    st.markdown("**Pontos positivos:**")
+                    st.write(", ".join(positivos))
+                negativos = analise_alvo.get("pontos_negativos", [])
+                if negativos:
+                    st.markdown("**Pontos negativos:**")
+                    st.write(", ".join(negativos))
+                obs = analise_alvo.get("observacoes", [])
+                if obs:
+                    st.markdown("**Observações:**")
+                    for o in obs:
+                        # Substitui mensagem técnica por amigável
+                        if "LLM Vision indisponivel" in str(o):
+                            o = "Nenhuma foto disponível para análise visual. A avaliação foi feita apenas com base no texto."
+                        st.write(f"• {o}")
+            else:
+                st.write("Análise do imóvel alvo não disponível (insira fotos para uma análise mais completa)")
+
+        # 2. M² da Região
+        with st.expander("💵 Valor do M² na Região"):
+            m2_zona = preco.get("valor_m2_zona_homogenea", {})
+            terreno_m2 = m2_zona.get("terreno", {})
+            constr_m2 = m2_zona.get("construcao_por_padrao", {})
+            if terreno_m2.get("quantidade_amostras", 0) > 0:
+                st.write(f"**M² do terreno:**")
+                st.write(f"- Referência: **R$ {terreno_m2.get('valor_m2_referencia', 0):,.2f}/m²**")
+                st.write(f"- Menor valor: R$ {terreno_m2.get('menor_valor_m2', 0):,.2f}/m²")
+                st.write(f"- Amostras: {terreno_m2.get('quantidade_amostras', 0)} terrenos")
+            else:
+                st.write("M² do terreno: não disponível (sem terrenos na zona)")
+            st.write("")
+            st.write(f"**M² da construção (padrão {constr_m2.get('padrao_usado', '?')}):**")
+            st.write(f"- Referência: **R$ {constr_m2.get('valor_m2_referencia_usado', 0):,.2f}/m²**")
+            st.write(f"- Menor valor: R$ {constr_m2.get('menor_valor_m2_usado', 0):,.2f}/m²")
+            st.write(f"- Método: {preco.get('metodo_estatistico', '?')}")
+
+        # 3. Comparação com preço anunciado
+        if imovel_alvo.get("price") and imovel_alvo["price"] > 0:
+            with st.expander("📊 Comparação com Preço Anunciado"):
+                preco_anunc = imovel_alvo["price"]
+                valor_med = avaliacao.get("valor_medio_imovel", 0)
+                if valor_med > 0:
+                    diferenca_pct = ((preco_anunc - valor_med) / valor_med) * 100
+                    if diferenca_pct > 5:
+                        st.warning(f"⚠️ O preço anunciado (**R$ {preco_anunc:,.0f}**) está **{diferenca_pct:.1f}% acima** do valor médio da região (R$ {valor_med:,.0f})")
+                    elif diferenca_pct < -5:
+                        st.success(f"✅ O preço anunciado (**R$ {preco_anunc:,.0f}**) está **{abs(diferenca_pct):.1f}% abaixo** do valor médio da região (R$ {valor_med:,.0f}) — boa oportunidade")
+                    else:
+                        st.info(f"O preço anunciado (**R$ {preco_anunc:,.0f}**) está alinhado com o valor médio da região (R$ {valor_med:,.0f}) — diferença de {abs(diferenca_pct):.1f}%")
+
+        # 4. Imagem de satélite
+        with st.expander("🛰️ Imagem de Satélite da Região"):
+            import os
+            img_path = "data/satelite_zona_homogenea_ag2.png"
+            if os.path.exists(img_path):
+                st.image(img_path, caption="Imagem de satélite com marcador no imóvel alvo", use_container_width=True)
+            else:
+                st.write("Imagem de satélite não disponível nesta execução")
+
+        # 5. POIs por faixa de distância
+        with st.expander("📍 O que tem perto (escolas, hospitais, comércio)"):
+            infra_data = resultado.get("infraestrutura", {})
+            pois = infra_data.get("pois_por_faixa", {})
+            if pois:
+                for faixa_nome, faixa_label in [("microentorno_imediato", "0 a 400m"), ("entorno_caminhavel", "401 a 800m"), ("infraestrutura_ampliada", "801 a 1500m")]:
+                    faixa = pois.get(faixa_nome, {})
+                    total_faixa = sum(len(v) for v in faixa.values() if isinstance(v, list))
+                    if total_faixa > 0:
+                        st.markdown(f"**{faixa_label} ({total_faixa} pontos):**")
+                        for cat, items in faixa.items():
+                            if items and isinstance(items, list):
+                                nomes = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in items[:5]]
+                                st.write(f"  {cat}: {', '.join(nomes)}")
+                        st.write("")
+                # Transporte
+                transporte = infra_data.get("transporte", {})
+                paradas = transporte.get("paradas", [])
+                if paradas:
+                    st.markdown(f"**Transporte público: {len(paradas)} paradas de ônibus**")
+                    for p in paradas[:5]:
+                        st.write(f"  • {p.get('nome', 'parada')} — {p.get('distancia_metros', '?')}m")
+                else:
+                    st.write("Transporte público: nenhuma parada encontrada no raio")
+            else:
+                st.write("Dados de infraestrutura não disponíveis")
 
     else:
         st.error("Não foi possível calcular o preço. Verifique os dados e tente novamente.")
