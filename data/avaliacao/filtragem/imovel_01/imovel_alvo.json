@@ -1,0 +1,23 @@
+{
+  "rua": "Rua não informada",
+  "numero": "",
+  "bairro": "São Gabriel",
+  "cidade": "Belo Horizonte",
+  "estado": "MG",
+  "localizacao": "Belo Horizonte, MG",
+  "tipo": "house",
+  "propertyType": "Casas",
+  "area": 257,
+  "area_terreno": 475,
+  "bedrooms": 3,
+  "bathrooms": 3,
+  "parkingSpaces": 4,
+  "neighborhood": "São Gabriel",
+  "street": "Rua não informada",
+  "description": "Excelente casa moderna, plana sem escada, ampla, arejada, confortavel, ambientes definidos, otima opcao para morar bem. Lote plano, metragem no IPTU 360m², metragem real do imovel 475m², area gourmet completa, com piscina com cascata, hidromassagem, espaco reservado para sauna, churrasqueira, 1 banheiro e 2 lavabos que atendem a area gourmet, mesa com bancada em granito, bancada que pega toda a parede da churrasqueira, armarios abaixo da bancada, quadra de esportes, telhado colonial, cameras de seguranca, piso em toda a area externa de excelente qualidade anti derrapante, varandao que pega toda a lateral da casa, casa composta por 3 quartos, suite, closet amplo, banho social, sala ampla, 2 cozinhas amplas, claras, arejadas, bancadas em granito, jardins e jardim de inverno, toda a casa com acabamento moderno de primeira qualidade, 4 vagas de garagem cobertas, excelente localizacao!! Este imovel possui o lazer com o conforto que voce procura dentro do seu proprio lar.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/5c51dda938efeb9b318b5ad6a88b3c93/casa-com-3-quartos-a-venda-257m-no-sao-gabriel-belo-horizonte.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.vivareal.com/img/vr-listing/609873dca34cb2ab8bd3712e3e69c8e2/casa-com-3-quartos-a-venda-257m-no-sao-gabriel-belo-horizonte.webp?action=fit-in&dimension=870x707&seo=false",
+    "https://resizedimgs.vivareal.com/img/vr-listing/d1333020b0ef45bf85fadd93b1e672fd/casa-com-3-quartos-a-venda-257m-no-sao-gabriel-belo-horizonte.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "rua": "Rua 87",
+  "numero": "S/N",
+  "bairro": "Parque Estrela Dalva XVI",
+  "cidade": "Santo Antônio do Descoberto",
+  "estado": "GO",
+  "localizacao": "Santo Antônio do Descoberto, GO",
+  "tipo": "house",
+  "propertyType": "Casas",
+  "area": 180,
+  "area_terreno": null,
+  "bedrooms": 2,
+  "bathrooms": 1,
+  "parkingSpaces": 1,
+  "neighborhood": "Parque Estrela Dalva XVI",
+  "street": "Rua 87",
+  "description": "Casa com 2 quartos, 1 vaga na garagem, varanda/sacada, área de serviço, WC, sala, cozinha. 180m². Imóvel retomado de financiamento bancário (Caixa). Aceita FGTS e financiamento SBPE.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/ff41b699af762d50c69ea17ddabdecc0/casa-com-2-quartos-a-venda-180m-no-parque-estrela-dalva-xvi-santo-antonio-do-descoberto.webp?action=fit-in&dimension=870x707"
+  ]
+}

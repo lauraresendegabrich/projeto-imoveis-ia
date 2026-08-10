@@ -1,0 +1,464 @@
+{
+  "data_avaliacao": "2026-06-09",
+  "total_imoveis": 11,
+  "resultado_global": {
+    "laura": {
+      "total_rotulados": 571,
+      "vp": 97,
+      "fp": 81,
+      "fn": 51,
+      "vn": 342,
+      "precisao": 0.5449,
+      "revocacao": 0.6554,
+      "f1_score": 0.5951,
+      "acuracia": 0.7688
+    },
+    "livia": {
+      "total_rotulados": 569,
+      "vp": 96,
+      "fp": 81,
+      "fn": 53,
+      "vn": 339,
+      "precisao": 0.5424,
+      "revocacao": 0.6443,
+      "f1_score": 0.589,
+      "acuracia": 0.7645
+    },
+    "kiro": {
+      "total_rotulados": 572,
+      "vp": 85,
+      "fp": 93,
+      "fn": 30,
+      "vn": 364,
+      "precisao": 0.4775,
+      "revocacao": 0.7391,
+      "f1_score": 0.5802,
+      "acuracia": 0.785
+    }
+  },
+  "concordancia_entre_avaliadores": {
+    "laura_vs_livia": 85.0,
+    "laura_vs_kiro": 83.2,
+    "livia_vs_kiro": 84.4
+  },
+  "resultados_por_imovel": [
+    {
+      "id": 1,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 29,
+          "vp": 2,
+          "fp": 0,
+          "fn": 8,
+          "vn": 19,
+          "precisao": 1.0,
+          "revocacao": 0.2,
+          "f1_score": 0.3333,
+          "acuracia": 0.7241
+        },
+        "livia": {
+          "total_rotulados": 29,
+          "vp": 2,
+          "fp": 0,
+          "fn": 5,
+          "vn": 22,
+          "precisao": 1.0,
+          "revocacao": 0.2857,
+          "f1_score": 0.4444,
+          "acuracia": 0.8276
+        },
+        "kiro": {
+          "total_rotulados": 29,
+          "vp": 2,
+          "fp": 0,
+          "fn": 4,
+          "vn": 23,
+          "precisao": 1.0,
+          "revocacao": 0.3333,
+          "f1_score": 0.5,
+          "acuracia": 0.8621
+        }
+      }
+    },
+    {
+      "id": 2,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 37,
+          "vp": 7,
+          "fp": 2,
+          "fn": 4,
+          "vn": 24,
+          "precisao": 0.7778,
+          "revocacao": 0.6364,
+          "f1_score": 0.7,
+          "acuracia": 0.8378
+        },
+        "livia": {
+          "total_rotulados": 36,
+          "vp": 8,
+          "fp": 0,
+          "fn": 6,
+          "vn": 22,
+          "precisao": 1.0,
+          "revocacao": 0.5714,
+          "f1_score": 0.7273,
+          "acuracia": 0.8333
+        },
+        "kiro": {
+          "total_rotulados": 37,
+          "vp": 8,
+          "fp": 1,
+          "fn": 0,
+          "vn": 28,
+          "precisao": 0.8889,
+          "revocacao": 1.0,
+          "f1_score": 0.9412,
+          "acuracia": 0.973
+        }
+      }
+    },
+    {
+      "id": 3,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 33,
+          "vp": 6,
+          "fp": 6,
+          "fn": 3,
+          "vn": 18,
+          "precisao": 0.5,
+          "revocacao": 0.6667,
+          "f1_score": 0.5714,
+          "acuracia": 0.7273
+        },
+        "livia": {
+          "total_rotulados": 33,
+          "vp": 4,
+          "fp": 8,
+          "fn": 0,
+          "vn": 21,
+          "precisao": 0.3333,
+          "revocacao": 1.0,
+          "f1_score": 0.5,
+          "acuracia": 0.7576
+        },
+        "kiro": {
+          "total_rotulados": 33,
+          "vp": 1,
+          "fp": 11,
+          "fn": 0,
+          "vn": 21,
+          "precisao": 0.0833,
+          "revocacao": 1.0,
+          "f1_score": 0.1538,
+          "acuracia": 0.6667
+        }
+      }
+    },
+    {
+      "id": 5,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 223,
+          "vp": 23,
+          "fp": 8,
+          "fn": 31,
+          "vn": 161,
+          "precisao": 0.7419,
+          "revocacao": 0.4259,
+          "f1_score": 0.5412,
+          "acuracia": 0.8251
+        },
+        "livia": {
+          "total_rotulados": 223,
+          "vp": 18,
+          "fp": 13,
+          "fn": 35,
+          "vn": 157,
+          "precisao": 0.5806,
+          "revocacao": 0.3396,
+          "f1_score": 0.4286,
+          "acuracia": 0.7848
+        },
+        "kiro": {
+          "total_rotulados": 224,
+          "vp": 18,
+          "fp": 13,
+          "fn": 23,
+          "vn": 170,
+          "precisao": 0.5806,
+          "revocacao": 0.439,
+          "f1_score": 0.5,
+          "acuracia": 0.8393
+        }
+      }
+    },
+    {
+      "id": 7,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 43,
+          "vp": 17,
+          "fp": 20,
+          "fn": 1,
+          "vn": 5,
+          "precisao": 0.4595,
+          "revocacao": 0.9444,
+          "f1_score": 0.6182,
+          "acuracia": 0.5116
+        },
+        "livia": {
+          "total_rotulados": 43,
+          "vp": 14,
+          "fp": 23,
+          "fn": 0,
+          "vn": 6,
+          "precisao": 0.3784,
+          "revocacao": 1.0,
+          "f1_score": 0.549,
+          "acuracia": 0.4651
+        },
+        "kiro": {
+          "total_rotulados": 43,
+          "vp": 20,
+          "fp": 17,
+          "fn": 1,
+          "vn": 5,
+          "precisao": 0.5405,
+          "revocacao": 0.9524,
+          "f1_score": 0.6897,
+          "acuracia": 0.5814
+        }
+      }
+    },
+    {
+      "id": 8,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 1,
+          "vp": 1,
+          "fp": 0,
+          "fn": 0,
+          "vn": 0,
+          "precisao": 1.0,
+          "revocacao": 1.0,
+          "f1_score": 1.0,
+          "acuracia": 1.0
+        },
+        "livia": {
+          "total_rotulados": 1,
+          "vp": 1,
+          "fp": 0,
+          "fn": 0,
+          "vn": 0,
+          "precisao": 1.0,
+          "revocacao": 1.0,
+          "f1_score": 1.0,
+          "acuracia": 1.0
+        },
+        "kiro": {
+          "total_rotulados": 1,
+          "vp": 1,
+          "fp": 0,
+          "fn": 0,
+          "vn": 0,
+          "precisao": 1.0,
+          "revocacao": 1.0,
+          "f1_score": 1.0,
+          "acuracia": 1.0
+        }
+      }
+    },
+    {
+      "id": 10,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 55,
+          "vp": 6,
+          "fp": 8,
+          "fn": 1,
+          "vn": 40,
+          "precisao": 0.4286,
+          "revocacao": 0.8571,
+          "f1_score": 0.5714,
+          "acuracia": 0.8364
+        },
+        "livia": {
+          "total_rotulados": 54,
+          "vp": 5,
+          "fp": 9,
+          "fn": 2,
+          "vn": 38,
+          "precisao": 0.3571,
+          "revocacao": 0.7143,
+          "f1_score": 0.4762,
+          "acuracia": 0.7963
+        },
+        "kiro": {
+          "total_rotulados": 55,
+          "vp": 0,
+          "fp": 14,
+          "fn": 0,
+          "vn": 41,
+          "precisao": 0.0,
+          "revocacao": 0,
+          "f1_score": 0,
+          "acuracia": 0.7455
+        }
+      }
+    },
+    {
+      "id": 11,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 4,
+          "vp": 0,
+          "fp": 0,
+          "fn": 0,
+          "vn": 4,
+          "precisao": 0,
+          "revocacao": 0,
+          "f1_score": 0,
+          "acuracia": 1.0
+        },
+        "livia": {
+          "total_rotulados": 4,
+          "vp": 0,
+          "fp": 0,
+          "fn": 0,
+          "vn": 4,
+          "precisao": 0,
+          "revocacao": 0,
+          "f1_score": 0,
+          "acuracia": 1.0
+        },
+        "kiro": {
+          "total_rotulados": 4,
+          "vp": 0,
+          "fp": 0,
+          "fn": 0,
+          "vn": 4,
+          "precisao": 0,
+          "revocacao": 0,
+          "f1_score": 0,
+          "acuracia": 1.0
+        }
+      }
+    },
+    {
+      "id": 13,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 88,
+          "vp": 21,
+          "fp": 27,
+          "fn": 1,
+          "vn": 39,
+          "precisao": 0.4375,
+          "revocacao": 0.9545,
+          "f1_score": 0.6,
+          "acuracia": 0.6818
+        },
+        "livia": {
+          "total_rotulados": 88,
+          "vp": 22,
+          "fp": 26,
+          "fn": 0,
+          "vn": 40,
+          "precisao": 0.4583,
+          "revocacao": 1.0,
+          "f1_score": 0.6286,
+          "acuracia": 0.7045
+        },
+        "kiro": {
+          "total_rotulados": 88,
+          "vp": 19,
+          "fp": 29,
+          "fn": 1,
+          "vn": 39,
+          "precisao": 0.3958,
+          "revocacao": 0.95,
+          "f1_score": 0.5588,
+          "acuracia": 0.6591
+        }
+      }
+    },
+    {
+      "id": 14,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 4,
+          "vp": 0,
+          "fp": 0,
+          "fn": 1,
+          "vn": 3,
+          "precisao": 0,
+          "revocacao": 0.0,
+          "f1_score": 0,
+          "acuracia": 0.75
+        },
+        "livia": {
+          "total_rotulados": 4,
+          "vp": 0,
+          "fp": 0,
+          "fn": 0,
+          "vn": 4,
+          "precisao": 0,
+          "revocacao": 0,
+          "f1_score": 0,
+          "acuracia": 1.0
+        },
+        "kiro": {
+          "total_rotulados": 4,
+          "vp": 0,
+          "fp": 0,
+          "fn": 0,
+          "vn": 4,
+          "precisao": 0,
+          "revocacao": 0,
+          "f1_score": 0,
+          "acuracia": 1.0
+        }
+      }
+    },
+    {
+      "id": 15,
+      "avaliadores": {
+        "laura": {
+          "total_rotulados": 54,
+          "vp": 14,
+          "fp": 10,
+          "fn": 1,
+          "vn": 29,
+          "precisao": 0.5833,
+          "revocacao": 0.9333,
+          "f1_score": 0.7179,
+          "acuracia": 0.7963
+        },
+        "livia": {
+          "total_rotulados": 54,
+          "vp": 22,
+          "fp": 2,
+          "fn": 5,
+          "vn": 25,
+          "precisao": 0.9167,
+          "revocacao": 0.8148,
+          "f1_score": 0.8627,
+          "acuracia": 0.8704
+        },
+        "kiro": {
+          "total_rotulados": 54,
+          "vp": 16,
+          "fp": 8,
+          "fn": 1,
+          "vn": 29,
+          "precisao": 0.6667,
+          "revocacao": 0.9412,
+          "f1_score": 0.7805,
+          "acuracia": 0.8333
+        }
+      }
+    }
+  ]
+}

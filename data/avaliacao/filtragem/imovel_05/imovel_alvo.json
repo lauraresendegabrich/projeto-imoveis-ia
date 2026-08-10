@@ -1,0 +1,22 @@
+{
+  "rua": "Rua Luiz Cézar Leal",
+  "numero": "90",
+  "bairro": "Rubem Berta",
+  "cidade": "Porto Alegre",
+  "estado": "RS",
+  "localizacao": "Porto Alegre, RS",
+  "tipo": "house",
+  "propertyType": "Casas",
+  "area": 179,
+  "area_terreno": null,
+  "bedrooms": 3,
+  "bathrooms": 3,
+  "parkingSpaces": 3,
+  "neighborhood": "Rubem Berta",
+  "street": "Rua Luiz Cézar Leal",
+  "description": "Sobrado com 3 dormitórios, sendo 1 suíte com closet. Sala de estar, cozinha, banheiro social, área de serviço, lavabo e depósito. Edícula com churrasqueira nos fundos. Amplo pátio e garagem para 3 carros cobertos e 1 descoberto.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/d4b8166022103cfd2790eb8841a25ca4/casa-com-3-quartos-a-venda-179m-no-rubem-berta-porto-alegre.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.vivareal.com/img/vr-listing/7f8d71c9a345e6b7b5da84360aabb31d/casa-com-3-quartos-a-venda-179m-no-rubem-berta-porto-alegre.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

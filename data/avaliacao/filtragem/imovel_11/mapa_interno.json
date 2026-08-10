@@ -1,0 +1,26 @@
+[
+  {
+    "numero_csv": 1,
+    "id_original": "353303348",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5717
+  },
+  {
+    "numero_csv": 2,
+    "id_original": "353185637",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.56
+  },
+  {
+    "numero_csv": 3,
+    "id_original": "353221496",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5717
+  },
+  {
+    "numero_csv": 4,
+    "id_original": "353646577",
+    "cluster_sistema": "B",
+    "score_similaridade": 0.5833
+  }
+]

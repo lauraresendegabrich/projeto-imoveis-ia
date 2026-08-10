@@ -1,0 +1,22 @@
+{
+  "rua": "Avenida Nazaré",
+  "numero": "1223",
+  "bairro": "Nazaré",
+  "cidade": "Belém",
+  "estado": "PA",
+  "localizacao": "Belém, PA",
+  "tipo": "apartment",
+  "propertyType": "Apartamentos",
+  "area": 120,
+  "area_terreno": null,
+  "bedrooms": 2,
+  "bathrooms": 3,
+  "parkingSpaces": 2,
+  "neighborhood": "Nazaré",
+  "street": "Avenida Nazaré",
+  "description": "Apartamento no Edifício Feliz, 120m², sala para dois ambientes, cozinha funcional, banheiro social, 2 quartos sendo 1 com closet, área de serviço, banheiro de serviço e 2 vagas. Diferenciais: porcelanato fosco, projeto de iluminação, armários planejados e cozinha equipada. Condomínio com portaria, portão eletrônico e elevador.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/f75976404b68eb3593a4b16e1c859825/apartamento-com-2-quartos-a-venda-120m-no-nazare-belem.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.vivareal.com/img/vr-listing/44e79a78864da040afb9cc563e17874e/apartamento-com-2-quartos-a-venda-120m-no-nazare-belem.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

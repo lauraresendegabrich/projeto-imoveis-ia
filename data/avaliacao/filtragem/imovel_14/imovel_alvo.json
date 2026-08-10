@@ -1,0 +1,22 @@
+{
+  "rua": "Rua não informada",
+  "numero": "",
+  "bairro": "Jardim Monte Líbano",
+  "cidade": "Campo Grande",
+  "estado": "MS",
+  "localizacao": "Campo Grande, MS",
+  "tipo": "apartment",
+  "propertyType": "Apartamentos",
+  "area": 142,
+  "area_terreno": null,
+  "bedrooms": 3,
+  "bathrooms": 2,
+  "parkingSpaces": 1,
+  "neighborhood": "Jardim Monte Líbano",
+  "street": "Rua não informada",
+  "description": "Apartamento amplo, 142m², 3 dormitórios sendo 1 suíte com guarda-roupa planejado. Sala ampla com 2 ambientes. Cozinha grande com lavanderia isolada e despensa. Jardim de inverno. 1 vaga descoberta. Portão eletrônico. Aceita permuta por imóvel de menor valor. Bairro nobre, ao lado da Padaria Monte Líbano.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/33c9c645e38750c9b5ffadc966b565b3/apartamento-com-3-quartos-a-venda-142m-no-jardim-monte-libano-campo-grande.webp?action=fit-in&dimension=870x707",
+    " https://resizedimgs.vivareal.com/img/vr-listing/f78672c01d5244e973d44de478f893ad/apartamento-com-3-quartos-a-venda-142m-no-jardim-monte-libano-campo-grande.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}

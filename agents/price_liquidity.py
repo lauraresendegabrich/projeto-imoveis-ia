@@ -28,6 +28,7 @@ LOGICA:
 """
 
 import json
+import os
 import re
 from pathlib import Path
 from statistics import mean, median
@@ -51,6 +52,8 @@ CAMINHO_ZONA = "data/zona_homogenea_ag2.json"
 CAMINHO_AG3 = "data/imoveis_analisados_ag3.json"
 CAMINHO_AG4 = "data/infra_avaliada_ag4.json"
 CAMINHO_SAIDA = "data/preco_liquidez_ag5.json"
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 # ============================================================
@@ -150,9 +153,12 @@ def arredondar_mil(valor: float) -> int:
 # ============================================================
 
 def carregar_json(caminho: str) -> Any:
-    """Carrega um arquivo JSON."""
-    with open(caminho, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Carrega um arquivo JSON. Retorna {} se nao existir."""
+    try:
+        with open(caminho, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 def salvar_json(dados: Any, caminho: str) -> None:
@@ -174,6 +180,16 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
     # Zona homogenea (Ag. 2)
     zona = carregar_json(CAMINHO_ZONA)
     todos_comparaveis = zona.get("comparaveis_confirmados", [])
+
+    # Fallback: se zona homogenea nao existe, usa comparaveis do Ag. 2 direto
+    if not todos_comparaveis:
+        import logging
+        logger_local = logging.getLogger(__name__)
+        caminho_ag2 = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
+        if os.path.exists(caminho_ag2):
+            ag2 = carregar_json(caminho_ag2)
+            todos_comparaveis = [c for c in ag2.get("comparaveis", []) if c.get("cluster") == "A"]
+            logger_local.info(f"Fallback zona: usando {len(todos_comparaveis)} comparaveis do Cluster A")
 
     # Separar terrenos dos construidos (sem duplicatas por id)
     terrenos_zona = []
@@ -199,7 +215,11 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
     dados_ag4 = carregar_json(CAMINHO_AG4)
 
     # Imovel alvo — pega do Ag. 3 (tem os dados completos)
+    # Fallback: se Ag. 3 nao tem, pega do Ag. 2 (imoveis_comparaveis)
     imovel_alvo = dados_ag3.get("imovel_alvo", {})
+    if not imovel_alvo:
+        ag2 = carregar_json(os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json"))
+        imovel_alvo = ag2.get("imovel_alvo", {})
 
     return imovel_alvo, terrenos_zona, comparaveis_zona, dados_ag3, dados_ag4
 

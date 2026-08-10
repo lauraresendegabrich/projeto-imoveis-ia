@@ -1,0 +1,22 @@
+{
+  "rua": "Rua Quinze",
+  "numero": "1",
+  "bairro": "Loteamento Recife",
+  "cidade": "Petrolina",
+  "estado": "PE",
+  "localizacao": "Petrolina, PE",
+  "tipo": "house",
+  "propertyType": "Casas",
+  "area": 140,
+  "area_terreno": null,
+  "bedrooms": 3,
+  "bathrooms": 3,
+  "parkingSpaces": 2,
+  "neighborhood": "Loteamento Recife",
+  "street": "Rua Quinze",
+  "description": "Casa com 3 quartos, suíte com closet, suíte normal, garagem para 2 carros, área de serviço, área para piscina, sala, jardim, cozinha americana. Cerca elétrica, portão eletrônico, piso porcelanato, vidros blindex.",
+  "images": [
+    "https://resizedimgs.vivareal.com/img/vr-listing/326c4209dd0067cc34defd632f9ece17/casa-com-3-quartos-a-venda-140m-no-loteamento-recife-petrolina.webp?action=fit-in&dimension=870x707",
+    "https://resizedimgs.vivareal.com/img/vr-listing/8f4ffc8a81389e06713e20ed801b5351/casa-com-3-quartos-a-venda-140m-no-loteamento-recife-petrolina.webp?action=fit-in&dimension=870x707&seo=false"
+  ]
+}
