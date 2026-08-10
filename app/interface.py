@@ -408,10 +408,11 @@ if submitted:
                 scores = infra.get("scores", {})
                 resumo = infra.get("resumo_scores", {})
                 st.write(f"- Score final: **{scores.get('score_final', '?')}**")
-                st.write(f"- Classificação: **{resumo.get('classificacao_infraestrutura', '?')}**")
-                st.write(f"- Perfil: {resumo.get('perfil_regiao', '?')}")
-                st.write(f"- Impacto no valor: {resumo.get('impacto_estimado_no_valor', '?')}")
-                st.write(f"- Tempo liquidez regional: {resumo.get('tempo_liquidez_regional', '?')}")
+                st.write(f"- Classificação: **{resumo.get('classificacao_infraestrutura', 'não disponível')}**")
+                st.write(f"- Perfil: {resumo.get('perfil_regiao') or 'não disponível'}")
+                st.write(f"- Impacto no valor: {resumo.get('impacto_estimado_no_valor') or 'não disponível'}")
+                tempo_reg = resumo.get('tempo_liquidez_regional')
+                st.write(f"- Tempo estimado de venda na região: {tempo_reg or 'não disponível'}")
                 pontos = resumo.get("pontos_fortes", [])
                 if pontos:
                     st.markdown("**Pontos fortes:**")
@@ -436,7 +437,12 @@ if submitted:
                     preco_comp = comp.get("price", 0)
                     area_comp = comp.get("area", 0)
                     rua_comp = comp.get("street") or "Rua não informada"
-                    st.write(f"{i}. **R$ {preco_comp:,.0f}** | {area_comp}m² | {comp.get('neighborhood', '?')} | {rua_comp}")
+                    url_comp = comp.get("url", "")
+                    linha = f"{i}. **R$ {preco_comp:,.0f}** | {area_comp}m² | {comp.get('neighborhood', '?')} | {rua_comp}"
+                    if url_comp:
+                        st.markdown(f"{linha} — [ver anúncio]({url_comp})")
+                    else:
+                        st.write(linha)
             else:
                 st.write("Nenhum comparável encontrado")
 
