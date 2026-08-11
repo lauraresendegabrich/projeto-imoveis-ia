@@ -925,8 +925,123 @@ def coletar_imoveis(
     t_ocrad = time.time() - t0
     logger.info(f"Apify ocrad: {len(ocrad)} imoveis | tempo: {t_ocrad:.1f}s")
 
+    # ── FONTE PRINCIPAL: Amazon Athena (S3/Parquet) ───────────────────
+    # Base de dados com milhares de anúncios já coletados
+    athena_imoveis = []
+    if os.getenv("AWS_ACCESS_KEY_ID"):
+        try:
+            from services.athena_client import AthenaClient
+            cidade_nome = localizacao.split(",")[0].strip()
+            estado_nome = localizacao.split(",")[1].strip() if "," in localizacao else None
+
+            logger.info(f"Athena: buscando dados em {cidade_nome}/{bairro or 'cidade toda'}...")
+            client = AthenaClient()
+
+            # Monta query com mesmos filtros do Apify: cidade + bairro + tipo + limites
+            # Apify "house": casas (20) + terrenos (10) = 30
+            # Apify "apartment": apartamentos (30)
+            athena_imoveis = []
+
+            if tipo_imovel == "house":
+                # Busca casas + terrenos (tipos no Athena: casa, two_story_house, village_house, residential_allotment_land)
+                casas = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa", limit=20)
+                casas2 = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="two_story_house", limit=10)
+                terrenos_athena = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="residential_allotment_land", limit=10)
+                athena_imoveis = casas + casas2 + terrenos_athena
+            elif tipo_imovel == "apartment":
+                athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento", limit=30)
+            else:
+                athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, limit=30)
+
+            # Filtra por bairro se informado
+            if bairro and athena_imoveis:
+                bairro_lower = bairro.lower().strip()
+                filtrados_bairro = [
+                    im for im in athena_imoveis
+                    if bairro_lower in (im.get("bairro") or "").lower()
+                ]
+                if filtrados_bairro:
+                    athena_imoveis = filtrados_bairro
+
+            logger.info(f"Athena: {len(athena_imoveis)} imoveis encontrados")
+
+            # Normaliza campos do Athena para o schema padrao
+            for im in athena_imoveis:
+                im["source"] = "Athena/S3"
+
+                # Fotos: vem em 'fotos_urls' separadas por '|' com template
+                fotos_raw = im.get("fotos_urls") or ""
+                if fotos_raw:
+                    fotos_list = []
+                    for foto_url in fotos_raw.split("|"):
+                        foto_url = foto_url.strip()
+                        if foto_url:
+                            # Substitui templates por valores padrão
+                            foto_url = foto_url.replace("{description}", "imovel")
+                            foto_url = foto_url.replace("{action}", "fit-in")
+                            foto_url = foto_url.replace("{width}x{height}", "870x653")
+                            foto_url = foto_url.replace("{width}", "870")
+                            foto_url = foto_url.replace("{height}", "653")
+                            fotos_list.append(foto_url)
+                    im["images"] = fotos_list[:30]
+                    im["imageCount"] = len(im["images"])
+                else:
+                    im["images"] = []
+                    im["imageCount"] = 0
+
+                # Mapeia campos
+                if im.get("preco") and not im.get("price"):
+                    try:
+                        im["price"] = float(im["preco"])
+                    except (ValueError, TypeError):
+                        pass
+                if im.get("area_construida") and not im.get("area"):
+                    try:
+                        im["area"] = float(im["area_construida"])
+                    except (ValueError, TypeError):
+                        pass
+                if im.get("quartos") and not im.get("bedrooms"):
+                    try:
+                        im["bedrooms"] = int(float(im["quartos"]))
+                    except (ValueError, TypeError):
+                        pass
+                if im.get("banheiros") and not im.get("bathrooms"):
+                    try:
+                        im["bathrooms"] = int(float(im["banheiros"]))
+                    except (ValueError, TypeError):
+                        pass
+                if im.get("vagas") and not im.get("parkingSpaces"):
+                    try:
+                        im["parkingSpaces"] = int(float(im["vagas"]))
+                    except (ValueError, TypeError):
+                        pass
+                im.setdefault("neighborhood", im.get("bairro"))
+                im.setdefault("city", im.get("cidade"))
+                im.setdefault("state", im.get("estado"))
+                im.setdefault("street", im.get("rua"))
+                im.setdefault("publishedAt", im.get("data_publicacao"))
+                im.setdefault("description", im.get("descricao"))
+                im.setdefault("title", im.get("titulo"))
+                # Tipo
+                tipo_raw = im.get("tipo", "")
+                if tipo_raw in ("casa", "two_story_house", "village_house"):
+                    im["propertyType"] = "Casas"
+                elif tipo_raw in ("apartamento", "flat", "cobertura"):
+                    im["propertyType"] = "Apartamentos"
+                elif tipo_raw in ("residential_allotment_land", "allotment_land"):
+                    im["propertyType"] = "Terrenos"
+                else:
+                    im["propertyType"] = tipo_raw
+
+        except Exception as e:
+            logger.warning(f"Athena indisponivel: {e}")
+
+    # Combina: Athena (principal) + Apify (complemento com fotos)
+    todos = athena_imoveis + ocrad
+    logger.info(f"Total combinado: {len(athena_imoveis)} Athena + {len(ocrad)} Apify = {len(todos)} imoveis")
+
     # ── FILTROS ───────────────────────────────────────────────────────
-    combinados = [i for i in ocrad if not _eh_leilao(i) and _campos_ok(i)]
+    combinados = [i for i in todos if not _eh_leilao(i) and _campos_ok(i)]
     combinados = _remover_duplicatas_url(combinados)
     logger.info(f"Apos filtros (sem duplicatas, sem leilao): {len(combinados)} imoveis")
 
