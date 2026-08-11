@@ -30,55 +30,114 @@ except Exception:
 # ============================================================
 
 st.set_page_config(
-    page_title="Precificação Imobiliária",
+    page_title="Precificação Imobiliária IA",
     page_icon="🏠",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("🏠 Sistema Multiagente de Precificação Imobiliária")
-st.markdown("Insira os dados do imóvel alvo e clique em **Avaliar** para estimar o valor de mercado.")
-
 # ============================================================
-# FORMULÁRIO
+# SIDEBAR — FORMULÁRIO
 # ============================================================
 
-with st.form("imovel_form"):
-    st.subheader("📍 Localização")
-    col1, col2 = st.columns(2)
-    with col1:
-        rua = st.text_input("Rua", value="Rua Frederico Soares")
-        numero = st.text_input("Número", value="499")
-        bairro = st.text_input("Bairro", value="Santa Fe")
-    with col2:
-        cidade = st.text_input("Cidade", value="Campo Grande")
-        estado = st.text_input("Estado (sigla)", value="MS")
+with st.sidebar:
+    st.title("🏠 Avaliação de Imóvel")
+    st.caption("Preencha os dados do imóvel que deseja avaliar")
 
-    st.subheader("🏗️ Características")
-    col3, col4, col5 = st.columns(3)
-    with col3:
-        tipo = st.selectbox("Tipo", ["Casa", "Apartamento", "Terreno"])
-        area = st.number_input("Área construída (m²)", min_value=0, value=230)
-        area_terreno = st.number_input("Área do terreno (m²)", min_value=0, value=360)
-    with col4:
-        quartos = st.number_input("Quartos", min_value=0, value=3)
-        banheiros = st.number_input("Banheiros", min_value=0, value=2)
-        vagas = st.number_input("Vagas", min_value=0, value=1)
-    with col5:
-        preco_anunciado = st.number_input("Preço anunciado (R$, opcional)", min_value=0, value=0, step=1000)
-        descricao = st.text_area("Descrição (opcional)", value="")
+    # ── BUSCA POR CEP ─────────────────────────────────────────
+    st.markdown("**🔎 Buscar por CEP:**")
+    cep_input = st.text_input("CEP (opcional)", value="", max_chars=9, placeholder="13015-100")
+    preset = {}
+    if cep_input and len(cep_input.replace("-", "")) == 8:
+        import requests
+        try:
+            cep_limpo = cep_input.replace("-", "")
+            r = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
+            if r.status_code == 200:
+                dados_cep = r.json()
+                if not dados_cep.get("erro"):
+                    preset = {
+                        "rua": dados_cep.get("logradouro", ""),
+                        "bairro": dados_cep.get("bairro", ""),
+                        "cidade": dados_cep.get("localidade", ""),
+                        "estado": dados_cep.get("uf", ""),
+                    }
+                    st.success(f"✅ {dados_cep.get('logradouro', '')}, {dados_cep.get('bairro', '')}, {dados_cep.get('localidade', '')}/{dados_cep.get('uf', '')}")
+                else:
+                    st.warning("CEP não encontrado")
+        except Exception:
+            pass
 
-    st.subheader("📸 Fotos do imóvel (opcional)")
-    st.caption("Cole as URLs das fotos do imóvel (uma por linha, até 8 fotos). Quanto mais fotos, melhor a análise de qualidade.")
-    fotos_texto = st.text_area("URLs das fotos", value="", height=150)
+    st.divider()
 
-    submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
+    with st.form("imovel_form"):
+        st.markdown("**📍 Localização**")
+        rua = st.text_input("Rua", value=preset.get("rua", ""))
+        numero = st.text_input("Número", value=preset.get("numero", ""))
+        bairro = st.text_input("Bairro", value=preset.get("bairro", ""))
+        col_cidade, col_estado = st.columns([3, 1])
+        with col_cidade:
+            cidade = st.text_input("Cidade", value=preset.get("cidade", ""))
+        with col_estado:
+            estados_br = ["", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
+            estado_default = preset.get("estado", "")
+            estado_idx = estados_br.index(estado_default) if estado_default in estados_br else 0
+            estado = st.selectbox("UF", estados_br, index=estado_idx)
+
+        st.markdown("**🏗️ Características**")
+        tipo = st.selectbox("Tipo", ["Casa", "Apartamento", "Terreno"], index=["Casa", "Apartamento", "Terreno"].index(preset.get("tipo", "Casa")))
+        col_a, col_b = st.columns(2)
+        with col_a:
+            area = st.number_input("Área construída (m²)", min_value=0, value=preset.get("area", 0))
+            quartos = st.number_input("Quartos", min_value=0, value=preset.get("quartos", 0))
+            vagas = st.number_input("Vagas", min_value=0, value=preset.get("vagas", 0))
+        with col_b:
+            terreno_default = 0 if tipo == "Apartamento" else preset.get("area_terreno", 0)
+            area_terreno = st.number_input("Terreno (m²)", min_value=0, value=terreno_default)
+            banheiros = st.number_input("Banheiros", min_value=0, value=preset.get("banheiros", 0))
+            preco_anunciado = st.number_input("Preço (R$, opcional)", min_value=0, value=0, step=1000)
+
+        st.markdown("**📝 Descrição** (opcional)")
+        descricao = st.text_area("Descrição do imóvel", value="", height=80)
+
+        st.markdown("**📸 Fotos do imóvel** (opcional, máx. 8)")
+        st.caption("Adicione fotos para uma avaliação mais precisa.")
+        link_anuncio = st.text_input("Link do anúncio (extrai fotos automaticamente)", value="", help="Cole o link do VivaReal/ZAP e as fotos serão extraídas")
+        fotos_texto = st.text_area("Ou cole links das fotos (um por linha)", value="", height=60)
+
+        submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
+
+# ============================================================
+# ÁREA PRINCIPAL — RESULTADOS
+# ============================================================
+
+st.title("📊 Precificação Imobiliária com IA")
+st.markdown("Sistema multiagente que estima o valor do seu imóvel com base em dados reais do mercado.")
 
 
 # ============================================================
 # EXECUÇÃO DO PIPELINE
 # ============================================================
 
-if submitted:
+if not submitted:
+    # Tela inicial
+    st.info("👈 Preencha os dados do imóvel na barra lateral e clique em **Avaliar Imóvel** para começar.")
+
+    col_info1, col_info2, col_info3 = st.columns(3)
+    with col_info1:
+        st.markdown("### 🔍 Coleta")
+        st.write("Busca imóveis similares à venda na mesma região")
+    with col_info2:
+        st.markdown("### 🧠 Análise")
+        st.write("Avalia qualidade, infraestrutura e padrão da vizinhança")
+    with col_info3:
+        st.markdown("### 💰 Preço")
+        st.write("Calcula valor de mercado e tempo estimado de venda")
+
+    st.divider()
+    st.caption("Cidades disponíveis no banco: Campinas, Indaiatuba, Guarulhos, Americana, Cotia, Jacareí, Bauru, Barueri, Atibaia, Itu (SP). Outras cidades usam coleta em tempo real.")
+
+elif submitted:
     # Validação dos campos obrigatórios
     erros_validacao = []
     if not rua.strip():
@@ -123,8 +182,30 @@ if submitted:
         "neighborhood": bairro,
         "street": rua,
         "description": descricao or f"{tipo} com {area}m², {quartos} quartos, {banheiros} banheiros, {vagas} vagas - {bairro}, {cidade}/{estado}",
-        "images": [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()][:8],
+        "images": [],
     }
+
+    # Processa fotos conforme opção escolhida
+    fotos_final = []
+    if link_anuncio and ("vivareal" in link_anuncio or "zap" in link_anuncio):
+        # Extrai fotos do link do anúncio
+        import requests as req_fotos
+        import re as re_fotos
+        try:
+            r = req_fotos.get(link_anuncio, timeout=10)
+            if r.status_code == 200:
+                hashes = re_fotos.findall(r'resizedimgs\.vivareal\.com/img/vr-listing/([a-f0-9]{32})/', r.text)
+                hashes_unicos = list(dict.fromkeys(hashes))
+                fotos_final = [
+                    f"https://resizedimgs.vivareal.com/img/vr-listing/{h}/imovel.webp?action=fit-in&dimension=870x653"
+                    for h in hashes_unicos[:8]
+                ]
+        except Exception:
+            pass
+    elif fotos_texto.strip():
+        fotos_final = [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()][:8]
+
+    imovel_alvo["images"] = fotos_final
 
     if preco_anunciado > 0:
         imovel_alvo["price"] = preco_anunciado
@@ -372,6 +453,19 @@ if submitted:
         "resumo": resumo,
     }
 
+    # Salva no session_state pra não perder no rerun
+    st.session_state["resultado"] = resultado
+    st.session_state["imovel_alvo_dados"] = imovel_alvo
+
+# Recupera resultado salvo (pra quando faz download sem perder)
+if "resultado" in st.session_state and not submitted:
+    resultado = st.session_state["resultado"]
+    imovel_alvo = st.session_state.get("imovel_alvo_dados", {})
+
+if "resultado" in st.session_state:
+    resultado = st.session_state["resultado"]
+    imovel_alvo_export = st.session_state.get("imovel_alvo_dados", {})
+
     # ============================================================
     # RESULTADO
     # ============================================================
@@ -466,6 +560,24 @@ if submitted:
                     st.markdown("**Pontos fortes:**")
                     for p in pontos:
                         st.write(f"  ✓ {p}")
+
+                # Gráfico radar de infraestrutura
+                scores_cat = {k: v for k, v in scores.items() if k not in ("score_final", "transporte_dados_insuficientes", "transporte_status")}
+                if scores_cat:
+                    import plotly.graph_objects as go
+                    categorias = list(scores_cat.keys())
+                    valores = list(scores_cat.values())
+                    fig = go.Figure(data=go.Scatterpolar(
+                        r=valores + [valores[0]],
+                        theta=categorias + [categorias[0]],
+                        fill="toself",
+                        name="Infraestrutura"
+                    ))
+                    fig.update_layout(
+                        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                        showlegend=False, height=300, margin=dict(l=40, r=40, t=20, b=20)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
             else:
                 st.write("Infraestrutura não disponível")
 
@@ -480,6 +592,7 @@ if submitted:
                 st.write(f"- Score médio da região: **{score_med}**")
 
                 # Explica o motivo do score
+                score_med = score_med or 0
                 if score_med >= 0.80:
                     st.success("A região tem imóveis em excelente estado — alto padrão, bem conservados, com muitos diferenciais.")
                 elif score_med >= 0.60:
@@ -492,24 +605,39 @@ if submitted:
                 st.write("Análise qualitativa não disponível")
 
         with st.expander("📋 Comparáveis Encontrados"):
-            st.caption("Imóveis à venda na mesma região que foram usados como referência para calcular o valor do seu. Clique em 'ver anúncio' para conferir.")
+            st.caption("Imóveis à venda na mesma região que foram usados como referência para calcular o valor do seu.")
             comparaveis = resultado.get("comparaveis", [])
             if comparaveis:
-                for i, comp in enumerate(comparaveis[:10], 1):
-                    preco_comp = comp.get("price", 0)
-                    area_comp = comp.get("area", 0)
-                    rua_comp = comp.get("street") or "Rua não informada"
+                # Tabela com link incluso
+                import pandas as pd
+                dados_tabela = []
+                for comp in comparaveis[:15]:
                     url_comp = comp.get("url", "")
-                    linha = f"{i}. **R$ {preco_comp:,.0f}** | {area_comp}m² | {comp.get('neighborhood', '?')} | {rua_comp}"
-                    if url_comp:
-                        st.markdown(f"{linha} — [ver anúncio]({url_comp})")
-                    else:
-                        st.write(linha)
+                    link = f"[ver]({url_comp})" if url_comp else ""
+                    dados_tabela.append({
+                        "Preço": f"R$ {comp.get('price', 0):,.0f}",
+                        "Área": f"{comp.get('area', 0)}m²",
+                        "Quartos": comp.get("bedrooms", "?"),
+                        "Bairro": comp.get("neighborhood", "?"),
+                        "Rua": comp.get("street") or "Não informada",
+                        "Anúncio": link,
+                    })
+                df = pd.DataFrame(dados_tabela)
+                st.markdown(df.to_markdown(index=False), unsafe_allow_html=True)
+
+                # Gráfico de preços
+                precos = [c.get("price", 0) for c in comparaveis if c.get("price")]
+                if precos:
+                    st.markdown("**Distribuição de preços dos comparáveis:**")
+                    import plotly.express as px
+                    fig = px.histogram(x=precos, nbins=10, labels={"x": "Preço (R$)", "y": "Quantidade"})
+                    fig.update_layout(showlegend=False, height=250, margin=dict(l=20, r=20, t=20, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
             else:
                 st.write("Nenhum comparável encontrado")
 
         # Justificativa
-        st.info(preco.get("justificativa", ""))
+        st.markdown(f"> {preco.get('justificativa', '')}")
 
         # ==============================================================
         # SEÇÕES EXTRAS
@@ -570,11 +698,11 @@ if submitted:
                 if valor_med > 0:
                     diferenca_pct = ((preco_anunc - valor_med) / valor_med) * 100
                     if diferenca_pct > 5:
-                        st.warning(f"⚠️ O preço anunciado (**R$ {preco_anunc:,.0f}**) está **{diferenca_pct:.1f}% acima** do valor médio da região (R$ {valor_med:,.0f})")
+                        st.warning(f"O preço anunciado (R$ {preco_anunc:,.0f}) está {diferenca_pct:.1f}% acima do valor médio da região (R$ {valor_med:,.0f})")
                     elif diferenca_pct < -5:
-                        st.success(f"✅ O preço anunciado (**R$ {preco_anunc:,.0f}**) está **{abs(diferenca_pct):.1f}% abaixo** do valor médio da região (R$ {valor_med:,.0f}) — boa oportunidade")
+                        st.success(f"O preço anunciado (R$ {preco_anunc:,.0f}) está {abs(diferenca_pct):.1f}% abaixo do valor médio da região (R$ {valor_med:,.0f}) — boa oportunidade")
                     else:
-                        st.info(f"O preço anunciado (**R$ {preco_anunc:,.0f}**) está alinhado com o valor médio da região (R$ {valor_med:,.0f}) — diferença de {abs(diferenca_pct):.1f}%")
+                        st.info(f"O preço anunciado (R$ {preco_anunc:,.0f}) está alinhado com o valor médio da região (R$ {valor_med:,.0f}) — diferença de {abs(diferenca_pct):.1f}%")
 
         # 4. Imagem de satélite
         with st.expander("🛰️ Imagem de Satélite da Região"):
@@ -611,6 +739,46 @@ if submitted:
                     st.write("Transporte público: nenhuma parada encontrada no raio")
             else:
                 st.write("Dados de infraestrutura não disponíveis")
+
+        # ── BOTÃO EXPORTAR PDF ─────────────────────────────────────
+        st.divider()
+        laudo_texto = f"""LAUDO DE AVALIAÇÃO IMOBILIÁRIA
+{'='*50}
+
+Imóvel: {rua}, {numero} - {bairro}, {cidade}/{estado}
+Tipo: {tipo} | Área: {area}m² | Terreno: {area_terreno}m²
+Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas}
+
+RESULTADO DA AVALIAÇÃO
+{'-'*50}
+Valor Médio Estimado: R$ {avaliacao.get('valor_medio_imovel', 0):,.2f}
+Valor de Liquidez (-10%): R$ {avaliacao.get('valor_liquidez', 0):,.2f}
+Tempo Estimado de Venda: {liquidez_info.get('tempo_estimado', '?')}
+
+MÉTODO
+{'-'*50}
+{preco.get('metodo_estatistico', '?')}
+{preco.get('justificativa', '')}
+
+INFRAESTRUTURA
+{'-'*50}
+Score: {resultado.get('infraestrutura', {}).get('scores', {}).get('score_final', '?')}
+Classificação: {resultado.get('infraestrutura', {}).get('resumo_scores', {}).get('classificacao_infraestrutura', '?')}
+
+ZONA HOMOGÊNEA
+{'-'*50}
+Raio: {resultado.get('zona_homogenea', {}).get('zona_homogenea', {}).get('raio_metros', '?')}m
+Imóveis na zona: {len(resultado.get('zona_homogenea', {}).get('comparaveis_confirmados', []))}
+
+Gerado automaticamente pelo Sistema Multiagente de Precificação Imobiliária.
+"""
+        st.download_button(
+            label="📄 Exportar Laudo (TXT)",
+            data=laudo_texto,
+            file_name=f"laudo_{cidade}_{bairro}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
     else:
         st.error("Não foi possível calcular o preço. Verifique os dados e tente novamente.")

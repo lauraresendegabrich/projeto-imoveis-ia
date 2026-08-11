@@ -89,7 +89,7 @@ class AthenaClient:
         preco_max: float = None,
         preco_min: float = None,
         tipo: str = None,
-        limit: int = 1000,
+        limit: int = 200,
     ) -> list[dict]:
         """Busca anúncios de uma cidade com filtros opcionais."""
         conditions = [f"cidade = '{cidade}'"]
@@ -108,7 +108,7 @@ class AthenaClient:
         sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
         return self.executar_query(sql)
 
-    def buscar_bairro(self, cidade: str, bairro: str, limit: int = 500) -> list[dict]:
+    def buscar_bairro(self, cidade: str, bairro: str, limit: int = 200) -> list[dict]:
         """Busca anúncios de um bairro específico."""
         sql = f"""
             SELECT * FROM vivareal

@@ -178,7 +178,7 @@ Retorne exatamente este JSON:
         if len(fotos_selecionadas) > 1:
             import time
             extras = [f for i, f in enumerate(fotos_selecionadas) if i != len(fotos_selecionadas) // 2]
-            for foto in extras[:3]:
+            for foto in extras[:7]:
                 time.sleep(1)
                 try:
                     r2 = client.chat.completions.create(

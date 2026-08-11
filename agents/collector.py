@@ -945,25 +945,41 @@ def coletar_imoveis(
             athena_imoveis = []
 
             if tipo_imovel == "house":
-                # Busca casas + terrenos (tipos no Athena: casa, two_story_house, village_house, residential_allotment_land)
-                casas = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa", limit=20)
-                casas2 = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="two_story_house", limit=10)
-                terrenos_athena = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="residential_allotment_land", limit=10)
-                athena_imoveis = casas + casas2 + terrenos_athena
+                # Busca casas + terrenos (sem limite, filtro por bairro no SQL)
+                if bairro:
+                    todos_bairro = client.buscar_bairro(cidade_nome, bairro)
+                    # Filtra por tipo no Python (buscar_bairro traz tudo do bairro)
+                    casas = [im for im in todos_bairro if im.get("tipo") in ("casa", "two_story_house", "village_house")]
+                    terrenos_athena = [im for im in todos_bairro if im.get("tipo") in ("residential_allotment_land", "allotment_land")]
+                    casas = [im for im in casas if im.get("tipo") not in ("residential_allotment_land", "allotment_land")]
+                else:
+                    casas = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa")
+                    terrenos_athena = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="residential_allotment_land")
+                athena_imoveis = casas + terrenos_athena
             elif tipo_imovel == "apartment":
-                athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento", limit=30)
+                if bairro:
+                    todos_bairro = client.buscar_bairro(cidade_nome, bairro)
+                    athena_imoveis = [im for im in todos_bairro if im.get("tipo") == "apartamento"]
+                else:
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento")
             else:
-                athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, limit=30)
+                if bairro:
+                    athena_imoveis = client.buscar_bairro(cidade_nome, bairro)
+                else:
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome)
 
-            # Filtra por bairro se informado
-            if bairro and athena_imoveis:
-                bairro_lower = bairro.lower().strip()
-                filtrados_bairro = [
-                    im for im in athena_imoveis
-                    if bairro_lower in (im.get("bairro") or "").lower()
-                ]
-                if filtrados_bairro:
-                    athena_imoveis = filtrados_bairro
+            # Filtro de bairro já feito no SQL — não precisa filtrar de novo
+
+            # Filtro de bairro já feito no SQL quando bairro informado
+            if bairro and not athena_imoveis:
+                # Se busca por bairro no SQL não retornou nada, tenta cidade toda
+                logger.info(f"Athena: bairro '{bairro}' sem resultados, buscando cidade toda...")
+                if tipo_imovel == "house":
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa")
+                elif tipo_imovel == "apartment":
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento")
+                else:
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome)
 
             logger.info(f"Athena: {len(athena_imoveis)} imoveis encontrados")
 
