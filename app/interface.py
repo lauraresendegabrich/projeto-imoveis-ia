@@ -250,7 +250,9 @@ if submitted:
             fora = zona_resultado.get("fora_zona", [])
             tempo_zona = time.time() - t2z
             with log_area:
-                st.success(f"✅ Vizinhança validada — {len(fora)} imóveis descartados por estarem longe demais")
+                st.success(f"✅ Vizinhança validada — {len(fora)} imóveis descartados por estarem a mais de 700m do seu endereço")
+                if len(fora) > len(confirmados):
+                    st.caption("ℹ️ Muitos imóveis foram descartados porque estão longe. O sistema só usa imóveis próximos para garantir que o valor reflete a sua vizinhança.")
         except Exception as e:
             with log_area:
                 st.warning(f"⚠️ Validação geográfica indisponível — continuando sem ela ({type(e).__name__}: {e})")
@@ -313,6 +315,8 @@ if submitted:
             classif = resultado_ag4.get("resumo_scores", {}).get("classificacao_infraestrutura", "?")
             with log_area:
                 st.success(f"✅ Infraestrutura da região avaliada — Classificação: **{classif}**")
+                if classif == "insuficiente":
+                    st.caption("ℹ️ Classificação insuficiente indica pouco comércio, transporte ou serviços no raio de 1500m. Comum em bairros residenciais afastados.")
         except Exception as e:
             with log_area:
                 st.warning("⚠️ Agente Avaliador de Infraestrutura indisponível")
@@ -323,6 +327,8 @@ if submitted:
             total_analisados = resultado_ag3.get("resumo", {}).get("total_analisados", 0)
             with log_area:
                 st.success(f"✅ Qualidade dos imóveis analisada — **{total_analisados} imóveis avaliados**")
+                if total_analisados <= 3:
+                    st.caption("ℹ️ Poucos imóveis avaliados — o bairro tem poucos anúncios próximos ao seu endereço. O valor estimado pode ser menos preciso.")
         except Exception as e:
             with log_area:
                 st.warning("⚠️ Agente Analisador indisponível")
@@ -392,6 +398,7 @@ if submitted:
 
         # Zona homogênea
         with st.expander("📍 Zona Homogênea"):
+            st.caption("A zona homogênea é a vizinhança ao redor do seu imóvel com padrão construtivo parecido. Só imóveis dentro dessa zona são usados para calcular o valor.")
             zona = resultado.get("zona_homogenea", {})
             if zona:
                 zh = zona.get("zona_homogenea", {})
@@ -411,6 +418,7 @@ if submitted:
 
         # Detalhes
         with st.expander("📐 Detalhes do Cálculo"):
+            st.caption("Mostra como o valor foi calculado: o sistema separa o preço do terreno e da construção, usando a média dos imóveis da vizinhança (removendo valores extremos).")
             col_d, col_e = st.columns(2)
             with col_d:
                 st.markdown("**Terreno**")
@@ -429,17 +437,30 @@ if submitted:
 
             st.markdown("**Método:** " + preco.get("metodo_estatistico", "?"))
 
-        with st.expander("🏥 Infraestrutura (Agente 4)"):
+        with st.expander("🏥 Infraestrutura da Região"):
+            st.caption("Avalia o que existe perto do imóvel: escolas, hospitais, comércio, transporte público e lazer. Quanto mais infraestrutura, mais valorizado é o imóvel.")
             infra = resultado.get("infraestrutura", {})
             if infra:
                 scores = infra.get("scores", {})
                 resumo = infra.get("resumo_scores", {})
-                st.write(f"- Score final: **{scores.get('score_final', '?')}**")
+                score_infra = scores.get("score_final", 0)
+                st.write(f"- Score final: **{score_infra}**")
                 st.write(f"- Classificação: **{resumo.get('classificacao_infraestrutura', 'não disponível')}**")
                 st.write(f"- Perfil: {resumo.get('perfil_regiao') or 'não disponível'}")
                 st.write(f"- Impacto no valor: {resumo.get('impacto_estimado_no_valor') or 'não disponível'}")
                 tempo_reg = resumo.get('tempo_liquidez_regional')
                 st.write(f"- Tempo estimado de venda na região: {tempo_reg or 'não disponível'}")
+
+                # Explicação do score
+                if score_infra >= 0.70:
+                    st.success("Região com excelente infraestrutura — tem escolas, hospitais, comércio e transporte perto. Isso valoriza o imóvel.")
+                elif score_infra >= 0.50:
+                    st.info("Região com boa infraestrutura — tem o básico por perto, mas pode faltar algo em alguma categoria.")
+                elif score_infra >= 0.30:
+                    st.warning("Região com infraestrutura regular — poucas opções de serviços no entorno. Pode demorar mais pra vender.")
+                else:
+                    st.error("Região com infraestrutura insuficiente — pouco comércio, transporte ou serviços próximos. Comum em bairros residenciais afastados ou praias.")
+
                 pontos = resumo.get("pontos_fortes", [])
                 if pontos:
                     st.markdown("**Pontos fortes:**")
@@ -471,6 +492,7 @@ if submitted:
                 st.write("Análise qualitativa não disponível")
 
         with st.expander("📋 Comparáveis Encontrados"):
+            st.caption("Imóveis à venda na mesma região que foram usados como referência para calcular o valor do seu. Clique em 'ver anúncio' para conferir.")
             comparaveis = resultado.get("comparaveis", [])
             if comparaveis:
                 for i, comp in enumerate(comparaveis[:10], 1):

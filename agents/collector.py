@@ -712,14 +712,16 @@ def _coletar_ocrad(
     #   - casa:        20 itens
     #   - terreno:     10 itens
     #   - apartamento: 30 itens
+    total_items = sum(limite for _, limite in urls)
     payload = {
         "urls": [{"url": url, "maxItems": limite} for url, limite in urls],
         "max_retries_per_url": 2,
         "ignore_url_failures": True,
+        "maxPaidItems": total_items,
     }
 
     try:
-        endpoint = f"{APIFY_BASE_URL}/acts/{APIFY_ACTOR_OCRAD}/runs?token={token_ocrad}"
+        endpoint = f"{APIFY_BASE_URL}/acts/{APIFY_ACTOR_OCRAD}/runs?token={token_ocrad}&maxItems={total_items}"
         r = requests.post(endpoint, json=payload, timeout=30)
         r.raise_for_status()
         run_id = r.json().get("data", {}).get("id")
