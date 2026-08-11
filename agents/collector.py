@@ -934,6 +934,28 @@ def coletar_imoveis(
     combinados, escopo = _aplicar_escopo(combinados, rua=rua, bairro=bairro)
     logger.info(f"Escopo final: {escopo.upper()} | {len(combinados)} comparaveis")
 
+    # ── ENRIQUECIMENTO (fotos, description, publishedAt) ─────────────
+    # Enriquece todos os imóveis que ainda não têm fotos
+    sem_fotos = [i for i in combinados if not i.get("images")]
+    if sem_fotos:
+        logger.info(f"Enriquecendo {len(sem_fotos)} imoveis sem fotos...")
+        enriq_ok = 0
+        for im in sem_fotos:
+            url_im = im.get("url", "")
+            if not url_im or "vivareal" not in url_im:
+                continue
+            dados_pagina = _extrair_dados_pagina(url_im)
+            if dados_pagina.get("images"):
+                im["images"] = dados_pagina["images"]
+                im["imageCount"] = dados_pagina["imageCount"]
+                enriq_ok += 1
+            if dados_pagina.get("publishedAt") and not im.get("publishedAt"):
+                im["publishedAt"] = dados_pagina["publishedAt"]
+            if dados_pagina.get("description") and not im.get("description"):
+                im["description"] = dados_pagina["description"]
+            time.sleep(0.5)
+        logger.info(f"Enriquecimento: {enriq_ok}/{len(sem_fotos)} imoveis com fotos")
+
     # ── ORDENA ────────────────────────────────────────────────────────
     combinados = _ordenar_por_proximidade(combinados, rua=rua, bairro=bairro)
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Agente 3 - Analisador Qualitativo de Descricao e Imagens
 ==========================================================
 
@@ -158,9 +158,11 @@ Retorne exatamente este JSON:
             indices = [int(i * step) for i in range(8)]
             fotos_selecionadas = [images[i] for i in indices]
 
+        # Chamada principal: texto completo + 1 foto (a do meio)
         content = [{"type": "text", "text": prompt_texto}]
-        for url in fotos_selecionadas:
-            content.append({"type": "image_url", "image_url": {"url": url}})
+        if fotos_selecionadas:
+            foto_principal = fotos_selecionadas[len(fotos_selecionadas) // 2]
+            content.append({"type": "image_url", "image_url": {"url": foto_principal}})
 
         response = client.chat.completions.create(
             model="meta/llama-3.2-11b-vision-instruct",
@@ -170,6 +172,28 @@ Retorne exatamente este JSON:
         )
 
         texto_resp = response.choices[0].message.content or ""
+        fotos_analisadas = 1 if fotos_selecionadas else 0
+
+        # Chamadas extras com mais fotos (pergunta curta, 1 foto por vez)
+        if len(fotos_selecionadas) > 1:
+            import time
+            extras = [f for i, f in enumerate(fotos_selecionadas) if i != len(fotos_selecionadas) // 2]
+            for foto in extras[:3]:
+                time.sleep(1)
+                try:
+                    r2 = client.chat.completions.create(
+                        model="meta/llama-3.2-11b-vision-instruct",
+                        messages=[{"role": "user", "content": [
+                            {"type": "text", "text": "Em uma frase: estado de conservacao (novo/bom/regular/precisa_reforma) e diferenciais visiveis."},
+                            {"type": "image_url", "image_url": {"url": foto}}
+                        ]}],
+                        max_tokens=80,
+                        temperature=0,
+                    )
+                    texto_resp += f"\n[Foto extra: {r2.choices[0].message.content}]"
+                    fotos_analisadas += 1
+                except Exception:
+                    pass
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
             logger.warning("NVIDIA NIM nao retornou JSON valido")

@@ -64,12 +64,12 @@ with st.form("imovel_form"):
         banheiros = st.number_input("Banheiros", min_value=0, value=2)
         vagas = st.number_input("Vagas", min_value=0, value=1)
     with col5:
-        preco_anunciado = st.number_input("Preço anunciado (R$, opcional)", min_value=0, value=0)
+        preco_anunciado = st.number_input("Preço anunciado (R$, opcional)", min_value=0, value=0, step=1000)
         descricao = st.text_area("Descrição (opcional)", value="")
 
     st.subheader("📸 Fotos do imóvel (opcional)")
-    st.caption("Cole as URLs das fotos do imóvel (uma por linha). Melhora a análise de qualidade.")
-    fotos_texto = st.text_area("URLs das fotos", value="", height=100, placeholder="https://exemplo.com/foto1.jpg\nhttps://exemplo.com/foto2.jpg")
+    st.caption("Cole as URLs das fotos do imóvel (uma por linha, até 8 fotos). Quanto mais fotos, melhor a análise de qualidade.")
+    fotos_texto = st.text_area("URLs das fotos", value="", height=150)
 
     submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
 
@@ -123,7 +123,7 @@ if submitted:
         "neighborhood": bairro,
         "street": rua,
         "description": descricao or f"{tipo} com {area}m², {quartos} quartos, {banheiros} banheiros, {vagas} vagas - {bairro}, {cidade}/{estado}",
-        "images": [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()],
+        "images": [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()][:8],
     }
 
     if preco_anunciado > 0:
@@ -273,7 +273,7 @@ if submitted:
     tempo_estimado_ag34 = 180  # ~3 minutos
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        future_ag3 = executor.submit(analisar_comparaveis)
+        future_ag3 = executor.submit(analisar_comparaveis, imovel_alvo)
         future_ag4 = executor.submit(avaliar_infraestrutura)
 
         # Contador enquanto espera
@@ -448,12 +448,25 @@ if submitted:
             else:
                 st.write("Infraestrutura não disponível")
 
-        with st.expander("📝 Análise Qualitativa (Agente 3)"):
+        with st.expander("📝 Qualidade dos Imóveis Comparáveis"):
+            st.caption("Avalia o estado de conservação, padrão de acabamento e diferenciais dos imóveis da região (usando fotos e descrição dos anúncios).")
             ag3 = resultado.get("analise_qualitativa", {})
             if ag3:
                 resumo3 = ag3.get("resumo", {})
-                st.write(f"- Score médio: **{resumo3.get('score_qualitativo_medio', '?')}**")
-                st.write(f"- Imóveis analisados: {resumo3.get('total_analisados', '?')}")
+                score_med = resumo3.get("score_qualitativo_medio", 0)
+                total = resumo3.get("total_analisados", 0)
+                st.write(f"- Imóveis analisados: **{total}**")
+                st.write(f"- Score médio da região: **{score_med}**")
+
+                # Explica o motivo do score
+                if score_med >= 0.80:
+                    st.success("A região tem imóveis em excelente estado — alto padrão, bem conservados, com muitos diferenciais.")
+                elif score_med >= 0.60:
+                    st.info("A região tem imóveis em bom estado — padrão médio a alto, conservados, com alguns diferenciais.")
+                elif score_med >= 0.40:
+                    st.warning("A região tem imóveis em estado neutro — sem evidências claras de qualidade superior ou inferior. Pode indicar falta de fotos nos anúncios.")
+                else:
+                    st.error("A região tem imóveis em estado abaixo da média — conservação regular ou acabamento simples.")
             else:
                 st.write("Análise qualitativa não disponível")
 

@@ -692,7 +692,7 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
                 }
             ],
             temperature=0,
-            max_tokens=512,
+            max_tokens=1024,
         )
         texto = response.choices[0].message.content or ""
         logger.info(f"Groq Vision respondeu ({len(texto)} chars)")
@@ -707,11 +707,41 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
                     resultado["raio_metros"] = resultado["raio_sugerido_metros"]
                 return resultado
             except json.JSONDecodeError:
-                logger.warning("JSON invalido da Groq Vision")
-                return {"descricao_zona_homogenea": texto, "raio_metros": 700}
-        else:
-            logger.warning("Groq Vision nao retornou JSON valido")
-            return {"descricao_zona_homogenea": texto, "raio_metros": 700}
+                logger.warning("JSON truncado — extraindo campos do texto")
+
+        # Fallback: extrai campos do texto usando regex
+        resultado_fallback = {"descricao_zona_homogenea": texto[:500], "raio_metros": 700}
+
+        # Tenta extrair raio
+        raio_match = re.search(r'raio.*?(\d{3,4})\s*(?:metros|m)', texto)
+        if raio_match:
+            resultado_fallback["raio_metros"] = int(raio_match.group(1))
+
+        # Tenta extrair padrao construtivo
+        if "casas" in texto.lower() or "sobrados" in texto.lower():
+            resultado_fallback["padrao_construtivo"] = "casas"
+        elif "predios" in texto.lower() or "edificios" in texto.lower():
+            resultado_fallback["padrao_construtivo"] = "predios"
+        elif "misto" in texto.lower():
+            resultado_fallback["padrao_construtivo"] = "misto"
+
+        # Tenta extrair homogeneidade
+        if "homogeneidade" in texto.lower() and "alta" in texto.lower():
+            resultado_fallback["homogeneidade_visual"] = "alta"
+        elif "homogeneidade" in texto.lower() and "baixa" in texto.lower():
+            resultado_fallback["homogeneidade_visual"] = "baixa"
+        elif "homogeneidade" in texto.lower():
+            resultado_fallback["homogeneidade_visual"] = "media"
+
+        # Tenta extrair densidade
+        if "densidade" in texto.lower() and "alta" in texto.lower():
+            resultado_fallback["densidade_urbana"] = "alta"
+        elif "densidade" in texto.lower() and "baixa" in texto.lower():
+            resultado_fallback["densidade_urbana"] = "baixa"
+        elif "densidade" in texto.lower():
+            resultado_fallback["densidade_urbana"] = "media"
+
+        return resultado_fallback
 
     except Exception as e:
         logger.error(f"Groq Vision falhou: {e}")
