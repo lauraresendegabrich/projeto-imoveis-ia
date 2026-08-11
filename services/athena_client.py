@@ -108,13 +108,13 @@ class AthenaClient:
         sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
         return self.executar_query(sql)
 
-    def buscar_bairro(self, cidade: str, bairro: str, limit: int = 200) -> list[dict]:
-        """Busca anúncios de um bairro específico."""
-        sql = f"""
-            SELECT * FROM vivareal
-            WHERE cidade = '{cidade}' AND bairro = '{bairro}'
-            LIMIT {limit}
-        """
+    def buscar_bairro(self, cidade: str, bairro: str, tipo: str = None, limit: int = 200) -> list[dict]:
+        """Busca anúncios de um bairro específico, opcionalmente filtrado por tipo."""
+        conditions = [f"cidade = '{cidade}'", f"bairro = '{bairro}'"]
+        if tipo:
+            conditions.append(f"tipo = '{tipo}'")
+        where = " AND ".join(conditions)
+        sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
         return self.executar_query(sql)
 
     def estatisticas_cidade(self, cidade: str) -> dict:
