@@ -611,7 +611,7 @@ if "resultado" in st.session_state:
                 # Tabela com link incluso
                 import pandas as pd
                 dados_tabela = []
-                for comp in comparaveis[:15]:
+                for comp in comparaveis:
                     url_comp = comp.get("url", "")
                     link = f"[ver]({url_comp})" if url_comp else ""
                     dados_tabela.append({

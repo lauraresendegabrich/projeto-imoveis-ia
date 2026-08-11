@@ -92,7 +92,7 @@ class AthenaClient:
         limit: int = 200,
     ) -> list[dict]:
         """Busca anúncios de uma cidade com filtros opcionais."""
-        conditions = [f"cidade = '{cidade}'"]
+        conditions = [f"cidade = '{cidade}'", "finalidade = 'venda'"]
         if estado:
             conditions.append(f"estado = '{estado}'")
         if quartos_min:
@@ -110,7 +110,7 @@ class AthenaClient:
 
     def buscar_bairro(self, cidade: str, bairro: str, tipo: str = None, limit: int = 200) -> list[dict]:
         """Busca anúncios de um bairro específico, opcionalmente filtrado por tipo."""
-        conditions = [f"cidade = '{cidade}'", f"bairro = '{bairro}'"]
+        conditions = [f"cidade = '{cidade}'", f"bairro = '{bairro}'", "finalidade = 'venda'"]
         if tipo:
             conditions.append(f"tipo = '{tipo}'")
         where = " AND ".join(conditions)

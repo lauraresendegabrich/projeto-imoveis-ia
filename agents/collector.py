@@ -977,20 +977,9 @@ def coletar_imoveis(
 
             # Filtro de bairro já feito no SQL — não precisa filtrar de novo
 
-            # Filtro de bairro já feito no SQL quando bairro informado
-            if bairro and len(athena_imoveis) < 20:
-                # Se bairro retornou poucos, complementa com a cidade
-                logger.info(f"Athena: bairro '{bairro}' com poucos resultados ({len(athena_imoveis)}), complementando com cidade...")
-                if tipo_imovel == "house":
-                    extras = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa")
-                elif tipo_imovel == "apartment":
-                    extras = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento")
-                else:
-                    extras = client.buscar_cidade(cidade_nome, estado=estado_nome)
-                # Junta: bairro primeiro + cidade depois (sem duplicar)
-                urls_ja = {im.get("url") for im in athena_imoveis if im.get("url")}
-                extras_novos = [im for im in extras if im.get("url") not in urls_ja]
-                athena_imoveis = athena_imoveis + extras_novos
+            # Se bairro não retornou nada, avisa (não expande pra cidade)
+            if bairro and not athena_imoveis:
+                logger.info(f"Athena: bairro '{bairro}' sem resultados de venda")
 
             logger.info(f"Athena: {len(athena_imoveis)} imoveis encontrados")
 
