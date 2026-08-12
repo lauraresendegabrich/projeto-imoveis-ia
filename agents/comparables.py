@@ -2,134 +2,88 @@
 Agente 2 - Identificador de Imoveis Comparaveis
 =================================================
 
-COMO FUNCIONA:
-==============
+RESPONSABILIDADE:
+    Recebe os imoveis coletados pelo Agente 1 e identifica quais sao
+    realmente comparaveis usando score numerico + LLM. Depois valida
+    geograficamente com imagem de satelite.
 
-Recebe os imoveis coletados pelo Agente 1 (imoveis_completos.json) e as
-caracteristicas do imovel alvo. Identifica quais sao realmente comparaveis
-usando 2 tecnicas combinadas:
+ENTRADA:
+    - data/imoveis_completos_ag1.json (saida do Agente 1)
+    - imovel_alvo (dict com area, bedrooms, bathrooms, parkingSpaces, etc.)
 
-  ETAPA 1 — SIMILARIDADE NUMERICA (sem LLM, instantaneo):
-  ─────────────────────────────────────────────────────────
-    Calcula um score de 0.0 a 1.0 para cada imovel baseado em:
-      - area (m²)    — peso 30% (fator mais importante na avaliacao)
-      - quartos      — peso 25%
-      - preco/m²     — peso 20% (indica padrao construtivo similar)
-      - banheiros    — peso 15%
-      - vagas        — peso 10%
-
-    Formula: para cada campo, calcula a distancia relativa entre alvo e
-    candidato (|alvo - cand| / max), converte pra similaridade (1 - dist),
-    e pondera pelo peso. Score final = media ponderada.
-
-    Exemplo: alvo 170m² vs candidato 160m²
-      distancia = |170-160| / 170 = 0.059
-      similaridade = 1 - 0.059 = 0.941 (muito similar)
-
-  ETAPA 2 — CLUSTERING VIA LLM (Groq, llama-3.3-70b-versatile):
-  ──────────────────────────────────────────────────────────────
-    Envia apenas casas/apartamentos para a LLM (terrenos sao excluidos
-    antes — tipo incomparavel com imovel construido). Envia com:
-      - Caracteristicas do imovel alvo
-      - Caracteristicas completas de cada candidato (sem score, pra nao enviesar)
-      - Criterios de avaliacao imobiliaria
-
-    A LLM retorna:
-      - Cluster A ou B para cada imovel (similar vs nao similar)
-      - Ranking global de 1 a N (todos ranqueados)
-      - Justificativa em 1 frase para cada classificacao
-
-    A LLM entende nuances que o score numerico nao pega:
-      - Terreno vazio vs casa construida (tipo diferente)
-      - Casa com kitnets alugadas (uso diferente)
-      - Preco absurdo (R$ 8M vs R$ 1.4M = padrao incompativel)
-
-    NOTA: O score numerico NAO e enviado pra LLM pra evitar viés.
-    A LLM faz sua propria analise baseada nas caracteristicas.
+SAIDA:
+    - data/imoveis_comparaveis_ag2.json (ranking + clusters)
+    - data/zona_homogenea_ag2.json (confirmados na zona + coordenadas alvo)
+    - data/satelite_zona_homogenea_ag2.png (imagem com marcador)
 
 FLUXO COMPLETO:
-───────────────
-  1. Carrega imoveis_completos.json (saida do Agente 1, todos os tipos)
-  2. Separa terrenos (propertyType == "Terrenos") do restante:
-       → Terrenos NAO entram no ranking nem no clustering via LLM
-         (score numerico seria distorcido — sem quartos, banheiros, vagas)
-       → Terrenos SIM sao enviados para a Etapa 3 (zona homogenea),
-         pois a validacao geografica por distancia e relevante
-         independente do tipo de imovel
-  3. Calcula score numerico de similaridade so para casas/apartamentos
-  4. LLM (Groq) clusteriza e ranqueia apenas casas/apartamentos:
-       → Cluster A: similares ao alvo
-       → Cluster B: nao similares
-  5. Ordena: Cluster A primeiro (por ranking_llm), depois Cluster B
-  6. Terrenos sao adicionados ao final com cluster="terreno", ranking_llm=null
-  7. Salva em data/imoveis_comparaveis.json
+===============
 
-FALLBACK (se LLM falhar):
-─────────────────────────
-  Usa apenas o score numerico:
-    - Score >= 0.60 → Cluster A (similar)
-    - Score < 0.60  → Cluster B (nao similar)
-    - Ranking = posicao no score (1 = maior score)
+  ETAPA 1 — SEPARACAO DE TERRENOS
+  ────────────────────────────────
+    Terrenos (propertyType == "Terrenos") → separados, nao entram no ranking/LLM.
+    Casas/Apartamentos → seguem para score + clustering.
+    Terrenos vao para zona homogenea (validacao geografica e relevante).
+
+  ETAPA 2 — SCORE NUMERICO (sem LLM, instantaneo)
+  ─────────────────────────────────────────────────
+    Score 0.0-1.0 por distancia relativa:
+      - area (m²):    30%
+      - quartos:      25%
+      - preco/m²:     20%
+      - banheiros:    15%
+      - vagas:        10%
+
+    Formula: similaridade = 1 - |alvo - cand| / max(alvo, cand)
+    Score final = media ponderada. NAO e enviado pra LLM (evita vies).
+
+  ETAPA 3 — CLUSTERING VIA LLM (lotes de 20)
+  ────────────────────────────────────────────
+    Cadeia de fallback:
+      1. Groq (GROQ_API_KEY) — llama-3.3-70b-versatile
+      2. Groq (GROQ_API_KEY_2) — llama-3.3-70b-versatile (2a conta)
+      3. Gemini (GOOGLE_API_KEY) — gemini-2.5-flash
+      4. Fallback numerico — score >= 0.60 → A
+
+    Lotes de 20 candidatos (~6.000 tokens, metade do limite Groq).
+    Pausa de 5s entre lotes.
+    LLM retorna: cluster (A/B), ranking (1-N), justificativa.
+
+    Criterios eliminatorios: tipo incompativel, area >2x ou <½, uso diferente.
+    Preco NAO e eliminatorio. Dados ausentes NAO eliminam.
+
+  ETAPA 4 — ZONA HOMOGENEA (Google Maps + Groq qwen3.6-27b)
+  ──────────────────────────────────────────────────────────
+    1. Geocodifica endereco do alvo (Nominatim; fallback: Google Geocoding)
+    2. Google Maps Static API gera imagem hybrid 1280x1280 scale=2 com marcador
+    3. Groq (qwen3.6-27b) analisa a imagem e sugere raio (300-1500m)
+    4. Usa lat/lon do Athena direto (sem geocodificar de novo)
+    5. Calcula distancia Haversine de cada imovel ao alvo
+    6. Classifica: na_zona (ate raio) ou fora_zona (acima)
+    7. So envia Cluster A + terrenos (Cluster B nao vai)
+    8. Sem localizacao verificavel = fora_zona
+
+    SAIDA: data/zona_homogenea_ag2.json + data/satelite_zona_homogenea_ag2.png
+
+QUEM USA A SAIDA:
+─────────────────
+    Agente 3 → zona_homogenea_ag2.json (Cluster A + na_zona → analisa fotos)
+    Agente 4 → zona_homogenea_ag2.json (coordenadas_alvo → busca POIs)
+    Agente 5 → zona_homogenea_ag2.json (comparaveis_confirmados + terrenos → preco)
+    Interface → satelite_zona_homogenea_ag2.png (exibe pro usuario)
 
 DEPENDENCIAS:
 ─────────────
-  - Groq (gratis, 14.400 req/dia) — modelo llama-3.3-70b-versatile
-  - langchain-groq (pip install langchain-groq)
-  - Dados do Agente 1: data/imoveis_completos.json
-
-ENTRADA:
-────────
-  - imovel_alvo: dict com area, bedrooms, bathrooms, parkingSpaces,
-    pricePerSqm, propertyType, neighborhood, street, description
-  - data/imoveis_completos.json (gerado pelo Agente 1)
-
-SAIDA: data/imoveis_comparaveis.json
-──────
-  {
-    "imovel_alvo": {...},
-    "comparaveis": [
-      {
-        ...campos do imovel...,
-        "score_similaridade": 0.85,
-        "ranking_llm": 1,
-        "cluster": "A",              ← "A" (similar) ou "B" (nao similar)
-        "justificativa": "Area e quartos proximos, mesmo bairro..."
-      },
-      {
-        ...campos do terreno...,
-        "score_similaridade": null,  ← terrenos nao tem score
-        "ranking_llm": null,         ← terrenos nao foram ranqueados
-        "cluster": "terreno",        ← identificados separadamente
-        "justificativa": "Terreno excluido do ranking — tipo incomparavel..."
-      }
-    ],
-    "terrenos": [...],               ← lista separada so com os terrenos
-    "resumo": {
-      "total_analisados": 28,        ← so casas/apartamentos
-      "cluster_a": 14,
-      "cluster_b": 14,
-      "terrenos_excluidos": 17,      ← contagem dos terrenos separados
-      "metodo": "similaridade_numerica + clustering_llm"
-    }
-  }
-
-ETAPA 3 — ZONA HOMOGENEA (Google Maps + Groq Vision):
-──────────────────────────────────────────────────────
-  Valida geograficamente os imoveis usando imagem de satelite + IA de visao.
-  1. Geocodifica endereco do alvo (Nominatim → lat/lng; fallback: Google Geocoding API),
-  2. Google Maps Static API gera imagem hybrid  1280x1280 scale=2 com marcador
-  3. Groq Vision (Llama 4 Scout 17B) analisa a imagem e retorna:
-     tipo_regiao, uso_predominante, padrao_construtivo, densidade_urbana,
-     homogeneidade_visual, infraestrutura, elementos de valor,
-     raio_sugerido_metros, justificativa, confianca, limitacoes
-  4. Geocodifica cada imovel e calcula distancia (Haversine)
-  5. Classifica: na_zona (ate raio da LLM) ou fora_zona (acima)
-
-  SAIDA: data/zona_homogenea.json + data/satelite_zona_homogenea.png
+    - Groq (llama-3.3-70b-versatile) — clustering
+    - Groq (qwen3.6-27b) — analise visual
+    - Gemini (gemini-2.5-flash) — fallback clustering
+    - Google Maps Static API — imagem de satelite
+    - Nominatim / Google Geocoding — geocodificacao
+    - langchain-groq, google-generativeai, openai, requests
 
 COMO RODAR:
 ───────────
-  .venv/Scripts/python.exe -m tests.test_comparaveis
+    .venv/Scripts/python.exe tests/test_ag2_isolado.py
 """
 
 import os
@@ -330,17 +284,43 @@ RESPONDA SOMENTE com JSON valido, sem Markdown, explicacoes ou texto antes ou de
 
 def _chamar_llm(prompt: str) -> str:
     """
-    Chama a LLM (Groq) e retorna a resposta como texto.
-    Usa llama-3.3-70b-versatile — melhor modelo gratuito pra
-    tarefas de classificacao/clustering imobiliario.
-    Groq: ~6s por chamada, 100 req/min no free tier.
+    Chama a LLM com cadeia de fallback:
+      1. Groq (GROQ_API_KEY) — llama-3.3-70b-versatile
+      2. Groq (GROQ_API_KEY_2) — llama-3.3-70b-versatile (2a conta)
+      3. Gemini (GOOGLE_API_KEY) — gemini-2.5-flash
+      4. Se tudo falhar → retorna "" (fallback numerico)
     """
+    # Tentativa 1: Groq com chave principal
+    resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""))
+    if resposta:
+        return resposta
+
+    # Tentativa 2: Groq com chave secundaria
+    groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
+    if groq_key_2:
+        logger.info("  Groq 1 falhou — tentando GROQ_API_KEY_2...")
+        resposta = _chamar_groq(prompt, groq_key_2)
+        if resposta:
+            return resposta
+
+    # Tentativa 3: Gemini
+    google_key = os.getenv("GOOGLE_API_KEY", "")
+    if google_key:
+        logger.info("  Groq 1+2 falhou — tentando Gemini...")
+        resposta = _chamar_gemini(prompt, google_key)
+        if resposta:
+            return resposta
+
+    logger.warning("  Todas as LLMs falharam — usando fallback numerico")
+    return ""
+
+
+def _chamar_groq(prompt: str, api_key: str) -> str:
+    """Chama Groq (llama-3.3-70b-versatile). Retorna "" se falhar."""
+    if not api_key:
+        return ""
     try:
         from langchain_groq import ChatGroq
-        api_key = os.getenv("GROQ_API_KEY", "")
-        if not api_key:
-            logger.warning("GROQ_API_KEY nao configurada")
-            return ""
         llm = ChatGroq(
             model="llama-3.3-70b-versatile",
             api_key=api_key,
@@ -351,7 +331,22 @@ def _chamar_llm(prompt: str) -> str:
             return resposta.content
         return str(resposta)
     except Exception as e:
-        logger.error(f"Erro ao chamar LLM: {e}")
+        logger.warning(f"Groq falhou: {e}")
+        return ""
+
+
+def _chamar_gemini(prompt: str, api_key: str) -> str:
+    """Chama Gemini (gemini-2.5-flash). Retorna "" se falhar."""
+    if not api_key:
+        return ""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        resposta = model.generate_content(prompt)
+        return resposta.text or ""
+    except Exception as e:
+        logger.warning(f"Gemini falhou: {e}")
         return ""
 
 
@@ -507,10 +502,11 @@ def identificar_comparaveis(
                     f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
 
     # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Envia todos os candidatos para a LLM em lotes de 40
+    # Envia todos os candidatos para a LLM em lotes de 20
     # (llama-3.3-70b-versatile: limite de ~12.000 tokens/min no free tier)
-    # Cada lote e processado separadamente e os resultados sao combinados
-    TAMANHO_LOTE = 40
+    # Lotes de 20 = ~6.000 tokens (metade do limite, evita 413/429)
+    # Cadeia de fallback: Groq 1 → Groq 2 → Gemini → numerico
+    TAMANHO_LOTE = 20
 
     if usar_llm:
         todos_classificados = []
@@ -534,7 +530,7 @@ def identificar_comparaveis(
             # Pausa entre lotes para nao estourar o rate limit de tokens/min
             if num_lote < len(lotes):
                 import time
-                time.sleep(3)
+                time.sleep(5)
 
         candidatos_llm = todos_classificados
     else:
@@ -640,8 +636,8 @@ def _obter_imagem_satelite(endereco: str, lat: float = None, lon: float = None, 
 
 def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     """
-    Envia imagem de satelite pro Groq Vision (Llama 4 Scout 17B)
-    e pede pra analisar a regiao e identificar a zona homogenea.
+    Envia imagem de satelite pro Groq (qwen3.6-27b) para analise visual
+    e identificacao da zona homogenea.
 
     Foca nos tres fatores prioritarios para definir a zona:
       - Padrao construtivo aparente (casas, sobrados, predios, misto)
@@ -661,7 +657,7 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
 
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
     if not nvidia_key:
-        logger.warning("NVIDIA_API_KEY nao configurada — usando raio padrao")
+        logger.warning("NVIDIA_API_KEY nao configurada — pulando analise visual")
         return {"raio_metros": 500}
 
     # Converte pra JPEG com qualidade 85 (mantém resolução original 1280x1280)
@@ -679,8 +675,7 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
         img_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
         img_mime = "image/png"
 
-    # Removido — Groq Vision nao esta mais disponivel
-    # Agora usa NVIDIA NIM (mistral-small-3.1-24b-instruct)
+    # Usa Groq (qwen3.6-27b) para analise visual da imagem de satelite
 
     prompt = f"""Você é um assistente especializado em análise visual urbana para apoio à avaliação imobiliária.
 Sua tarefa é analisar uma imagem de satélite ou mapa híbrido centrada em um imóvel alvo e sugerir um raio para representar aproximadamente sua ZONA HOMOGÊNEA.
@@ -987,7 +982,7 @@ def analisar_zona_homogenea(
     FLUXO:
       1. Geocodificacao do endereco alvo (Nominatim → lat/lng)
       2. Geracao da imagem da regiao (Google Maps Static API, hybrid, scale=2, marcador)
-      3. Analise visual da regiao (Groq Vision, Llama 4 Scout)
+      3. Analise visual da regiao (Groq, qwen3.6-27b)
       4. Definicao da zona de analise (raio sugerido pela LLM, minimo 400m)
       5. Geocoding de cada imovel (Nominatim) + calculo de distancia (Haversine)
       6. Classificacao: na_zona ou fora_zona
@@ -1016,7 +1011,7 @@ def analisar_zona_homogenea(
       - imagem_satelite: caminho do PNG salvo
     """
     logger.info("=" * 55)
-    logger.info("ZONA HOMOGENEA: Google Maps + Groq Vision")
+    logger.info("ZONA HOMOGENEA: Google Maps + Groq (qwen3.6-27b)")
     logger.info("=" * 55)
 
     # ── 1. GEOCODIFICACAO DO ALVO ─────────────────────────────────
@@ -1047,7 +1042,7 @@ def analisar_zona_homogenea(
     # ── 3. ANALISE VISUAL VIA GROQ VISION ─────────────────────────
     zona = {}
     if imagem:
-        logger.info("Enviando imagem para Groq Vision (Llama 4 Scout)...")
+        logger.info("Enviando imagem para Groq (qwen3.6-27b)...")
         zona = _analisar_zona_homogenea(imagem, endereco_alvo)
         logger.info(f"Zona: padrao={zona.get('padrao_construtivo','?')} | "
                     f"homogeneidade={zona.get('homogeneidade_visual','?')} | "
