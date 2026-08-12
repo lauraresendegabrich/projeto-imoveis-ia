@@ -698,8 +698,8 @@ def _classificar_infraestrutura(score: float) -> str:
 
 def _analisar_infra_llm(pois_por_faixa: dict, scores: dict, endereco: str, transporte: dict) -> dict:
     """
-    Envia resumo dos POIs por faixa para o Groq e retorna analise estruturada.
-    Usa classificacoes expandidas de perfil e impacto.
+    Envia resumo dos POIs e scores para o Groq e retorna interpretacao qualitativa.
+    A LLM NAO modifica scores — apenas interpreta os resultados ja calculados.
     """
     try:
         from langchain_groq import ChatGroq
@@ -710,82 +710,121 @@ def _analisar_infra_llm(pois_por_faixa: dict, scores: dict, endereco: str, trans
             logger.warning("GROQ_API_KEY nao configurada")
             return {}
 
-        # Monta resumo por faixa
-        resumo = ""
+        # Monta resumo de POIs por faixa
+        resumo_pois = ""
         for _, _, nome_faixa in FAIXAS:
             cats = pois_por_faixa.get(nome_faixa, {})
             total = sum(len(v) for v in cats.values())
-            resumo += f"\n\n{nome_faixa} ({total} POIs):"
+            resumo_pois += f"\n\n{nome_faixa} ({total} POIs):"
             for cat, pois in cats.items():
                 if cat == "transporte":
-                    continue  # transporte tratado separadamente
+                    continue
                 if pois:
                     nomes = [p["nome"] for p in pois[:4]]
-                    resumo += f"\n  {cat} ({len(pois)}): {', '.join(nomes)}"
+                    resumo_pois += f"\n  {cat} ({len(pois)}): {', '.join(nomes)}"
 
-        # Resumo de transporte expandido
+        # Monta resumo de transporte
         status_transp = transporte.get("status", "dados_insuficientes")
         paradas = transporte.get("paradas", [])
         estacoes = transporte.get("estacoes", [])
-        rotas = transporte.get("rotas", [])
-        resumo_transp = f"\n\nTRANSPORTE PUBLICO (status: {status_transp}):"
+        resumo_transporte = f"Status: {status_transp}"
         if paradas:
             nomes_p = [f"{p['nome']} ({p['distancia_metros']}m)" for p in paradas[:4]]
-            resumo_transp += f"\n  paradas ({len(paradas)}): {', '.join(nomes_p)}"
+            resumo_transporte += f"\n  paradas ({len(paradas)}): {', '.join(nomes_p)}"
         if estacoes:
             nomes_e = [f"{e['nome']} ({e['distancia_metros']}m)" for e in estacoes[:3]]
-            resumo_transp += f"\n  estacoes ({len(estacoes)}): {', '.join(nomes_e)}"
-        if rotas:
-            nomes_r = [r["nome"] for r in rotas[:4]]
-            resumo_transp += f"\n  rotas ({len(rotas)}): {', '.join(nomes_r)}"
-        if not paradas and not estacoes and not rotas:
-            resumo_transp += "\n  Nenhum dado encontrado — possivel sub-representacao no OSM"
+            resumo_transporte += f"\n  estacoes ({len(estacoes)}): {', '.join(nomes_e)}"
+        if not paradas and not estacoes:
+            resumo_transporte += "\n  Nenhum dado de transporte encontrado"
 
-        scores_sem_meta = {k: v for k, v in scores.items()
-                          if k not in ("score_final", "transporte_dados_insuficientes", "transporte_status")}
+        # Extrai scores por categoria (sem metadados)
+        scores_categoria = scores.get("scores_categoria", {})
+        score_final = scores.get("score_final", 0.5)
+        classificacao = _classificar_infraestrutura(score_final)
 
-        classificacao = _classificar_infraestrutura(scores.get("score_final", 0.5))
+        scores_categoria_json = json.dumps(scores_categoria, ensure_ascii=False, indent=2)
 
-        prompt = f"""Voce e um avaliador imobiliario especializado em analise urbana. Analise a infraestrutura do entorno do imovel e responda APENAS com um JSON valido.
+        prompt = f"""Voce e um avaliador imobiliario especializado em interpretacao de infraestrutura urbana.
+Sua tarefa e interpretar os resultados JA CALCULADOS pelo Agente 4 para o entorno de um imovel.
 
+IMPORTANTE:
+Os scores numericos ja foram calculados de forma deterministica pelo sistema a partir de dados do OpenStreetMap.
+Voce NAO deve:
+- recalcular scores
+- modificar scores
+- estimar preco do imovel
+- estimar percentual de valorizacao
+- estimar tempo de venda
+- estimar liquidez em dias
+- inventar POIs que nao estejam nos dados fornecidos
+- utilizar conhecimento externo sobre o endereco ou bairro
+
+Analise exclusivamente os dados fornecidos.
+
+IMOVEL
 Endereco: {endereco}
 
-Pontos de interesse por faixa de distancia:{resumo}
-{resumo_transp}
+PONTOS DE INTERESSE
+POIs encontrados por faixa de distancia:{resumo_pois}
 
-Scores calculados por categoria:
-{json.dumps(scores_sem_meta, ensure_ascii=False, indent=2)}
+Resumo de transporte:
+{resumo_transporte}
 
-Score final: {scores.get('score_final', 0.5)}
+SCORES CALCULADOS
+Scores por categoria:
+{scores_categoria_json}
+
+Score final de infraestrutura: {score_final}
 Classificacao da infraestrutura: {classificacao}
 
-REGRAS OBRIGATORIAS:
+As categorias utilizadas sao: comercio, educacao, saude_basica, transporte, lazer, hospital, equipamentos_regionais.
 
-1. perfil_regiao:
-   - Se score >= 0.70 com alta pontuacao em educacao, saude, hospital e grandes equipamentos: "regiao_mista_com_alta_infraestrutura"
-   - Se score >= 0.70 predominantemente residencial: "residencial_com_alta_infraestrutura"
-   - Se score 0.50-0.69 com servicos essenciais: "residencial_servida"
-   - Se score < 0.50: "regiao_pouco_servida"
+OBJETIVO DA INTERPRETACAO
+Produza somente uma interpretacao qualitativa dos resultados ja calculados.
 
-2. impacto_estimado_no_valor:
-   - Mesmo com score alto, se comercio ou lazer forem baixos: "positivo_moderado" (nao "positivo_forte")
-   - "positivo_forte" so se TODAS as categorias tiverem score >= 0.70
-   - Opcoes: negativo_forte | negativo_moderado | neutro | positivo_moderado | positivo_forte
+1. PERFIL_INFRAESTRUTURA
+Escolha EXATAMENTE uma opcao:
+- classificacao "excelente" -> "infraestrutura_muito_alta"
+- classificacao "boa" -> "infraestrutura_alta"
+- classificacao "moderada" -> "infraestrutura_moderada"
+- classificacao "basica" -> "infraestrutura_basica"
+- classificacao "insuficiente" -> "infraestrutura_insuficiente"
 
-3. limitacoes:
-   - SEMPRE incluir: "Nenhuma limitacao critica foi identificada no teste, mas os resultados dependem da completude dos dados disponiveis no OpenStreetMap."
-   - Adicionar outras limitacoes especificas se identificadas
+2. PONTOS_FORTES
+Liste categorias com score >= 0.70 (maximo 4). Se nenhuma, retorne [].
 
-Responda exatamente neste formato JSON:
+3. PONTOS_DE_ATENCAO
+Liste categorias com score < 0.50 (maximo 4). Se nenhuma, retorne [].
+Nao afirme que o servico "nao existe". Prefira "baixa disponibilidade identificada".
+
+4. IMPACTO_INFRAESTRUTURA
+Escolha EXATAMENTE uma opcao baseada no score_final:
+- score_final >= 0.85: "muito_positivo"
+- score_final >= 0.70 e < 0.85: "positivo"
+- score_final >= 0.50 e < 0.70: "neutro"
+- score_final >= 0.30 e < 0.50: "negativo"
+- score_final < 0.30: "muito_negativo"
+
+5. LIMITACOES
+Sempre inclua: "Os resultados dependem da cobertura, atualizacao e completude dos dados disponiveis no OpenStreetMap."
+Maximo de 2 limitacoes.
+
+6. JUSTIFICATIVA
+Explicacao curta e objetiva. Nao estime preco, tempo de venda ou valorizacao.
+
+7. CONCLUSAO
+Frase curta resumindo a avaliacao da infraestrutura. Nao mencione tempo de venda ou preco.
+
+RESPONDA SOMENTE COM JSON VALIDO. Nao escreva Markdown. Nao escreva texto antes ou depois.
+
 {{
-  "perfil_regiao": "...",
-  "pontos_fortes": ["lista dos principais diferenciais de infraestrutura"],
-  "pontos_de_atencao": ["categorias com pontuacao mais baixa"],
-  "limitacoes": ["Nenhuma limitacao critica foi identificada no teste, mas os resultados dependem da completude dos dados disponiveis no OpenStreetMap."],
-  "impacto_estimado_no_valor": "...",
-  "tempo_liquidez_regional": "estimativa do tempo medio de venda de um imovel nesta regiao (ex: 30 a 60 dias, 60 a 90 dias, 90 a 150 dias, acima de 150 dias). Considere a infraestrutura, acessibilidade e atratividade da regiao.",
-  "justificativa": "paragrafo explicando o impacto considerando as tres faixas, os pontos fortes, os pontos de atencao e as limitacoes do OSM",
-  "conclusao": "O Agente 4 utiliza OpenStreetMap, Nominatim e osmnx para identificar pontos de interesse no entorno do imovel. A analise multirraio considera educacao, saude, hospitais, transporte, comercio, lazer e grandes equipamentos urbanos. [complete com o resultado especifico deste imovel]"
+  "perfil_infraestrutura": "...",
+  "pontos_fortes": [],
+  "pontos_de_atencao": [],
+  "impacto_infraestrutura": "muito_positivo | positivo | neutro | negativo | muito_negativo",
+  "limitacoes": [],
+  "justificativa": "",
+  "conclusao": ""
 }}"""
 
         llm = ChatGroq(model="llama-3.1-8b-instant", api_key=api_key, temperature=0)
@@ -799,19 +838,18 @@ Responda exatamente neste formato JSON:
 
         data = json.loads(m.group(0))
 
-        # Força regra: positivo_forte só se TODAS as categorias >= 0.70
-        scores_cat = {k: v for k, v in scores.items()
-                      if k not in ("score_final", "transporte_dados_insuficientes", "transporte_status")}
-        todas_altas = all(v >= 0.70 for v in scores_cat.values())
-        if not todas_altas and data.get("impacto_estimado_no_valor") == "positivo_forte":
-            data["impacto_estimado_no_valor"] = "positivo_moderado"
+        # Validacao: impacto_infraestrutura deve ser coerente com score_final
+        impacto_valido = {"muito_positivo", "positivo", "neutro", "negativo", "muito_negativo"}
+        if data.get("impacto_infraestrutura") not in impacto_valido:
+            data["impacto_infraestrutura"] = "neutro"
 
         # Garante que limitacoes sempre tem o texto padrao
         limitacoes = data.get("limitacoes", [])
-        texto_padrao = "Nenhuma limitacao critica foi identificada no teste, mas os resultados dependem da completude dos dados disponiveis no OpenStreetMap."
-        if not any("completude" in str(l) for l in limitacoes):
-            limitacoes = [texto_padrao] + [l for l in limitacoes if l != texto_padrao]
+        texto_padrao = "Os resultados dependem da cobertura, atualizacao e completude dos dados disponiveis no OpenStreetMap."
+        if not any("cobertura" in str(l) or "completude" in str(l) for l in limitacoes):
+            limitacoes = [texto_padrao] + limitacoes
             data["limitacoes"] = limitacoes
+
         return data
 
     except Exception as e:
@@ -950,8 +988,8 @@ def avaliar_infraestrutura(
         "resumo_scores": {
             "score_final":                  scores.get("score_final"),
             "classificacao_infraestrutura": classificacao,
-            "perfil_regiao":                analise.get("perfil_regiao"),
-            "impacto_infraestrutura":       analise.get("impacto_infraestrutura", analise.get("impacto_estimado_no_valor")),
+            "perfil_infraestrutura":        analise.get("perfil_infraestrutura"),
+            "impacto_infraestrutura":       analise.get("impacto_infraestrutura"),
             "pontos_fortes":                analise.get("pontos_fortes", []),
             "pontos_de_atencao":            analise.get("pontos_de_atencao", []),
             "limitacoes":                   analise.get("limitacoes", []),
