@@ -2,30 +2,72 @@
 Agente 3 - Analisador Qualitativo de Descricao e Imagens
 ==========================================================
 
-ARQUITETURA:
-    Titulo + Descricao + 8 Fotos espaçadas -> NVIDIA NIM (uma unica chamada) -> Python (valida + calcula) -> JSON
+RESPONSABILIDADE:
+    Analisa fotos e descricao dos imoveis comparaveis (Cluster A + na_zona)
+    para determinar estado de conservacao, padrao de acabamento e score qualitativo.
+    Usa modelos de visao multimodal (texto + imagens em uma unica chamada).
 
-MODELO: meta/llama-3.2-11b-vision-instruct via NVIDIA NIM
-    Multimodal (texto + imagem). Gratuito, sem limite diario. ~11s por imovel.
-    Limite: 8 imagens por prompt. Fotos selecionadas de forma espaçada.
+ENTRADA:
+    - data/zona_homogenea_ag2.json (fonte principal — Cluster A + na_zona)
+    - data/imoveis_comparaveis_ag2.json (fallback — Cluster A sem filtro zona)
+
+SAIDA:
+    - data/imoveis_analisados_ag3.json
 
 FLUXO:
-    1. Carrega zona_homogenea_ag2.json (Agente 2 - Etapa 3)
+    1. Carrega zona_homogenea_ag2.json (Agente 2 - Etapa 4)
     2. Filtra: cluster="A" E classificacao_zona="na_zona"
     3. Para cada imovel:
-         a. Monta prompt com titulo, descricao e campos estruturados
-         b. Seleciona ate 8 fotos espaçadas uniformemente (cobre mais ambientes)
-         c. NVIDIA NIM analisa texto + fotos juntos e retorna JSON
-         d. Python valida, normaliza vocabulario e calcula score
+         a. Seleciona ate 8 fotos espacadas uniformemente
+         b. Monta prompt com titulo, descricao, campos estruturados e fotos
+         c. LLM multimodal analisa texto + fotos juntos e retorna JSON
+         d. Python valida, normaliza vocabulario e calcula score deterministico
     4. Imovel alvo: analisado separadamente
     5. Salva em data/imoveis_analisados_ag3.json
 
-ENTRADA:
-    data/zona_homogenea_ag2.json
-    data/imoveis_comparaveis_ag2.json (imovel alvo)
+CADEIA DE FALLBACK (LLMs):
+    1. Gemini 2.5 Flash (GOOGLE_API_KEY) — multimodal, ate 8 fotos por chamada
+    2. Groq qwen3.6-27b (GROQ_API_KEY) — multimodal, ate 5 fotos por chamada
+    3. NVIDIA NIM llama-3.2-11b-vision (NVIDIA_API_KEY) — 1 foto por chamada
 
-SAIDA:
-    data/imoveis_analisados_ag3.json
+CALCULO DO SCORE (deterministico, Python):
+    Base: 0.50
+    + ajuste conservacao: novo(+0.20), reformado(+0.15), bom(+0.10), regular(-0.05), precisa_reforma(-0.25)
+    + ajuste padrao: alto_padrao(+0.15), medio(+0.07), simples(-0.03)
+    + bonus positivos: acabamento diferenciado(+0.05), varanda gourmet(+0.04), etc. (max +0.15)
+    + penalizacoes: documentacao_irregular(-0.20), infiltracao(-0.15), etc. (max -0.30)
+    Score final: clamp [0.0, 1.0]
+
+CLASSIFICACAO:
+    < 0.40 → desfavoravel
+    0.40-0.60 → neutro
+    0.60-0.80 → favoravel
+    >= 0.80 → muito_favoravel
+
+REGRA NEUTRA:
+    Se estado=desconhecido E padrao=desconhecido E sem negativos E confianca=baixa:
+    → score = 0.50 (neutro, nao penaliza nem bonifica sem evidencia)
+
+SAIDA POR IMOVEL:
+    - estado_conservacao (novo/reformado/bom/regular/precisa_reforma/desconhecido)
+    - padrao_acabamento (alto_padrao/medio/simples/desconhecido)
+    - pontos_positivos (lista)
+    - pontos_negativos (lista)
+    - qualidade_imagens (boa/razoavel/ruim)
+    - confianca_extracao (alta/media/baixa)
+    - evidencias (conservacao: [], acabamento: [])
+    - score_qualitativo (0.0-1.0)
+    - classificacao_qualitativa (desfavoravel/neutro/favoravel/muito_favoravel)
+
+QUEM USA A SAIDA:
+    Agente 5 → padrao_acabamento do alvo (medio/alto/baixo)
+    Agente 5 → score_qualitativo (liquidez experimental)
+    Interface → exibe estado, padrao, score pro usuario
+
+DEPENDENCIAS:
+    - google-generativeai (Gemini 2.5 Flash)
+    - groq (qwen3.6-27b)
+    - openai (NVIDIA NIM)
 
 COMO RODAR:
     .venv/Scripts/python.exe -m tests.test_text_analyzer

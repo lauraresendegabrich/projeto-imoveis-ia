@@ -1,199 +1,220 @@
-# Agente 3 — Analisador Qualitativo de Descrição e Imagens
+# Agente 3 — Analisador Qualitativo
 
 ## Objetivo
 
-Analisar a descrição e as fotos dos imóveis comparáveis usando LLM multimodal, extraindo características qualitativas como estado de conservação e diferenciais, e convertendo em um score qualitativo e fator de impacto no valor do imóvel.
-
----
-
-## Arquitetura Final
-
-```
-Título + Descrição + 8 fotos espaçadas → LLM Vision (uma chamada) → Python (valida + calcula) → JSON
-```
-
-O LLM analisa texto e imagens juntos em uma única chamada. O Python valida, normaliza e calcula o score.
-
----
-
-## Modelo
-
-| Parâmetro | Valor |
-|---|---|
-| Provider | NVIDIA NIM |
-| Modelo | `mistralai/ministral-14b-instruct-2512` |
-| Tipo | Multimodal (texto + imagem) |
-| Limite de imagens | 8 por prompt |
-| Custo | Gratuito, sem limite diário |
-| Velocidade | ~11s por imóvel |
-| Base URL | `https://integrate.api.nvidia.com/v1` |
-| Configuração | `NVIDIA_API_KEY` no `.env` |
-
----
-
-## Histórico de Decisões
-
-### 1. Groq Vision (Llama 4 Scout 17B) — descartado
-**Resultado:** funcionou bem com 3 fotos por imóvel (~3s). Porém, limite diário de 500K tokens esgotava com ~10 imóveis.
-**Decisão:** descartado por limite diário insuficiente.
-
-### 2. Google Gemini (gemini-2.5-flash) — descartado
-**Resultado:** aceita muitas imagens, mas quota diária de apenas 20 requests para o modelo 2.5-flash. Esgotava antes de processar todos os imóveis.
-**Decisão:** descartado por limite diário insuficiente.
-
-### 3. NVIDIA NIM (mistral-large-675b) — descartado
-**Resultado:** funcionou sem limite diário, mas cada chamada demorava ~90s (modelo muito grande).
-**Decisão:** descartado por velocidade.
-
-### 4. NVIDIA NIM (ministral-14b) — adotado
-**Resultado:** ~11s por imóvel, sem limite diário, aceita até 8 imagens por prompt, gratuito.
-**Decisão:** adotado como modelo principal.
-
-### 5. Seleção de fotos espaçadas
-**Problema:** o limite de 8 imagens por prompt não cobre todas as fotos (média de 20 por imóvel).
-**Solução:** selecionar fotos distribuídas uniformemente ao longo do anúncio (1ª, 4ª, 7ª, 10ª...) para cobrir fachada, sala, quartos, banheiro, cozinha e área externa.
-
-### 6. Justificativa única
-**Problema:** três campos separados (justificativa_score, justificativa_classificacao, justificativa_fator) eram redundantes.
-**Solução:** um único campo `justificativa` que resume tudo em uma frase.
-
-### 7. Renomeação: analise_textual → analise_qualitativa
-**Motivo:** o agente agora analisa texto + fotos, não apenas texto.
-
-### 8. Renomeação: fator_valor_textual → fator_valor_qualitativo
-**Motivo:** consistência com a mudança acima.
-
----
-
-## Fluxo Completo
-
-```
-1. Carrega zona_homogenea_ag2.json (Agente 2 — Etapa 3)
-   → Filtra: cluster="A" E classificacao_zona="na_zona"
-
-2. Para cada imóvel filtrado:
-   a. Monta prompt com título, descrição e campos estruturados
-   b. Seleciona até 8 fotos espaçadas uniformemente
-   c. Envia tudo junto para NVIDIA NIM (ministral-14b)
-   d. LLM retorna JSON com estado, padrão, pontos positivos/negativos
-   e. Python normaliza vocabulário
-   f. Python calcula score qualitativo
-   g. Python aplica regra de neutro se necessário
-   h. Python gera justificativa
-
-3. Imóvel alvo: analisado separadamente (de imoveis_comparaveis_ag2.json)
-
-4. Salva em data/imoveis_analisados_ag3.json
-```
-
----
-
-## Cálculo do Score
-
-Base: **0.50** (neutro)
-
-| Ajuste | Valor |
-|---|---|
-| estado = novo | +0.20 |
-| estado = reformado | +0.15 |
-| estado = bom | +0.10 |
-| estado = regular | −0.08 |
-| estado = precisa_reforma | −0.25 |
-| padrao = alto_padrao | +0.15 |
-| padrao = medio | +0.08 |
-| cada ponto positivo | +0.03 (máx +0.20) |
-| infiltração / umidade | −0.15 |
-| documentação irregular | −0.20 |
-| outros negativos | −0.08 cada |
-
-**Regra de segurança:** estado=desconhecido + padrao=desconhecido + sem negativos + confiança=baixa → score=0.50, neutro, fator=0.00
-
----
-
-## Classificação
-
-| Score | Classificação | Significado |
-|---|---|---|
-| 0.81–1.00 | muito_favoravel | Imóvel com qualidade muito acima da média |
-| 0.61–0.80 | favoravel | Imóvel com qualidade acima da média |
-| 0.40–0.60 | neutro | Sem evidência suficiente ou qualidade média |
-| 0.00–0.39 | desfavoravel | Imóvel com problemas identificados |
-
----
-
-## Schema de Saída (por imóvel)
-
-```json
-{
-  "id_imovel": "...",
-  "status": "ok",
-  "estado_conservacao": "novo",
-  "padrao_acabamento": "alto_padrao",
-  "pontos_positivos": ["suite", "vagas de garagem", "churrasqueira", "porcelanato"],
-  "pontos_negativos": [],
-  "confianca_extracao": "alta",
-  "fotos_analisadas": 8,
-  "total_fotos_disponiveis": 26,
-  "observacoes": [],
-  "scores": {"score_qualitativo": 1.0},
-  "classificacao_qualitativa": "muito_favoravel",
-  "justificativa": "estado de conservacao: novo. padrao de acabamento: alto_padrao. 10 pontos positivos identificados. score qualitativo 1.0 -> classificacao muito_favoravel.",
-  "analise_qualitativa": "Estado: novo. Padrao: alto_padrao. Positivos: suite, vagas de garagem, churrasqueira.",
-  "limitacoes": [
-    "A analise depende da qualidade e completude da descricao e das fotos do anuncio.",
-    "As informacoes extraidas devem ser validadas por vistoria ou fonte oficial."
-  ]
-}
-```
-
----
-
-## Resultado dos Testes (Centro de Itajaí/SC — maio 2026)
-
-```
-Provider: NVIDIA NIM (ministral-14b-instruct-2512)
-Imóveis analisados: 19
-Tempo total: ~5 minutos (~11s por imóvel)
-Fotos por imóvel: até 8 (espaçadas)
-
-Score qualitativo médio: 0.807
-
-Exemplos:
-  #2  Rua Jorge Mattos (11 fotos)     → novo, alto_padrao → score=1.0, muito_favoravel
-  #4  Rua Juvenal Garcia (6 fotos)    → novo, alto_padrao → score=1.0, muito_favoravel
-  #9  Centro (27 fotos)               → novo, alto_padrao → score=1.0, muito_favoravel
-  #1  Rua Franklin (26 fotos)         → bom, medio       → score=0.88, muito_favoravel
-  #10 Centro (24 fotos)               → regular, medio   → score=0.03, desfavoravel
-  Alvo (sem fotos)                    → desconhecido     → score=0.50, neutro
-```
+Analisa fotos e descrição dos imóveis comparáveis para determinar estado de conservação, padrão de acabamento e score qualitativo. Usa modelos de visão multimodal (texto + imagens numa única chamada).
 
 ---
 
 ## Entrada
 
-| Parâmetro | Tipo | Descrição |
-|---|---|---|
-| `arquivo_entrada` | str | `zona_homogenea_ag2.json` (default) |
-| `arquivo_saida` | str | `imoveis_analisados_ag3.json` (default) |
+- `data/zona_homogenea_ag2.json` — pega imóveis com `cluster="A"` E `classificacao_zona="na_zona"`
+- Fallback: `data/imoveis_comparaveis_ag2.json` — pega Cluster A sem filtro de zona
+
+---
+
+## Fluxo
+
+```
+1. Carrega zona_homogenea_ag2.json
+2. Filtra: cluster="A" E classificacao_zona="na_zona"
+3. Para cada imóvel:
+     a. Seleciona até 8 fotos espaçadas uniformemente
+     b. Monta prompt (título + descrição + campos + fotos)
+     c. LLM multimodal analisa → retorna JSON
+     d. Python normaliza + calcula score determinístico
+4. Imóvel alvo: analisado separadamente
+5. Salva em data/imoveis_analisados_ag3.json
+```
+
+---
+
+## Cadeia de Fallback (LLMs)
+
+| Prioridade | Modelo | Provider | Fotos por chamada |
+|---|---|---|---|
+| 1ª | gemini-2.5-flash | Google (GOOGLE_API_KEY) | até 8 |
+| 2ª | qwen3.6-27b | Groq (GROQ_API_KEY) | até 5 |
+| 3ª | llama-3.2-11b-vision | NVIDIA NIM (NVIDIA_API_KEY) | 1 por vez |
+
+Se Gemini falhar (500, timeout, etc.) → tenta Groq → tenta NVIDIA → se tudo falhar → retorna score neutro 0.50.
+
+---
+
+## O que a LLM analisa
+
+A LLM recebe título, descrição, dados estruturados e fotos e retorna:
+
+| Campo | Valores possíveis |
+|-------|-------------------|
+| estado_conservacao | novo, reformado, bom, regular, precisa_reforma, desconhecido |
+| padrao_acabamento | alto_padrao, medio, simples, desconhecido |
+| pontos_positivos | lista de strings |
+| pontos_negativos | lista de strings |
+| qualidade_imagens | boa, razoavel, ruim |
+| confianca_extracao | alta, media, baixa |
+| evidencias | {conservacao: [...], acabamento: [...]} |
+
+### Regras do prompt
+
+- Usa SOMENTE informações visíveis nas fotos ou explícitas na descrição
+- NÃO inventa informações
+- Preço NÃO influencia a classificação
+- Ausência de característica NÃO é ponto negativo
+- Analisa TODAS as imagens em conjunto (não julga por 1 foto isolada)
+- Conflitos entre ambientes → reduz confiança
+
+---
+
+## Cálculo do Score (determinístico, Python)
+
+A LLM não calcula score. Ela retorna conservação + acabamento + positivos/negativos, e o Python calcula o score com pesos fixos.
+
+### Fórmula
+
+```
+score = 0.50 (base)
+      + ajuste_conservacao
+      + ajuste_padrao
+      + bonus_positivos (max +0.15)
+      + penalizacoes (max -0.30)
+
+score = clamp(score, 0.0, 1.0)
+```
+
+### Pesos de conservação
+
+| Estado | Ajuste |
+|--------|--------|
+| novo | +0.20 |
+| reformado | +0.15 |
+| bom | +0.10 |
+| regular | -0.05 |
+| precisa_reforma | -0.25 |
+| desconhecido | 0.00 |
+
+### Pesos de acabamento
+
+| Padrão | Ajuste |
+|--------|--------|
+| alto_padrao | +0.15 |
+| medio | +0.07 |
+| simples | -0.03 |
+| desconhecido | 0.00 |
+
+### Bônus positivos (exemplos)
+
+| Diferencial | Bônus |
+|-------------|-------|
+| acabamento diferenciado | +0.05 |
+| varanda gourmet | +0.04 |
+| area externa privativa | +0.04 |
+| piscina privativa | +0.04 |
+| cozinha planejada | +0.03 |
+| armarios planejados | +0.03 |
+| vista livre | +0.03 |
+| churrasqueira | +0.02 |
+| boa iluminacao natural | +0.02 |
+
+**Máximo total de bônus: +0.15**
+
+Vagas de garagem e suítes ficam na lista mas NÃO geram bônus no score (já são dados estruturados).
+
+### Penalizações (exemplos)
+
+| Problema | Penalidade |
+|----------|-----------|
+| precisa_reforma | -0.25 |
+| documentacao_irregular | -0.20 |
+| infiltracao_umidade | -0.15 |
+| danos_visiveis | -0.10 |
+| pintura_deteriorada | -0.06 |
+| acabamento_desgastado | -0.06 |
+| problema não previsto | -0.05 |
+
+**Máximo total de penalização: -0.30**
+
+Anti-dupla penalização: se estado = "precisa_reforma", não desconta de novo pelo mesmo problema nos negativos.
+
+### Regra neutra
+
+Se `estado=desconhecido` E `padrao=desconhecido` E `sem negativos` E `confianca=baixa`:
+→ score fixo = **0.50** (neutro, não prejudica nem beneficia)
+
+---
+
+## Classificação
+
+| Score | Classificação |
+|-------|---------------|
+| < 0.40 | desfavoravel |
+| 0.40 – 0.60 | neutro |
+| 0.60 – 0.80 | favoravel |
+| ≥ 0.80 | muito_favoravel |
+
+---
+
+## Saída
+
+### `data/imoveis_analisados_ag3.json`
+
+```json
+{
+  "imovel_alvo": {
+    "analise_qualitativa": {
+      "estado_conservacao": "bom",
+      "padrao_acabamento": "medio",
+      "pontos_positivos": ["varanda gourmet", "armarios planejados"],
+      "pontos_negativos": [],
+      "qualidade_imagens": "boa",
+      "confianca_extracao": "alta",
+      "evidencias": {"conservacao": [...], "acabamento": [...]},
+      "scores": {"score_qualitativo": 0.67},
+      "classificacao_qualitativa": "favoravel"
+    }
+  },
+  "comparaveis": [
+    {
+      "id": "2752976859",
+      "analise_qualitativa": {
+        "estado_conservacao": "reformado",
+        "padrao_acabamento": "alto_padrao",
+        "scores": {"score_qualitativo": 0.85},
+        "classificacao_qualitativa": "muito_favoravel"
+      }
+    }
+  ],
+  "resumo": {
+    "total_analisados": 23,
+    "score_qualitativo_medio": 0.67
+  }
+}
+```
+
+---
+
+## Quem usa a saída
+
+| Agente | O que pega | Pra que |
+|--------|-----------|---------|
+| **Agente 5** | `padrao_acabamento` do alvo | Identifica padrão construtivo (não usado no preço nesta versão) |
+| **Agente 5** | `score_qualitativo` do alvo | Liquidez experimental (peso 35%) |
+| **Interface** | estado, padrão, score, classificação | Exibe pro usuário |
 
 ---
 
 ## Dependências
 
-| Serviço | Uso | Custo | Configuração |
-|---|---|---|---|
-| NVIDIA NIM | Análise multimodal (texto + fotos) | Gratuito, sem limite | `NVIDIA_API_KEY` no `.env` |
-| openai (pacote Python) | Cliente para API compatível OpenAI | — | `pip install openai` |
+| Serviço | Modelo | Uso |
+|---------|--------|-----|
+| Google Gemini | gemini-2.5-flash | Análise multimodal (principal) |
+| Groq | qwen3.6-27b | Fallback multimodal |
+| NVIDIA NIM | llama-3.2-11b-vision | Fallback final |
 
 ---
 
-## Como Rodar
+## Limitação
 
-```bash
-.venv/Scripts/python.exe -m tests.test_text_analyzer
-```
-
-**Pré-requisitos:**
-- `data/zona_homogenea_ag2.json` gerado pelo Agente 2
-- `data/imoveis_comparaveis_ag2.json` gerado pelo Agente 2
-- `NVIDIA_API_KEY` no `.env`
+- A análise depende da qualidade e completude da descrição e das fotos do anúncio
+- Imóveis sem fotos ou com fotos ruins → score neutro 0.50
+- Máximo 20 comparáveis analisados por execução (limite de chamadas)
