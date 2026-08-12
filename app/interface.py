@@ -236,7 +236,7 @@ elif submitted:
     # ETAPA 1 — Coleta de imóveis na região (~2 min)
     # ==============================================================
     with log_area:
-        st.write(f"Pesquisando imóveis à venda perto do seu, em **{bairro}, {cidade}/{estado}**...")
+        st.write(f"**Agente Coletor** — Pesquisando imóveis à venda perto do seu, em **{bairro}, {cidade}/{estado}**...")
 
     # Roda coleta em thread separada para poder atualizar o contador
     resultado_coleta = [None]
@@ -282,7 +282,18 @@ elif submitted:
 
     progress.progress(20)
     with log_area:
-        st.success(f"✅ **{len(imoveis_coletados)} imóveis à venda encontrados** na região")
+        st.success(f"✅ **Agente Coletor** — {len(imoveis_coletados)} imóveis à venda encontrados na região")
+        # Avisa se não encontrou na rua ou bairro
+        if rua and imoveis_coletados:
+            na_rua = sum(1 for im in imoveis_coletados if rua.lower() in (im.get("street") or im.get("rua") or "").lower())
+            if na_rua > 0:
+                st.caption(f"ℹ️ {na_rua} imóveis encontrados na mesma rua ({rua})")
+            else:
+                st.caption(f"ℹ️ Nenhum imóvel encontrado na mesma rua ({rua}). Usando imóveis do bairro.")
+        if bairro and imoveis_coletados:
+            no_bairro = sum(1 for im in imoveis_coletados if bairro.lower() in (im.get("neighborhood") or im.get("bairro") or "").lower())
+            if no_bairro == 0:
+                st.caption(f"ℹ️ Nenhum imóvel encontrado no bairro {bairro}. Usando imóveis da cidade toda.")
 
     # ==============================================================
     # ETAPA 2 — Identificação dos comparáveis (~30s)
@@ -290,7 +301,7 @@ elif submitted:
     status_box.info("📊 **Etapa 2/5 — Agente Identificador de Comparáveis** | Tempo estimado: ~30 segundos")
     progress.progress(25)
     with log_area:
-        st.write("Comparando os imóveis encontrados com o seu para identificar os mais parecidos...")
+        st.write("**Agente Identificador** — Comparando os imóveis encontrados com o seu para identificar os mais parecidos...")
 
     t2 = time.time()
     resultado_ag2 = identificar_comparaveis(
@@ -305,7 +316,7 @@ elif submitted:
     resumo = resultado_ag2.get("resumo", {})
 
     with log_area:
-        st.success(f"✅ **{resumo.get('cluster_a', 0)} imóveis parecidos com o seu** selecionados para avaliação")
+        st.success(f"✅ **Agente Identificador** — {resumo.get('cluster_a', 0)} imóveis parecidos com o seu (mesma faixa de área, quartos e preço)")
 
     if not comparaveis:
         status_box.error("❌ Nenhum imóvel comparável encontrado. O bairro pode ter poucos anúncios.")
@@ -317,21 +328,23 @@ elif submitted:
         status_box.info("📊 **Etapa 2/5 — Agente Identificador de Comparáveis** | Validando localização...")
         progress.progress(35)
         with log_area:
-            st.write("Verificando quais estão na mesma vizinhança...")
+            st.write("**Agente Identificador** — Verificando quais estão na mesma vizinhança (zona homogênea)...")
         try:
             t2z = time.time()
             endereco = f"{rua}, {numero}, {bairro}, {cidade}, {estado}"
             zona_resultado = analisar_zona_homogenea(
                 endereco_alvo=endereco,
-                imoveis=comparaveis + terrenos,
+                imoveis=[c for c in comparaveis if c.get("cluster") == "A"] + terrenos,
                 cidade=cidade,
                 estado=estado,
             )
             confirmados = zona_resultado.get("comparaveis_confirmados", [])
             fora = zona_resultado.get("fora_zona", [])
             tempo_zona = time.time() - t2z
+            total_analisados_zona = len(confirmados) + len(fora)
+            raio_usado = zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros") or zona_resultado.get("zona_homogenea", {}).get("raio_metros") or 700
             with log_area:
-                st.success(f"✅ Vizinhança validada — {len(fora)} imóveis descartados por estarem a mais de 700m do seu endereço")
+                st.success(f"✅ **Agente Identificador** — Zona homogênea definida: **{len(confirmados)}** de {total_analisados_zona} imóveis estão na vizinhança (raio {raio_usado}m), {len(fora)} descartados por distância")
                 if len(fora) > len(confirmados):
                     st.caption("ℹ️ Muitos imóveis foram descartados porque estão longe. O sistema só usa imóveis próximos para garantir que o valor reflete a sua vizinhança.")
         except Exception as e:
@@ -345,7 +358,8 @@ elif submitted:
     # ==============================================================
     progress.progress(50)
     with log_area:
-        st.write("Analisando a qualidade dos imóveis (fotos e descrição) e mapeando o que tem perto (escolas, hospitais, comércio, transporte)...")
+        st.write("**Agente Analisador** — Avaliando qualidade dos imóveis (fotos e descrição)")
+        st.write("**Agente Avaliador de Infraestrutura** — Mapeando o que tem perto (escolas, hospitais, comércio, transporte)")
 
     resultado_ag3 = {}
     resultado_ag4 = {}
@@ -395,7 +409,7 @@ elif submitted:
             score_infra = resultado_ag4.get("scores", {}).get("score_final", 0)
             classif = resultado_ag4.get("resumo_scores", {}).get("classificacao_infraestrutura", "?")
             with log_area:
-                st.success(f"✅ Infraestrutura da região avaliada — Classificação: **{classif}**")
+                st.success(f"✅ **Agente Avaliador de Infraestrutura** — Mapeou escolas, hospitais, comércio e transporte no entorno. Classificação: **{classif}**")
                 if classif == "insuficiente":
                     st.caption("ℹ️ Classificação insuficiente indica pouco comércio, transporte ou serviços no raio de 1500m. Comum em bairros residenciais afastados.")
         except Exception as e:
@@ -407,7 +421,7 @@ elif submitted:
             score_qual = resultado_ag3.get("resumo", {}).get("score_qualitativo_medio", 0)
             total_analisados = resultado_ag3.get("resumo", {}).get("total_analisados", 0)
             with log_area:
-                st.success(f"✅ Qualidade dos imóveis analisada — **{total_analisados} imóveis avaliados**")
+                st.success(f"✅ **Agente Analisador** — Avaliou fotos e descrição de **{total_analisados} imóveis** (estado de conservação, padrão de acabamento)")
                 if total_analisados <= 3:
                     st.caption("ℹ️ Poucos imóveis avaliados — o bairro tem poucos anúncios próximos ao seu endereço. O valor estimado pode ser menos preciso.")
         except Exception as e:
@@ -423,7 +437,7 @@ elif submitted:
     status_box.info("💰 **Etapa 5/5 — Agente Estimador de Preço e Liquidez** | Finalizando...")
     progress.progress(90)
     with log_area:
-        st.write("Calculando o valor do seu imóvel com base nos preços da vizinhança...")
+        st.write("**Agente Estimador de Preço** — Calculando o valor do seu imóvel com base nos preços da vizinhança...")
 
     resultado_ag5 = {}
     try:
@@ -490,8 +504,79 @@ if "resultado" in st.session_state:
             tempo = liquidez_info.get("tempo_estimado", "?")
             st.metric("⏱️ Tempo Estimado de Venda", tempo)
 
+        # ==============================================================
+        # COMO CHEGAMOS NESTE VALOR
+        # ==============================================================
+        st.divider()
+        st.subheader("📖 Como chegamos neste valor")
+
+        zona = resultado.get("zona_homogenea", {})
+        zh = zona.get("zona_homogenea", {}) if zona else {}
+        raio = zh.get("raio_metros") or zh.get("raio_sugerido_metros") or 400
+        confirmados = zona.get("comparaveis_confirmados", []) if zona else []
+        fora_zona = zona.get("fora_zona", []) if zona else []
+        ag3_data = resultado.get("analise_qualitativa", {})
+        resumo3 = ag3_data.get("resumo", {}) if ag3_data else {}
+        infra_data = resultado.get("infraestrutura", {})
+        scores_infra = infra_data.get("scores", {}) if infra_data else {}
+        resumo_infra = infra_data.get("resumo_scores", {}) if infra_data else {}
+        preco_data = resultado.get("preco_estimado", {})
+        calc_constr = preco_data.get("calculo_construcao", {}) if preco_data else {}
+        imovel_alvo_info = preco_data.get("imovel_alvo", {}) if preco_data else {}
+
+        # Ag.1
+        total_encontrados = resultado.get("resumo", {}).get("total_coletados", len(confirmados) + len(fora_zona))
+        st.markdown(f"**🔍 Agente Coletor de Dados**")
+        st.write(f"Encontramos **{total_encontrados}** imóveis à venda no bairro {bairro}, {cidade}/{estado}.")
+
+        # Ag.2
+        cluster_a = resultado.get("resumo", {}).get("cluster_a", len(confirmados))
+        cluster_b = resultado.get("resumo", {}).get("cluster_b", 0)
+        terrenos_sep = resultado.get("resumo", {}).get("terrenos_excluidos", 0)
+        st.markdown(f"**📊 Agente Identificador de Comparáveis**")
+        st.write(f"Dos {total_encontrados} imóveis encontrados:")
+        if terrenos_sep > 0:
+            st.write(f"- {terrenos_sep} são terrenos (separados para cálculo do m² do terreno — não entram na comparação)")
+            st.write(f"- {total_encontrados - terrenos_sep} foram analisados pela inteligência artificial para identificar os mais parecidos com o seu")
+        else:
+            st.write(f"- Todos foram analisados pela inteligência artificial para identificar os mais parecidos com o seu")
+        st.write(f"- **{cluster_a}** foram classificados como comparáveis (perfil similar ao seu)")
+        if cluster_b > 0:
+            st.write(f"- {cluster_b} foram descartados (perfil muito diferente: área, quartos ou padrão incompatível)")
+        st.write(f"- Zona homogênea: **{len(confirmados)}** de {len(confirmados) + len(fora_zona)} analisados estão na mesma vizinhança (raio de {raio}m), {len(fora_zona)} descartados por distância")
+
+        # Ag.3
+        score_medio = resumo3.get("score_qualitativo_medio", 0) or 0
+        total_analisados = resumo3.get("total_analisados", 0) or 0
+        alvo_analise = ag3_data.get("imovel_alvo", {}).get("analise_qualitativa", {}) if ag3_data else {}
+        estado_alvo = alvo_analise.get("estado_conservacao", "?")
+        padrao_alvo = alvo_analise.get("padrao_acabamento", "?")
+        st.markdown(f"**📝 Agente Analisador**")
+        st.write(f"Analisamos fotos e descrição de **{total_analisados}** imóveis da vizinhança. Score médio de qualidade: **{score_medio:.2f}**. O seu imóvel foi classificado como: **{estado_alvo}, {padrao_alvo}**.")
+
+        # Ag.4
+        score_final_infra = scores_infra.get("score_final", 0) or 0
+        classif_infra = resumo_infra.get("classificacao_infraestrutura", "?")
+        st.markdown(f"**🏥 Agente Avaliador de Infraestrutura**")
+        st.write(f"O entorno do seu imóvel tem infraestrutura **{classif_infra}** (score {score_final_infra:.2f}).")
+
+        # Ag.5
+        m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
+        padrao_usado = calc_constr.get("padrao_usado", "?")
+        area_calc = calc_constr.get("area_construida_m2", 0) or 0
+        valor_med = avaliacao.get("valor_medio_imovel", 0)
+        valor_liq = avaliacao.get("valor_liquidez", 0)
+        st.markdown(f"**💰 Agente Estimador de Preço**")
+        st.write(f"Com base nos imóveis da vizinhança de padrão **{padrao_usado}**, o valor médio do m² é **R$ {m2_ref:,.2f}**. Para o seu imóvel de {area_calc:.0f}m²:")
+        st.write(f"- Valor médio estimado: **R$ {valor_med:,.0f}**")
+        st.write(f"- Valor de liquidez (-10%): **R$ {valor_liq:,.0f}**")
+        st.write(f"- Tempo estimado de venda: **{tempo}**")
+
+        st.divider()
+
         # Zona homogênea
         with st.expander("📍 Zona Homogênea"):
+
             st.caption("A zona homogênea é a vizinhança ao redor do seu imóvel com padrão construtivo parecido. Só imóveis dentro dessa zona são usados para calcular o valor.")
             zona = resultado.get("zona_homogenea", {})
             if zona:
@@ -604,9 +689,10 @@ if "resultado" in st.session_state:
             else:
                 st.write("Análise qualitativa não disponível")
 
-        with st.expander("📋 Comparáveis Encontrados"):
-            st.caption("Imóveis à venda na mesma região que foram usados como referência para calcular o valor do seu.")
-            comparaveis = resultado.get("comparaveis", [])
+        with st.expander("📋 Comparáveis Usados no Cálculo"):
+            st.caption("Imóveis confirmados na zona homogênea que foram usados para calcular o valor do seu.")
+            zona_data = resultado.get("zona_homogenea", {})
+            comparaveis = zona_data.get("comparaveis_confirmados", []) if zona_data else resultado.get("comparaveis", [])
             if comparaveis:
                 # Tabela com link incluso
                 import pandas as pd
@@ -614,12 +700,18 @@ if "resultado" in st.session_state:
                 for comp in comparaveis:
                     url_comp = comp.get("url", "")
                     link = f"[ver]({url_comp})" if url_comp else ""
+                    analise = comp.get("analise_qualitativa", {})
+                    estado_cons = analise.get("estado_conservacao", "-")
+                    padrao = analise.get("padrao_acabamento", "-")
+                    score_q = analise.get("scores", {}).get("score_qualitativo", "-")
                     dados_tabela.append({
                         "Preço": f"R$ {comp.get('price', 0):,.0f}",
                         "Área": f"{comp.get('area', 0)}m²",
                         "Quartos": comp.get("bedrooms", "?"),
                         "Bairro": comp.get("neighborhood", "?"),
-                        "Rua": comp.get("street") or "Não informada",
+                        "Estado": estado_cons,
+                        "Padrão": padrao,
+                        "Score": score_q,
                         "Anúncio": link,
                     })
                 df = pd.DataFrame(dados_tabela)

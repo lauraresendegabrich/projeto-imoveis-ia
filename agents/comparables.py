@@ -230,55 +230,97 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
     candidatos_texto = ""
     for idx, c in enumerate(candidatos, 1):
         desc = (c.get("description") or "")[:300]
+        suites = c.get("suites") or c.get("suites") or ""
+        condominio = c.get("preco_condominio") or c.get("condominiumFee") or ""
+        amenities = c.get("amenities") or ""
+        area_terreno = c.get("area_terreno") or c.get("lotArea") or ""
+        iptu = c.get("iptu") or ""
         candidatos_texto += (
             f"\n[{idx}]\n"
             f"  Tipo: {c.get('propertyType', '?')} | Area: {c.get('area', '?')}m² | "
-            f"Quartos: {c.get('bedrooms', '?')} | Banheiros: {c.get('bathrooms', '?')} | "
-            f"Vagas: {c.get('parkingSpaces', '?')}\n"
-            f"  Preco: {c.get('priceFormatted', '?')} | Preco/m²: R$ {c.get('pricePerSqm', '?')}\n"
-            f"  Bairro: {c.get('neighborhood', '?')} | Rua: {c.get('street', '?')}\n"
+            f"Quartos: {c.get('bedrooms', '?')} | Suites: {suites or '?'} | "
+            f"Banheiros: {c.get('bathrooms', '?')} | Vagas: {c.get('parkingSpaces', '?')}\n"
+            f"  Preco: {c.get('priceFormatted', '?')} | Preco/m²: R$ {c.get('pricePerSqm', '?')} | "
+            f"Condominio: R$ {condominio or '?'} | IPTU: R$ {iptu or '?'}\n"
+            f"  Bairro: {c.get('neighborhood', '?')} | Rua: {c.get('street', '?')}"
         )
+        if area_terreno:
+            candidatos_texto += f" | Terreno: {area_terreno}m²"
+        candidatos_texto += "\n"
+        if amenities:
+            candidatos_texto += f"  Diferenciais: {amenities}\n"
         if desc:
             candidatos_texto += f"  Descricao: {desc}\n"
 
-    prompt = f"""Voce e um avaliador imobiliario. Analise os imoveis abaixo e classifique cada um.
+    prompt = f"""Voce e um avaliador imobiliario responsavel por identificar imoveis comparaveis para avaliacao de mercado.
+
+Seu objetivo NAO e determinar o preco correto do imovel alvo nesta etapa. Seu objetivo e identificar quais imoveis possuem caracteristicas suficientemente semelhantes para servirem como comparaveis em uma avaliacao imobiliaria.
 
 {alvo_resumo}
 
 IMOVEIS CANDIDATOS ({len(candidatos)} imoveis):
 {candidatos_texto}
 
-TAREFA:
-1. Classifique cada imovel em CLUSTER A (similar ao alvo) ou CLUSTER B (nao similar).
-2. Ordene TODOS por similaridade (1 = mais similar, independente do cluster).
-3. Justifique brevemente cada classificacao (1 frase).
+TAREFA
+Para cada imovel candidato:
+1. Compare-o SOMENTE com o imovel alvo.
+2. Classifique-o como: CLUSTER A = comparavel; CLUSTER B = nao comparavel.
+3. Atribua um score_similaridade entre 0 e 100.
+4. Justifique a decisao em uma frase curta e objetiva.
+5. Ao final, atribua um ranking unico, em que 1 representa o imovel mais semelhante ao alvo.
 
-CRITERIOS para Cluster A (similar):
-- Mesmo tipo de imovel (casa com casa, terreno com terreno)
-- Area na mesma faixa (diferenca ate 50% e aceitavel)
-- Numero de quartos proximo (diferenca de 1 quarto e aceitavel)
-- Mesmo bairro ou regiao equivalente
-- Preco/m² na mesma faixa (diferenca ate 50% e aceitavel)
-- NAO precisa ser identico — basta ser comparavel para avaliacao
+PRINCIPIO GERAL
+Um imovel comparavel nao precisa ser identico ao imovel alvo. Ele deve possuir caracteristicas suficientemente proximas para que possa ser utilizado como referencia de mercado. Nao elimine um imovel apenas por pequenas diferencas em quartos, banheiros, vagas, preco ou caracteristicas secundarias.
 
-CRITERIOS para Cluster B (nao similar):
-- Tipo diferente (terreno vazio vs casa construida)
-- Area MUITO diferente (terreno de 500m² vs casa de 100m²)
-- Padrao MUITO diferente (kitnet vs mansao)
-- Uso diferente (comercial vs residencial)
+CRITERIOS ELIMINATORIOS
+Classifique como CLUSTER B quando houver pelo menos uma incompatibilidade estrutural relevante:
+- tipo de imovel incompativel (apartamento vs terreno)
+- uso diferente (comercial vs residencial)
+- area extremamente diferente (mais que o dobro ou menos que a metade)
+- padrao imobiliario claramente incompativel (kitnet popular vs cobertura de luxo)
+- localizacao claramente pertencente a um mercado imobiliario nao comparavel
 
-IMPORTANTE: Na avaliacao imobiliaria, imoveis "comparaveis" sao aqueles
-que um comprador consideraria como alternativa. Casas de 3 quartos com
-135-226m² no mesmo bairro SAO comparaveis entre si, mesmo com diferencas
-de preco. Diferenca de 1 banheiro ou 1 vaga NAO desqualifica um imovel.
-Seja GENEROSO no Cluster A — so coloque no B se for realmente
-incompativel (tipo diferente, area >2x maior/menor, ou uso diferente).
+CRITERIOS PRINCIPAIS DE SIMILARIDADE (em ordem de importancia):
+1. TIPO DO IMOVEL - mesmo tipo e fortemente preferivel
+2. LOCALIZACAO - mesmo bairro e forte evidencia de comparabilidade
+3. AREA - diferenca ate 25% muito semelhante; 25-50% semelhante; 50-100% pode ser comparavel; acima de 100% forte indicacao de B
+4. QUARTOS - mesmo numero muito semelhante; diferenca de 1 aceitavel; diferenca de 2+ reduz significativamente
 
-RESPONDA EXATAMENTE neste formato JSON (sem texto antes ou depois):
+CRITERIOS SECUNDARIOS (fatores complementares):
+- numero de banheiros, vagas, suites
+- condominio
+- diferenciais/amenities
+- caracteristicas da descricao
+Diferenca de 1 banheiro, 1 vaga ou 1 suite NAO deve, isoladamente, colocar um imovel no Cluster B.
+
+PRECO E PRECO/M2
+O preco anunciado e o preco/m2 NAO sao criterios eliminatorios. O imovel alvo pode estar subavaliado ou superavaliado. Nao descarte um candidato apenas porque seu preco e muito diferente. Use preco/m2 apenas como informacao secundaria.
+
+DADOS AUSENTES
+Campos ausentes ou nulos NAO devem ser interpretados como valor zero ou ausencia da caracteristica. Falta de informacao isolada nao e motivo para Cluster B.
+
+SCORE DE SIMILARIDADE
+90-100 = extremamente comparavel
+80-89 = muito comparavel
+70-79 = bom comparavel
+60-69 = comparavel com diferencas relevantes
+40-59 = baixa comparabilidade
+0-39 = incompativel
+Regra geral: Cluster A >= 60, Cluster B < 60
+
+IMPORTANTE
+- Seja tolerante com pequenas diferencas
+- Priorize HOMOGENEIDADE de mercado e caracteristicas fisicas
+- Nao escolha imoveis simplesmente porque possuem preco semelhante ao alvo
+- O ranking deve refletir a similaridade geral
+- Todos os IDs devem aparecer exatamente uma vez
+- Rankings devem ser numeros inteiros unicos de 1 ate N, sem empates
+
+RESPONDA SOMENTE com JSON valido, sem Markdown, explicacoes ou texto antes ou depois:
 {{
   "classificacao": [
-    {{"id": 1, "cluster": "A", "ranking": 1, "justificativa": "..."}},
-    {{"id": 2, "cluster": "B", "ranking": 15, "justificativa": "..."}},
+    {{"id": 1, "cluster": "A", "score_similaridade": 92, "ranking": 1, "justificativa": "..."}},
+    {{"id": 2, "cluster": "B", "score_similaridade": 31, "ranking": 15, "justificativa": "..."}},
     ...
   ]
 }}"""
@@ -338,6 +380,10 @@ def _parsear_resposta_llm(resposta: str, candidatos: list[dict]) -> list[dict]:
             candidatos[idx]["cluster"] = item.get("cluster", "B")
             candidatos[idx]["ranking_llm"] = item.get("ranking")
             candidatos[idx]["justificativa"] = item.get("justificativa", "")
+            # Score da LLM (0-100) sobrescreve o numérico se disponivel
+            llm_score = item.get("score_similaridade")
+            if llm_score is not None:
+                candidatos[idx]["score_similaridade"] = float(llm_score) / 100.0  # normaliza pra 0-1
 
     # Garante que todos tem os campos
     for c in candidatos:
@@ -618,20 +664,17 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
         logger.warning("NVIDIA_API_KEY nao configurada — usando raio padrao")
         return {"raio_metros": 500}
 
-    # Redimensiona imagem para no maximo 800x800 (reduz tamanho do base64)
+    # Converte pra JPEG com qualidade 85 (mantém resolução original 1280x1280)
     try:
         from PIL import Image
         import io
         img = Image.open(io.BytesIO(imagem_bytes))
-        max_size = 800
-        if img.width > max_size or img.height > max_size:
-            img.thumbnail((max_size, max_size), Image.LANCZOS)
         buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=70)
+        img.save(buffer, format="JPEG", quality=85)
         imagem_comprimida = buffer.getvalue()
         img_b64 = base64.b64encode(imagem_comprimida).decode("utf-8")
         img_mime = "image/jpeg"
-        logger.info(f"Imagem comprimida: {len(imagem_bytes)//1024}KB -> {len(imagem_comprimida)//1024}KB")
+        logger.info(f"Imagem: {img.width}x{img.height} | {len(imagem_bytes)//1024}KB -> {len(imagem_comprimida)//1024}KB (JPEG 85%)")
     except Exception:
         img_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
         img_mime = "image/png"
@@ -639,46 +682,137 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     # Removido — Groq Vision nao esta mais disponivel
     # Agora usa NVIDIA NIM (mistral-small-3.1-24b-instruct)
 
-    prompt = f"""Voce e um assistente especializado em analise urbana para avaliacao imobiliaria.
-Analise a imagem de satelite/mapa hibrido da regiao de um imovel marcado no mapa.
+    prompt = f"""Você é um assistente especializado em análise visual urbana para apoio à avaliação imobiliária.
+Sua tarefa é analisar uma imagem de satélite ou mapa híbrido centrada em um imóvel alvo e sugerir um raio para representar aproximadamente sua ZONA HOMOGÊNEA.
 
-Endereco do imovel alvo (marcador vermelho): {endereco_alvo}
+IMÓVEL ALVO
+Endereço: {endereco_alvo}
+O imóvel alvo está identificado por um marcador vermelho na imagem.
 
-Analise apenas o que pode ser observado na imagem. Nao invente informacoes.
+OBJETIVO
+Determine, apenas com base nos elementos visualmente observáveis na imagem, qual raio ao redor do imóvel alvo representa melhor uma área com características urbanas semelhantes.
 
-Foque nos tres aspectos mais importantes para definir a zona homogenea:
-1. PADRAO CONSTRUTIVO APARENTE — que tipo de edificacoes predominam visualmente
-2. HOMOGENEIDADE VISUAL — o quanto a regiao e uniforme em padrao e uso
-3. DENSIDADE URBANA — quao ocupada e a regiao
+IMPORTANTE
+Analise SOMENTE aquilo que pode ser observado na imagem.
+Não utilize conhecimento externo sobre o bairro, endereço ou cidade.
+Não invente informações que não possam ser determinadas visualmente.
+Não faça inferências sobre:
+* renda dos moradores;
+* segurança;
+* valorização imobiliária;
+* preço dos imóveis;
+* qualidade interna das construções;
+* idade exata dos imóveis;
+* perfil socioeconômico;
+* qualidade de serviços públicos;
+* qualquer informação não visível na imagem.
 
-Com base nesses tres fatores, sugira o raio adequado para a zona homogenea.
+A zona homogênea representa uma região em que o padrão urbano permanece relativamente semelhante ao observado no entorno imediato do imóvel alvo.
 
-Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
+CRITÉRIOS DE ANÁLISE
+Analise principalmente os seguintes fatores:
+
+1. PADRÃO CONSTRUTIVO APARENTE
+Identifique visualmente o tipo predominante de ocupação:
+* casas;
+* sobrados;
+* prédios baixos;
+* prédios médios;
+* torres altas;
+* misto;
+* indefinido.
+Considere apenas características externas que possam ser percebidas na imagem, como dimensão aparente das construções, altura relativa, formato das edificações e organização dos lotes.
+
+2. HOMOGENEIDADE VISUAL
+Avalie se o padrão urbano observado próximo ao imóvel alvo permanece semelhante à medida que se afasta dele.
+Classifique como:
+* alta: predominância clara de um mesmo padrão construtivo e de ocupação;
+* média: existem algumas variações, mas ainda há um padrão predominante;
+* baixa: existem mudanças frequentes ou mistura significativa de padrões;
+* indefinida: a imagem não permite avaliar adequadamente.
+
+3. DENSIDADE URBANA
+Avalie visualmente o nível de ocupação da região considerando concentração de edificações, tamanho dos lotes, espaçamento entre construções e presença de áreas não edificadas.
+Classifique como:
+* baixa;
+* média;
+* alta;
+* indefinida.
+
+4. TRANSIÇÕES VISUAIS
+Observe se existem mudanças significativas na estrutura urbana à medida que se afasta do imóvel alvo.
+Exemplos:
+* mudança de casas para edifícios;
+* surgimento de grandes galpões;
+* áreas comerciais de grande porte;
+* grandes terrenos vazios;
+* áreas verdes extensas;
+* rodovias ou grandes avenidas;
+* cursos d'água;
+* mudança clara no tamanho dos lotes;
+* mudança significativa na densidade das construções.
+Uma transição visual relevante pode indicar o limite aproximado da zona homogênea.
+
+DEFINIÇÃO DO RAIO
+Escolha APENAS um dos seguintes valores:
+300, 500, 700, 1000 ou 1500 metros.
+
+Use as seguintes orientações:
+* 300 m: região muito heterogênea, com mudanças urbanas relevantes muito próximas ao imóvel;
+* 500 m: região relativamente homogênea no entorno imediato, mas com mudanças perceptíveis a curta distância;
+* 700 m: região predominantemente homogênea, com algumas mudanças mais afastadas;
+* 1000 m: padrão urbano bastante uniforme em uma área ampla;
+* 1500 m: padrão urbano muito uniforme e sem transições visuais significativas dentro de grande parte da área observável.
+
+O raio NÃO deve ser escolhido apenas com base na densidade.
+Considere conjuntamente:
+* padrão construtivo;
+* homogeneidade;
+* densidade;
+* presença de transições visuais.
+
+Priorize o MENOR raio que ainda represente adequadamente uma quantidade relevante de área urbana semelhante ao entorno do imóvel alvo.
+Não aumente o raio apenas para obter mais imóveis comparáveis.
+Se houver uma mudança urbana significativa próxima ao imóvel, prefira um raio menor.
+Se a região continuar visualmente semelhante por uma grande distância, um raio maior pode ser utilizado.
+
+LIMITAÇÃO DA IMAGEM
+Não presuma que características existentes fora dos limites da imagem são semelhantes às observadas dentro dela.
+Se a imagem não possuir abrangência ou resolução suficiente para determinar adequadamente a zona homogênea:
+* escolha o raio mais conservador suportado pela imagem;
+* reduza o nível de confiança;
+* mencione a limitação na justificativa.
+
+CONFIANÇA
+Classifique a confiança como:
+* alta: imagem clara, ampla e com padrão urbano facilmente identificável;
+* média: existem algumas ambiguidades ou limitações;
+* baixa: resolução, abrangência ou características visuais são insuficientes para uma conclusão segura.
+
+RESPONDA SOMENTE com JSON válido, sem Markdown e sem qualquer texto antes ou depois:
 {{
   "padrao_construtivo": "casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido",
   "homogeneidade_visual": "alta | media | baixa | indefinida",
   "densidade_urbana": "baixa | media | alta | indefinida",
+  "transicao_visual": "nenhuma_relevante | proxima | intermediaria | distante | indefinida",
   "raio_sugerido_metros": 700,
-  "justificativa_raio": "Explique em uma frase por que esse raio e adequado, baseando-se nos tres fatores acima.",
-  "descricao_zona_homogenea": "Descreva em ate 2 frases o perfil da zona com base no padrao construtivo, homogeneidade e densidade.",
+  "justificativa_raio": "Explique em uma frase objetiva por que o raio escolhido representa adequadamente a região visualmente homogênea.",
+  "descricao_zona_homogenea": "Descreva em no máximo duas frases apenas as características urbanas visualmente observáveis.",
   "confianca": "alta | media | baixa"
 }}"""
 
     try:
-        from openai import OpenAI as NvidiaClient
+        from groq import Groq
 
-        nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-        if not nvidia_key:
-            logger.warning("NVIDIA_API_KEY nao configurada — usando raio padrao")
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if not groq_key:
+            logger.warning("GROQ_API_KEY nao configurada — usando raio padrao")
             return {"raio_metros": 500}
 
-        client = NvidiaClient(
-            base_url="https://integrate.api.nvidia.com/v1",
-            api_key=nvidia_key,
-        )
+        client = Groq(api_key=groq_key)
 
         response = client.chat.completions.create(
-            model="meta/llama-3.2-11b-vision-instruct",
+            model="qwen/qwen3.6-27b",
             messages=[
                 {
                     "role": "user",
@@ -692,10 +826,10 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
                 }
             ],
             temperature=0,
-            max_tokens=1024,
+            max_completion_tokens=1024,
         )
         texto = response.choices[0].message.content or ""
-        logger.info(f"Groq Vision respondeu ({len(texto)} chars)")
+        logger.info(f"Groq Vision (qwen3.6-27b) respondeu ({len(texto)} chars)")
 
         # Parseia JSON
         m = re.search(r'\{[\s\S]+\}', texto)
@@ -705,6 +839,14 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
                 # Normaliza campo de raio
                 if "raio_sugerido_metros" in resultado:
                     resultado["raio_metros"] = resultado["raio_sugerido_metros"]
+                # Garante raio discreto valido (300/500/700/1000/1500)
+                raios_validos = [300, 500, 700, 1000, 1500]
+                raio = resultado.get("raio_metros", 700)
+                if raio not in raios_validos:
+                    # Pega o mais proximo
+                    raio = min(raios_validos, key=lambda x: abs(x - raio))
+                    resultado["raio_metros"] = raio
+                    resultado["raio_sugerido_metros"] = raio
                 return resultado
             except json.JSONDecodeError:
                 logger.warning("JSON truncado — extraindo campos do texto")
@@ -714,8 +856,13 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
 
         # Tenta extrair raio
         raio_match = re.search(r'raio.*?(\d{3,4})\s*(?:metros|m)', texto)
+        if not raio_match:
+            raio_match = re.search(r'(\d{3,4})\s*(?:metros|m)', texto)
         if raio_match:
-            resultado_fallback["raio_metros"] = int(raio_match.group(1))
+            raio_extraido = int(raio_match.group(1))
+            raios_validos = [300, 500, 700, 1000, 1500]
+            resultado_fallback["raio_metros"] = min(raios_validos, key=lambda x: abs(x - raio_extraido))
+            resultado_fallback["raio_sugerido_metros"] = resultado_fallback["raio_metros"]
 
         # Tenta extrair padrao construtivo
         if "casas" in texto.lower() or "sobrados" in texto.lower():
@@ -740,6 +887,15 @@ Retorne somente um JSON valido, sem texto fora do JSON, no seguinte formato:
             resultado_fallback["densidade_urbana"] = "baixa"
         elif "densidade" in texto.lower():
             resultado_fallback["densidade_urbana"] = "media"
+
+        # Tenta extrair transicao
+        if "transicao" in texto.lower() or "transição" in texto.lower():
+            if "proxima" in texto.lower() or "próxima" in texto.lower():
+                resultado_fallback["transicao_visual"] = "proxima"
+            elif "distante" in texto.lower():
+                resultado_fallback["transicao_visual"] = "distante"
+            else:
+                resultado_fallback["transicao_visual"] = "intermediaria"
 
         return resultado_fallback
 
@@ -912,14 +1068,35 @@ def analisar_zona_homogenea(
         rua = im.get("street", "")
         bairro = im.get("neighborhood", "")
 
-        # Se nao tem rua especifica, nao geocodifica
-        # Mesmo bairro = assume na zona (precisao geografica baixa)
+        # Se já tem coordenadas (Athena), usa direto sem geocodificar
+        lat_existente = im.get("lat")
+        lon_existente = im.get("lon")
+        if lat_existente and lon_existente:
+            try:
+                lat = float(lat_existente)
+                lon = float(lon_existente)
+                dist = _distancia_haversine(lat_alvo, lon_alvo, lat, lon)
+                classificacao = _classificar_por_distancia(dist, raio_zona)
+                im["distancia_metros"] = round(dist)
+                im["classificacao_zona"] = classificacao
+                im["coordenadas"] = {"lat": lat, "lon": lon}
+                if classificacao == "na_zona":
+                    confirmados.append(im)
+                else:
+                    fora.append(im)
+                logger.info(f"  [{idx+1}/{len(imoveis)}] {dist:.0f}m | {classificacao} | {rua or bairro} (coords existentes)")
+                continue
+            except (ValueError, TypeError):
+                pass
+
+        # Se nao tem rua especifica e nao tem coordenadas, nao tem como verificar
+        # Descarta — sem localizacao verificavel
         if not rua:
             im["distancia_metros"] = None
-            im["classificacao_zona"] = "na_zona"
+            im["classificacao_zona"] = "fora_zona"
             im["coordenadas"] = None
-            confirmados.append(im)
-            logger.info(f"  [{idx+1}/{len(imoveis)}] na_zona (mesmo bairro) | {bairro}")
+            fora.append(im)
+            logger.info(f"  [{idx+1}/{len(imoveis)}] fora_zona (sem localizacao verificavel) | {bairro}")
             continue
 
         # Geocodifica com endereco completo (rua + bairro + cidade + estado)
@@ -942,12 +1119,12 @@ def analisar_zona_homogenea(
 
             logger.info(f"  [{idx+1}/{len(imoveis)}] {dist:.0f}m | {classificacao} | {rua}")
         else:
-            # Geocoding falhou — assume na zona (mesmo bairro)
+            # Geocoding falhou — sem localizacao verificavel, descarta
             im["distancia_metros"] = None
-            im["classificacao_zona"] = "na_zona"
+            im["classificacao_zona"] = "fora_zona"
             im["coordenadas"] = None
-            confirmados.append(im)
-            logger.info(f"  [{idx+1}/{len(imoveis)}] na_zona (sem coords) | {rua}")
+            fora.append(im)
+            logger.info(f"  [{idx+1}/{len(imoveis)}] fora_zona (geocoding falhou) | {rua}")
 
     # ── 5. RESUMO ─────────────────────────────────────────────────
     raio_usado = max(raio_zona, 400)

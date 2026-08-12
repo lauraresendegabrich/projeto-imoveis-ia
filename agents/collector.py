@@ -977,14 +977,36 @@ def coletar_imoveis(
 
             # Filtro de bairro já feito no SQL — não precisa filtrar de novo
 
-            # Se bairro não retornou nada, avisa (não expande pra cidade)
+            # Se bairro não retornou nada, expande pra cidade
             if bairro and not athena_imoveis:
-                logger.info(f"Athena: bairro '{bairro}' sem resultados de venda")
+                logger.info(f"Athena: bairro '{bairro}' sem resultados, expandindo pra cidade toda...")
+                if tipo_imovel == "house":
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa")
+                elif tipo_imovel == "apartment":
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento")
+                else:
+                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome)
 
             logger.info(f"Athena: {len(athena_imoveis)} imoveis encontrados")
 
-            # Prioriza imóveis da mesma rua (ficam no início da lista)
-            if rua and athena_imoveis:
+            # Prioriza imóveis da mesma rua — busca ANTES no SQL
+            if rua and bairro:
+                # Query 1: busca todos da rua (sem limit restritivo)
+                tipo_rua = None
+                if tipo_imovel == "house":
+                    tipo_rua = "casa"
+                elif tipo_imovel == "apartment":
+                    tipo_rua = "apartamento"
+                imoveis_rua = client.buscar_rua(cidade_nome, bairro, rua, tipo=tipo_rua, limit=50)
+                if imoveis_rua:
+                    # Remove duplicatas (URL) que já vieram no bairro
+                    urls_bairro = {im.get("url") for im in athena_imoveis if im.get("url")}
+                    novos_rua = [im for im in imoveis_rua if im.get("url") not in urls_bairro]
+                    # Coloca os da rua no início
+                    athena_imoveis = novos_rua + athena_imoveis
+                    logger.info(f"  Rua '{rua}': {len(imoveis_rua)} encontrados ({len(novos_rua)} novos + {len(imoveis_rua) - len(novos_rua)} já no bairro)")
+            elif rua and athena_imoveis:
+                # Fallback: reordena os que já vieram
                 rua_lower = rua.lower().strip()
                 na_rua = [im for im in athena_imoveis if rua_lower in (im.get("rua") or "").lower()]
                 fora_rua = [im for im in athena_imoveis if rua_lower not in (im.get("rua") or "").lower()]
@@ -1049,6 +1071,13 @@ def coletar_imoveis(
                 im.setdefault("publishedAt", im.get("data_publicacao"))
                 im.setdefault("description", im.get("descricao"))
                 im.setdefault("title", im.get("titulo"))
+                # Coordenadas
+                if im.get("latitude") and im.get("longitude"):
+                    try:
+                        im["lat"] = float(im["latitude"])
+                        im["lon"] = float(im["longitude"])
+                    except (ValueError, TypeError):
+                        pass
                 # Tipo
                 tipo_raw = im.get("tipo", "")
                 if tipo_raw in ("casa", "two_story_house", "village_house"):

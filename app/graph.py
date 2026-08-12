@@ -194,9 +194,11 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
                 f"{imovel_alvo.get('cidade', '')}, "
                 f"{imovel_alvo.get('estado', '')}"
             )
+            # Só envia Cluster A + terrenos (Cluster B já foi descartado pela LLM)
+            cluster_a = [c for c in comparaveis if c.get("cluster") == "A"]
             zona_resultado = analisar_zona_homogenea(
                 endereco_alvo=endereco,
-                imoveis=comparaveis + terrenos,
+                imoveis=cluster_a + terrenos,
                 cidade=imovel_alvo.get("cidade", ""),
                 estado=imovel_alvo.get("estado", ""),
             )
