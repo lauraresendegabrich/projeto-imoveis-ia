@@ -16,9 +16,9 @@ print("=" * 60)
 
 resultado = coletar_imoveis(
     localizacao="Campinas, SP",
-    tipo_imovel="house",
-    bairro="Jardim Eulina",
-    rua="Rua Doutor Walter Pereira de Queiroz",
+    tipo_imovel="apartment",
+    bairro="Cambuí",
+    rua="Rua Doutor Liraucio Gomes",
 )
 
 print(f"\n{'=' * 60}")

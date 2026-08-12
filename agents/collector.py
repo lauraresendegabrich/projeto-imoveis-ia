@@ -23,23 +23,34 @@ FLUXO COMPLETO:
   ETAPA 1 — ATHENA (fonte principal)
   ───────────────────────────────────
     Consulta SQL na tabela vivareal (S3/Parquet).
-    Executa queries sequenciais com controle de limite total (230).
+    Para cada tipo de imovel, busca com limite proprio (rua + bairro somados):
 
-    Passo 1: Busca todos da mesma RUA (limit 230)
-      SELECT * FROM vivareal
-      WHERE cidade='X' AND bairro='Y' AND rua LIKE '%Z%'
-        AND tipo='apartamento' AND finalidade='venda' LIMIT 230
+    Para house:
+      casa                        → limite 200
+      two_story_house             → limite 50
+      village_house               → limite 50
+      residential_allotment_land  → limite 60
+      allotment_land              → limite 60
 
-    Passo 2: Se rua < 230, complementa com BAIRRO
-      Para apartment: apartamento → flat → cobertura (sequencial, respeitando teto)
-      Para house: casa → two_story_house → village_house (teto 230)
-                  + terrenos: residential_allotment_land (50) + allotment_land (50)
-                  Terrenos tem limit fixo 50, FORA do teto de 230.
+    Para apartment:
+      apartamento  → limite 200
+      flat         → limite 50
+      cobertura    → limite 50
 
-    Passo 3: Se rua + bairro = 0, expande pra CIDADE
-      SELECT * FROM vivareal WHERE cidade='X' AND tipo='apartamento' LIMIT 200
+    Logica por tipo:
+      1. Busca na RUA (LIKE '%nome%', ate o limite do tipo)
+      2. Se rua < limite, complementa com BAIRRO (restante = limite - qtd_rua)
+      3. Se TODOS os tipos = 0 → expande pra CIDADE
 
-    Resultado: rua primeiro + bairro depois. Maximo 230 construidos + 100 terrenos.
+    Fallback de acentos (buscar_rua):
+      1. Nome completo
+      2. Sem acento
+      3. So a ultima palavra (ex: "Gomes" de "Rua Doutor Liraucio Gomes")
+
+    Fallback de acentos (buscar_bairro):
+      1. Nome exato
+      2. Sem acento
+      3. LIKE parte final (ex: "Guanabara" de "Jardim Guanabara")
 
   ETAPA 2 — APIFY (fallback, so roda se Athena < 10)
   ────────────────────────────────────────────────────
@@ -57,6 +68,7 @@ FLUXO COMPLETO:
       vagas → parkingSpaces (int)
       bairro → neighborhood
       rua → street
+      latitude/longitude → lat/lon (float)
       data_publicacao → publishedAt
       fotos_urls → images (split por |, resolve templates)
       tipo → propertyType ("Casas"/"Apartamentos"/"Terrenos")
@@ -89,7 +101,7 @@ FLUXO COMPLETO:
 
   ETAPA 8 — ORDENACAO FINAL
   ──────────────────────────
-    Prioridade 0: mesma rua (ex: "Conego Nery" no campo street)
+    Prioridade 0: mesma rua (normaliza acentos pra comparar)
     Prioridade 1: mesmo bairro
     Prioridade 2: restante (cidade)
 
