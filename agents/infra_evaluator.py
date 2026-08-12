@@ -351,7 +351,13 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
                     if faixa is None:
                         continue
 
-                    entrada = {"nome": nome, "tipo": tipo, "distancia_metros": dist, "faixa": faixa}
+                    entrada = {
+                        "nome": nome,
+                        "tipo": tipo,
+                        "ref": row.get("ref") or row.get("local_ref") or None,
+                        "distancia_metros": dist,
+                        "faixa": faixa,
+                    }
                     if tipo == "bus_station":
                         resultado["estacoes"].append(entrada)
                     else:
@@ -362,18 +368,38 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
 
                 # Deduplicacao espacial: remove paradas muito proximas (~mesmo ponto fisico)
                 def _dedup_transporte(paradas: list, dist_min: int = DEDUP_TRANSPORTE_METROS) -> list:
-                    """Remove paradas que estao a menos de dist_min metros entre si."""
+                    """
+                    Remove paradas que representam o mesmo ponto fisico.
+                    Usa nome/ref/stop_area quando disponivel, fallback para proximidade espacial.
+                    """
                     if not paradas:
                         return paradas
                     resultado_dedup = [paradas[0]]
                     for p in paradas[1:]:
-                        muito_perto = False
+                        duplicado = False
                         for aceita in resultado_dedup:
                             diff = abs(p["distancia_metros"] - aceita["distancia_metros"])
-                            if diff < dist_min:
-                                muito_perto = True
+                            if diff > dist_min:
+                                continue
+                            # Dentro do raio de dedup - verifica evidencia de mesma parada
+                            mesmo_nome = (
+                                p.get("nome") and aceita.get("nome")
+                                and p["nome"] == aceita["nome"]
+                                and p["nome"] != "parada"
+                            )
+                            mesmo_ref = (
+                                p.get("ref") and aceita.get("ref")
+                                and p["ref"] == aceita["ref"]
+                            )
+                            # Se tem nome/ref igual E esta proximo, e a mesma parada
+                            if mesmo_nome or mesmo_ref:
+                                duplicado = True
                                 break
-                        if not muito_perto:
+                            # Fallback: sem nome/ref, usa apenas proximidade se MUITO perto (<20m)
+                            if diff < 20 and not p.get("nome") and not aceita.get("nome"):
+                                duplicado = True
+                                break
+                        if not duplicado:
                             resultado_dedup.append(p)
                     return resultado_dedup
 
@@ -461,7 +487,7 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
             categoria = None
             tipo_encontrado = None
 
-            for chave in ("amenity", "shop", "leisure", "highway"):
+            for chave in ("amenity", "shop", "leisure", "highway", "public_transport"):
                 valor = row.get(chave)
                 if valor and isinstance(valor, str):
                     cat = TAG_PARA_CATEGORIA.get((chave, valor))
@@ -625,6 +651,15 @@ def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
         max(0.0, min(1.0, sum(scores_categoria.values()) / len(scores_categoria))),
         3
     )
+
+    # Validacao de consistencia (nao interrompe execucao)
+    try:
+        for cat in scores_categoria:
+            if cat in detalhes_score:
+                if scores_categoria[cat] != detalhes_score[cat]["score"]:
+                    logger.warning(f"Inconsistencia: scores_categoria[{cat}]={scores_categoria[cat]} != detalhes_score score={detalhes_score[cat]['score']}")
+    except Exception:
+        pass
 
     return {
         "score_final": score_final,
@@ -894,6 +929,13 @@ def avaliar_infraestrutura(
     saida = {
         "imovel_alvo":   imovel_alvo,
         "coordenadas":   {"lat": lat, "lon": lon},
+        "fonte_infraestrutura": "OpenStreetMap",
+        "raio_maximo_metros": RAIO_MAX,
+        "total_pois_validos": sum(
+            len(pois)
+            for faixa_data in pois_por_faixa.values()
+            for pois in faixa_data.values()
+        ),
         "faixas_metros": {"0_400": "0-400m",
                           "401_800": "401-800m",
                           "801_1500": "801-1500m"},
