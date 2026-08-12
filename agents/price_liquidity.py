@@ -334,19 +334,27 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]]) -> List[float]:
     """
     Calcula o valor do m2 dos terrenos da zona homogenea.
     valor_m2_terreno = preco / area
+    Se topografia = "Aclive/Declive acentuado", aplica fator 0.80 (desconto 20%).
     """
     valores = []
     for terreno in terrenos:
-        # Tenta pricePerSqm direto
-        val_direto = converter_numero(terreno.get("pricePerSqm"))
-        if val_direto and val_direto > 0:
-            valores.append(val_direto)
-            continue
-
         preco = extrair_preco(terreno)
         area = extrair_area(terreno)
-        if preco and area and area > 0:
-            valores.append(preco / area)
+        if not preco or not area or area <= 0:
+            # Tenta pricePerSqm direto
+            val_direto = converter_numero(terreno.get("pricePerSqm"))
+            if val_direto and val_direto > 0:
+                valores.append(val_direto)
+            continue
+
+        valor_m2 = preco / area
+
+        # Fator topografia: Aclive/Declive acentuado = 0.80
+        topografia = (terreno.get("topografia") or terreno.get("topography") or "").strip().lower()
+        if "acentuado" in topografia:
+            valor_m2 *= 0.80
+
+        valores.append(valor_m2)
 
     return valores
 
@@ -554,45 +562,72 @@ def executar_agente5(
         separar_terreno = False
 
     # ========================================================
-    # 3. VALOR M2 DA CONSTRUCAO POR PADRAO
-    # Se separar_terreno=True: so usa comparaveis com area_terreno
-    # e desconta o terreno antes de calcular m2 construcao.
-    # Se separar_terreno=False: usa preco/area direto.
+    # 3. DUAS SERIES DE M2 DA CONSTRUCAO (fiel a planilha)
+    # Serie 1: desconta terreno usando m2_terreno_MINIMO
+    # Serie 2: desconta terreno usando m2_terreno_MEDIO
+    # Para apto/sala: preco/area direto (sem desconto terreno)
     # ========================================================
 
-    grupos_construcao = agrupar_m2_construcao_por_padrao(
-        comparaveis=comparaveis_zona,
-        valor_m2_terreno_zona=medio_m2_terreno,
-        dados_ag3=dados_ag3,
-        separar_terreno=separar_terreno
-    )
+    valores_m2_construcao_min_terreno = []
+    valores_m2_construcao_med_terreno = []
 
-    valores_padrao_alvo = grupos_construcao.get(padrao_alvo, [])
+    for imovel in comparaveis_zona:
+        tipo_comp = normalizar_tipo(imovel.get("propertyType", ""))
+        if tipo_comp in TIPOS_TERRENO:
+            continue
 
-    if valores_padrao_alvo:
-        menor_m2_construcao = min(valores_padrao_alvo)
-        medio_m2_construcao = calcular_estatistica(valores_padrao_alvo, metodo=metodo_media)
-    else:
-        # Fallback: usa todos os padroes
-        todos_valores = (
-            grupos_construcao["baixo"] +
-            grupos_construcao["medio"] +
-            grupos_construcao["alto"]
-        )
-        if todos_valores:
-            menor_m2_construcao = min(todos_valores)
-            medio_m2_construcao = calcular_estatistica(todos_valores, metodo=metodo_media)
-            avisos.append(
-                f"Nao havia amostras suficientes para o padrao '{padrao_alvo}'. "
-                "Foi usada a base geral de construcao da zona homogenea."
-            )
+        preco_comp = extrair_preco(imovel)
+        area_construida_comp = extrair_area(imovel)
+        if not preco_comp or not area_construida_comp or area_construida_comp <= 0:
+            continue
+
+        # Apartamento/Sala: preco/area direto (terreno = 0)
+        if tipo_comp in TIPOS_CONDOMINIAIS:
+            m2_valor = preco_comp / area_construida_comp
+            valores_m2_construcao_min_terreno.append(m2_valor)
+            valores_m2_construcao_med_terreno.append(m2_valor)
+            continue
+
+        # Casa/Loja/Galpao: desconta terreno
+        if separar_terreno:
+            area_terreno_comp = extrair_area_terreno_imovel(imovel)
+            if not area_terreno_comp or area_terreno_comp <= 0:
+                # Sem area terreno: usa preco/area como fallback
+                m2_valor = preco_comp / area_construida_comp
+                valores_m2_construcao_min_terreno.append(m2_valor)
+                valores_m2_construcao_med_terreno.append(m2_valor)
+                continue
+
+            # Serie MIN/TERRENO
+            valor_terreno_est_min = menor_m2_terreno * area_terreno_comp
+            valor_constr_min = preco_comp - valor_terreno_est_min
+            if valor_constr_min > 0:
+                valores_m2_construcao_min_terreno.append(valor_constr_min / area_construida_comp)
+
+            # Serie MED/TERRENO
+            valor_terreno_est_med = medio_m2_terreno * area_terreno_comp
+            valor_constr_med = preco_comp - valor_terreno_est_med
+            if valor_constr_med > 0:
+                valores_m2_construcao_med_terreno.append(valor_constr_med / area_construida_comp)
         else:
-            menor_m2_construcao = 0.0
-            medio_m2_construcao = 0.0
-            if not eh_terreno and area_construida_alvo > 0:
-                avisos.append(
-                    "Nao foram encontrados imoveis comparaveis para calcular o valor m2 da construcao."
-                )
+            # Nao separa terreno: preco/area direto
+            m2_valor = preco_comp / area_construida_comp
+            valores_m2_construcao_min_terreno.append(m2_valor)
+            valores_m2_construcao_med_terreno.append(m2_valor)
+
+    # Combina as duas series para MIN e MEDIA
+    todos_valores_construcao = valores_m2_construcao_min_terreno + valores_m2_construcao_med_terreno
+
+    if todos_valores_construcao:
+        menor_m2_construcao = min(todos_valores_construcao)
+        medio_m2_construcao = calcular_estatistica(todos_valores_construcao, metodo=metodo_media)
+    else:
+        menor_m2_construcao = 0.0
+        medio_m2_construcao = 0.0
+        if not eh_terreno and area_construida_alvo > 0:
+            avisos.append(
+                "Nao foram encontrados imoveis comparaveis para calcular o valor m2 da construcao."
+            )
 
     # ========================================================
     # 4. CALCULO DO TERRENO
@@ -643,16 +678,14 @@ def executar_agente5(
     valor_liquidez = valor_medio_imovel * (1 - desconto_liquidez)
 
     # ========================================================
-    # 7. TEMPO DE LIQUIDEZ
+    # 7. LIQUIDEZ (planilha nao calcula — campos null)
+    # Score de liquidez e tempo estimado nao fazem parte
+    # da metodologia da planilha. Serao adicionados em versao futura.
     # ========================================================
 
-    score_liquidez = calcular_score_liquidez(
-        score_agente3=score_agente3,
-        score_agente4=score_agente4,
-        desconto_liquidez=desconto_liquidez
-    )
-
-    classificacao_liquidez, tempo_estimado = classificar_tempo_liquidez(score_liquidez)
+    score_liquidez = None
+    classificacao_liquidez = None
+    tempo_estimado = None
 
     # ========================================================
     # 8. RESULTADO FINAL
@@ -677,23 +710,21 @@ def executar_agente5(
                 "metodo": metodo_media,
                 "valores_individuais": [round(v, 2) for v in valores_m2_terreno],
             },
-            "construcao_por_padrao": {
-                "baixo": {
-                    "quantidade_amostras": len(grupos_construcao["baixo"]),
-                    "valores_m2": [round(v, 2) for v in grupos_construcao["baixo"]],
+            "construcao": {
+                "serie_min_terreno": {
+                    "quantidade_amostras": len(valores_m2_construcao_min_terreno),
+                    "valores_m2": [round(v, 2) for v in valores_m2_construcao_min_terreno],
                 },
-                "medio": {
-                    "quantidade_amostras": len(grupos_construcao["medio"]),
-                    "valores_m2": [round(v, 2) for v in grupos_construcao["medio"]],
+                "serie_med_terreno": {
+                    "quantidade_amostras": len(valores_m2_construcao_med_terreno),
+                    "valores_m2": [round(v, 2) for v in valores_m2_construcao_med_terreno],
                 },
-                "alto": {
-                    "quantidade_amostras": len(grupos_construcao["alto"]),
-                    "valores_m2": [round(v, 2) for v in grupos_construcao["alto"]],
+                "combinados": {
+                    "quantidade_total": len(todos_valores_construcao),
+                    "menor_valor_m2": round(menor_m2_construcao, 2),
+                    "valor_m2_referencia": round(medio_m2_construcao, 2),
+                    "metodo": metodo_media,
                 },
-                "padrao_usado": padrao_alvo,
-                "menor_valor_m2_usado": round(menor_m2_construcao, 2),
-                "valor_m2_referencia_usado": round(medio_m2_construcao, 2),
-                "metodo": metodo_media,
             },
         },
         "calculo_terreno": {
@@ -707,8 +738,7 @@ def executar_agente5(
         },
         "calculo_construcao": {
             "aplicado": construcao_aplicada,
-            "formula": "valor_m2_construcao_padrao * area_construida",
-            "padrao_usado": padrao_alvo,
+            "formula": "valor_m2_construcao * area_construida",
             "valor_m2_menor": round(menor_m2_construcao, 2),
             "valor_m2_referencia": round(medio_m2_construcao, 2),
             "area_construida_m2": area_construida_alvo,
@@ -723,29 +753,29 @@ def executar_agente5(
             "valor_liquidez_arredondado": arredondar_mil(valor_liquidez),
         },
         "liquidez": {
-            "score_liquidez": round(score_liquidez, 3),
-            "classificacao": classificacao_liquidez,
-            "tempo_estimado": tempo_estimado,
-            "tempo_liquidez_regional_ag4": dados_ag4.get("resumo_scores", {}).get("tempo_liquidez_regional")
-                or dados_ag4.get("analise_llm", {}).get("tempo_liquidez_regional"),
-            "composicao_score": {
-                "score_qualitativo_ag3": score_agente3,
-                "peso_qualitativo": 0.35,
-                "score_infraestrutura_ag4": score_agente4,
-                "peso_infraestrutura": 0.40,
-                "fator_preco": round(1 - desconto_liquidez, 2),
-                "peso_preco": 0.25,
-            },
+            "score_liquidez": None,
+            "classificacao": None,
+            "tempo_estimado": None,
+            "nota": "Score de liquidez e tempo de venda nao sao calculados nesta versao (fidelidade a planilha).",
+        },
+        "auditoria": {
+            "valores_m2_terreno": [round(v, 2) for v in valores_m2_terreno],
+            "valor_m2_terreno_minimo": round(menor_m2_terreno, 2),
+            "valor_m2_terreno_medio": round(medio_m2_terreno, 2),
+            "m2_construcao_min_terreno": [round(v, 2) for v in valores_m2_construcao_min_terreno],
+            "m2_construcao_med_terreno": [round(v, 2) for v in valores_m2_construcao_med_terreno],
+            "valores_m2_construcao_combinados": [round(v, 2) for v in todos_valores_construcao],
+            "valor_m2_construcao_minimo": round(menor_m2_construcao, 2),
+            "valor_m2_construcao_medio": round(medio_m2_construcao, 2),
         },
         "avisos": avisos,
         "justificativa": (
             f"O valor do imovel foi estimado a partir do m2 da zona homogenea. "
             f"Terreno: {len(valores_m2_terreno)} amostras, m2 referencia R$ {medio_m2_terreno:.2f}. "
-            f"Construcao (padrao {padrao_alvo}): {len(valores_padrao_alvo)} amostras, "
+            f"Construcao: {len(todos_valores_construcao)} amostras (2 series combinadas), "
             f"m2 referencia R$ {medio_m2_construcao:.2f}. "
             f"Valor medio estimado: R$ {valor_medio_imovel:,.2f}. "
-            f"Valor de liquidez (desconto {desconto_liquidez*100:.0f}%): R$ {valor_liquidez:,.2f}. "
-            f"Tempo estimado de venda: {tempo_estimado} ({classificacao_liquidez})."
+            f"Valor de liquidez (desconto 10%%): R$ {valor_liquidez:,.2f}."
         ),
     }
 
@@ -806,9 +836,6 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
     )
     logger.info(
         f"  Valor liquidez: R$ {resultado['avaliacao']['valor_liquidez']:,.2f}"
-    )
-    logger.info(
-        f"  Tempo estimado: {resultado['liquidez']['tempo_estimado']}"
     )
 
     return resultado
