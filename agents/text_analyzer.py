@@ -291,13 +291,23 @@ Não crie campos além dos especificados.
             except Exception:
                 pass
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[types.Content(role="user", parts=parts)],
-            config=types.GenerateContentConfig(temperature=0),
-        )
-
-        texto_resp = response.text or ""
+        # Retry: tenta ate 2x se Gemini der 500
+        texto_resp = ""
+        for tentativa in range(2):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[types.Content(role="user", parts=parts)],
+                    config=types.GenerateContentConfig(temperature=0),
+                )
+                texto_resp = response.text or ""
+                break
+            except Exception as e:
+                if "500" in str(e) and tentativa == 0:
+                    logger.warning(f"Gemini 500 — retry em 3s...")
+                    time.sleep(3)
+                    continue
+                raise
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
             logger.warning("Gemini nao retornou JSON valido")
@@ -308,7 +318,85 @@ Não crie campos além dos especificados.
         return resultado
 
     except Exception as e:
-        logger.error(f"Gemini falhou: {e} — tentando NVIDIA NIM")
+        logger.error(f"Gemini falhou: {e} — tentando Groq qwen3.6-27b")
+        return _analisar_imovel_vision_groq(imovel)
+
+
+def _analisar_imovel_vision_groq(imovel: dict) -> dict:
+    """
+    Fallback 1: Groq qwen3.6-27b (multimodal, ate 5 fotos por request).
+    Envia texto + ate 5 fotos via URL numa unica chamada.
+    """
+    try:
+        from groq import Groq
+
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key:
+            return _analisar_imovel_vision_nvidia(imovel)
+
+        client = Groq(api_key=api_key)
+
+        titulo    = imovel.get("title", "") or ""
+        descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
+        tipo      = imovel.get("propertyType", "") or ""
+        area      = imovel.get("area", "")
+        quartos   = imovel.get("bedrooms", "")
+        banheiros = imovel.get("bathrooms", "")
+        suites    = imovel.get("suites", "") or ""
+        vagas     = imovel.get("parkingSpaces", "")
+        preco     = imovel.get("priceFormatted", "") or imovel.get("price", "")
+        bairro    = imovel.get("neighborhood", "") or imovel.get("bairro", "") or ""
+        cidade    = imovel.get("city", "") or imovel.get("cidade", "") or ""
+        images    = imovel.get("images", []) or []
+
+        # Groq aceita max 5 imagens por request
+        if len(images) <= 5:
+            fotos_selecionadas = images
+        else:
+            step = len(images) / 5
+            indices = [int(i * step) for i in range(5)]
+            fotos_selecionadas = [images[i] for i in indices]
+
+        prompt_texto = (
+            f"Voce e um avaliador imobiliario. Analise este imovel com base no texto e fotos.\n"
+            f"Titulo: {titulo[:200]}\nDescricao: {descricao[:400]}\n"
+            f"Tipo: {tipo} | Area: {area}m2 | Quartos: {quartos} | Banheiros: {banheiros} | "
+            f"Suites: {suites} | Vagas: {vagas} | Preco: {preco} | Bairro: {bairro} | Cidade: {cidade}\n\n"
+            f"Retorne SOMENTE JSON valido:\n"
+            f'{{"estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",'
+            f'"padrao_acabamento": "alto_padrao|medio|simples|desconhecido",'
+            f'"pontos_positivos": [],'
+            f'"pontos_negativos": [],'
+            f'"qualidade_imagens": "boa|razoavel|ruim",'
+            f'"confianca_extracao": "baixa|media|alta",'
+            f'"evidencias": {{"conservacao": [], "acabamento": []}},'
+            f'"observacoes": []}}'
+        )
+
+        # Monta content com texto + fotos como URLs
+        content = [{"type": "text", "text": prompt_texto}]
+        for url in fotos_selecionadas:
+            content.append({"type": "image_url", "image_url": {"url": url}})
+
+        response = client.chat.completions.create(
+            model="qwen/qwen3.6-27b",
+            messages=[{"role": "user", "content": content}],
+            temperature=0,
+            max_completion_tokens=1024,
+        )
+
+        texto_resp = response.choices[0].message.content or ""
+        m = re.search(r"\{[\s\S]+\}", texto_resp)
+        if not m:
+            logger.warning("Groq qwen3.6-27b nao retornou JSON valido — tentando NVIDIA NIM")
+            return _analisar_imovel_vision_nvidia(imovel)
+
+        resultado = json.loads(m.group(0))
+        resultado["fotos_analisadas"] = len(fotos_selecionadas)
+        return resultado
+
+    except Exception as e:
+        logger.error(f"Groq qwen3.6-27b falhou: {e} — tentando NVIDIA NIM")
         return _analisar_imovel_vision_nvidia(imovel)
 
 
@@ -845,6 +933,14 @@ def analisar_comparaveis(
                 f"class={analise_alvo['classificacao_qualitativa']} | "
                 f"fotos={analise_alvo['fotos_analisadas']}")
     time.sleep(2.0)  # 2s entre chamadas
+
+    # Limita a 20 comparaveis (os melhores por ranking_llm)
+    MAX_COMPARAVEIS_AG3 = 20
+    if len(comparaveis) > MAX_COMPARAVEIS_AG3:
+        # Ordena por ranking_llm (menor = melhor) e pega os top 20
+        comparaveis.sort(key=lambda x: x.get("ranking_llm") or 999)
+        logger.info(f"Limitando de {len(comparaveis)} para {MAX_COMPARAVEIS_AG3} comparaveis (top ranking)")
+        comparaveis = comparaveis[:MAX_COMPARAVEIS_AG3]
 
     logger.info(f"Analisando {len(comparaveis)} comparaveis (Cluster A + na_zona)...")
     com_ok = 0
