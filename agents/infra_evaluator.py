@@ -147,6 +147,11 @@ PESOS_DISTANCIA = {
         "401_800": 0.90,
         "801_1500": 0.70
     },
+    "servicos_e_alimentacao": {
+        "0_400": 1.00,
+        "401_800": 0.60,
+        "801_1500": 0.20
+    },
 }
 
 # Mapeamento de POIs por categoria usando (chave_osm, valor_osm)
@@ -191,6 +196,12 @@ POIS_POR_CATEGORIA = {
         ("amenity", "college"),
         ("shop", "mall"),
     ],
+    "servicos_e_alimentacao": [
+        ("amenity", "restaurant"),
+        ("amenity", "cafe"),
+        ("amenity", "bank"),
+        ("amenity", "atm"),
+    ],
 }
 
 # Mapeamento reverso: (chave, valor) → categoria (para classificação rápida)
@@ -211,6 +222,14 @@ for categoria, tags in POIS_POR_CATEGORIA.items():
 # Distancia para deduplicacao de paradas de transporte (metros)
 DEDUP_TRANSPORTE_METROS = 40
 
+# Limites por subtipo para servicos_e_alimentacao (evita inflacao por concentracao)
+LIMITES_SERVICOS_ALIMENTACAO = {
+    "restaurant": 2,
+    "cafe": 2,
+    "bank": 1,
+    "atm": 1,
+}
+
 # Normalizador por categoria (qtd ponderada esperada para score = 1.0)
 NORMALIZADORES = {
     "comercio":           5,
@@ -220,6 +239,7 @@ NORMALIZADORES = {
     "lazer":              3,
     "hospital":           2,
     "equipamentos_regionais": 2,
+    "servicos_e_alimentacao": 4,
 }
 
 
@@ -620,6 +640,61 @@ def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
                 }
             continue
 
+        # Tratamento especial para servicos_e_alimentacao (limite por subtipo)
+        if categoria == "servicos_e_alimentacao":
+            # Coleta todos os POIs dessa categoria de todas as faixas
+            todos_pois = []
+            for _, _, nome_faixa in FAIXAS:
+                pois_faixa = pois_por_faixa.get(nome_faixa, {}).get(categoria, [])
+                for poi in pois_faixa:
+                    todos_pois.append({**poi, "faixa_original": nome_faixa})
+
+            # Agrupa por subtipo, ordena por distancia, aplica limite
+            from collections import defaultdict
+            por_subtipo = defaultdict(list)
+            for poi in todos_pois:
+                por_subtipo[poi.get("tipo", "?")].append(poi)
+
+            # Ordena cada subtipo por distancia e aplica limite
+            pois_selecionados = []
+            qtd_bruta_por_tipo = {}
+            qtd_considerada_por_tipo = {}
+            for subtipo, pois_sub in por_subtipo.items():
+                pois_sub.sort(key=lambda x: x.get("distancia_metros", 9999))
+                qtd_bruta_por_tipo[subtipo] = len(pois_sub)
+                limite = LIMITES_SERVICOS_ALIMENTACAO.get(subtipo, 2)
+                selecionados = pois_sub[:limite]
+                qtd_considerada_por_tipo[subtipo] = len(selecionados)
+                pois_selecionados.extend(selecionados)
+
+            # Distribui nas faixas e calcula poi_efetivo
+            qtd_por_faixa = {"0_400": 0, "401_800": 0, "801_1500": 0}
+            total_ponderado = 0.0
+            tipos_encontrados = set()
+            for poi in pois_selecionados:
+                faixa_poi = poi.get("faixa_original")
+                if faixa_poi:
+                    qtd_por_faixa[faixa_poi] = qtd_por_faixa.get(faixa_poi, 0) + 1
+                    peso = pesos_faixa.get(faixa_poi, 0)
+                    total_ponderado += peso
+                    tipos_encontrados.add(poi.get("tipo", "?"))
+
+            normalizador = NORMALIZADORES.get(categoria, 4)
+            score = max(0.0, min(1.0, round(total_ponderado / normalizador, 3)))
+            scores_categoria[categoria] = score
+            detalhes_score[categoria] = {
+                "qtd_0_400": qtd_por_faixa.get("0_400", 0),
+                "qtd_401_800": qtd_por_faixa.get("401_800", 0),
+                "qtd_801_1500": qtd_por_faixa.get("801_1500", 0),
+                "tipos_encontrados": sorted(tipos_encontrados),
+                "quantidade_bruta_por_tipo": qtd_bruta_por_tipo,
+                "quantidade_considerada_por_tipo": qtd_considerada_por_tipo,
+                "poi_efetivo": round(total_ponderado, 3),
+                "normalizador": normalizador,
+                "score": score,
+            }
+            continue
+
         # Calcula para categorias normais
         qtd_por_faixa = {}
         total_ponderado = 0.0
@@ -777,7 +852,7 @@ Scores por categoria:
 Score final de infraestrutura: {score_final}
 Classificacao da infraestrutura: {classificacao}
 
-As categorias utilizadas sao: comercio, educacao, saude_basica, transporte, lazer, hospital, equipamentos_regionais.
+As categorias utilizadas sao: comercio, educacao, saude_basica, transporte, lazer, hospital, equipamentos_regionais, servicos_e_alimentacao.
 
 OBJETIVO DA INTERPRETACAO
 Produza somente uma interpretacao qualitativa dos resultados ja calculados.
