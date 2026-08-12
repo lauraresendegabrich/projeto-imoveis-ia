@@ -110,12 +110,45 @@ class AthenaClient:
 
     def buscar_bairro(self, cidade: str, bairro: str, tipo: str = None, limit: int = 200) -> list[dict]:
         """Busca anúncios de um bairro específico, opcionalmente filtrado por tipo."""
+        import unicodedata
+        # Remove acentos do bairro (banco pode ter sem acento)
+        bairro_sem_acento = unicodedata.normalize("NFD", bairro).encode("ascii", "ignore").decode()
+        # Tenta com acento primeiro, depois sem
         conditions = [f"cidade = '{cidade}'", f"bairro = '{bairro}'", "finalidade = 'venda'"]
         if tipo:
             conditions.append(f"tipo = '{tipo}'")
         where = " AND ".join(conditions)
         sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
-        return self.executar_query(sql)
+        resultados = self.executar_query(sql)
+
+        # Se não achou com acento, tenta sem
+        if not resultados and bairro_sem_acento != bairro:
+            conditions[1] = f"bairro = '{bairro_sem_acento}'"
+            where = " AND ".join(conditions)
+            sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
+            resultados = self.executar_query(sql)
+
+        return resultados
+
+    def buscar_rua(self, cidade: str, bairro: str, rua: str, tipo: str = None, limit: int = 50) -> list[dict]:
+        """Busca anúncios de uma rua específica."""
+        import unicodedata
+        rua_sem_acento = unicodedata.normalize("NFD", rua).encode("ascii", "ignore").decode()
+        conditions = [f"cidade = '{cidade}'", f"bairro = '{bairro}'", f"rua LIKE '%{rua}%'", "finalidade = 'venda'"]
+        if tipo:
+            conditions.append(f"tipo = '{tipo}'")
+        where = " AND ".join(conditions)
+        sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
+        resultados = self.executar_query(sql)
+
+        # Se não achou com acento, tenta sem
+        if not resultados and rua_sem_acento != rua:
+            conditions[2] = f"rua LIKE '%{rua_sem_acento}%'"
+            where = " AND ".join(conditions)
+            sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
+            resultados = self.executar_query(sql)
+
+        return resultados
 
     def estatisticas_cidade(self, cidade: str) -> dict:
         """Retorna estatísticas de uma cidade."""
