@@ -46,7 +46,7 @@ COMO FUNCIONA:
     transporte       | 1.0  | 0.6  |  —    | Onibus: quanto mais perto melhor
     lazer            | 1.0  | 0.6  |  —    | Parque/academia: uso frequente
     hospital         |  —   | 0.6  | 1.0   | Nao precisa estar a 400m
-    grande_equipamento|  —  | 0.6  | 1.0   | Shopping/universidade: regional
+    equipamentos_regionais|  —  | 0.6  | 1.0   | Shopping/universidade: regional
 
     score_categoria = (qtd_raio × peso_raio) / normalizador
     score_final = media ponderada dos scores por categoria
@@ -142,7 +142,7 @@ PESOS_DISTANCIA = {
         "401_800": 0.90,
         "801_1500": 0.70
     },
-    "grande_equipamento": {
+    "equipamentos_regionais": {
         "0_400": 1.00,
         "401_800": 0.90,
         "801_1500": 0.70
@@ -182,10 +182,10 @@ TAG_PARA_CATEGORIA = {
     "playground":    "lazer",
     # Hospital
     "hospital":      "hospital",
-    # Grande equipamento
-    "university":    "grande_equipamento",
-    "shopping_mall": "grande_equipamento",
-    "mall":          "grande_equipamento",
+    # Equipamentos regionais
+    "university":    "equipamentos_regionais",
+    "shopping_mall": "equipamentos_regionais",
+    "mall":          "equipamentos_regionais",
 }
 
 # Normalizador por categoria (qtd ponderada esperada para score = 1.0)
@@ -196,7 +196,7 @@ NORMALIZADORES = {
     "transporte":         6,
     "lazer":              3,
     "hospital":           2,
-    "grande_equipamento": 2,
+    "equipamentos_regionais": 2,
 }
 
 
