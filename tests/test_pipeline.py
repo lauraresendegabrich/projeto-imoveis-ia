@@ -78,12 +78,12 @@ if Path("data/infra_avaliada_ag4.json").exists():
 if Path("data/preco_liquidez_ag5.json").exists():
     with open("data/preco_liquidez_ag5.json", encoding="utf-8") as f:
         ag5 = json.load(f)
-    assert "avaliacao" in ag5, "Ag.5: falta avaliacao"
-    assert "liquidez" in ag5, "Ag.5: falta liquidez"
-    assert ag5["avaliacao"]["valor_medio_imovel"] > 0, "Ag.5: valor deve ser > 0"
-    print(f"  ✅ Ag. 5: valor médio = R$ {ag5['avaliacao']['valor_medio_imovel']:,.2f}")
-    print(f"  ✅ Ag. 5: liquidez = R$ {ag5['avaliacao']['valor_liquidez']:,.2f}")
-    print(f"  ✅ Ag. 5: tempo = {ag5['liquidez']['tempo_estimado']}")
+    assert "avaliacao_planilha" in ag5, "Ag.5: falta avaliacao_planilha"
+    assert "liquidez_experimental" in ag5, "Ag.5: falta liquidez_experimental"
+    assert ag5["avaliacao_planilha"]["valor_medio_imovel"] > 0, "Ag.5: valor deve ser > 0"
+    print(f"  ✅ Ag. 5: valor médio = R$ {ag5['avaliacao_planilha']['valor_medio_imovel']:,.2f}")
+    print(f"  ✅ Ag. 5: liquidez = R$ {ag5['avaliacao_planilha']['valor_liquidez']:,.2f}")
+    print(f"  ✅ Ag. 5: tempo = {ag5['liquidez_experimental']['tempo_estimado']}")
 
 # ==============================================================
 # TESTE 3: Teste de falha (cidade sem imóveis)

@@ -26,9 +26,9 @@ else:
             dados_ag3=ag3,
             dados_ag4=ag4,
         )
-        print(f"\n✅ Valor médio: R$ {resultado['avaliacao']['valor_medio_imovel']:,.2f}")
-        print(f"   Valor liquidez: R$ {resultado['avaliacao']['valor_liquidez']:,.2f}")
-        print(f"   Tempo estimado: {resultado['liquidez']['tempo_estimado']}")
+        print(f"\n✅ Valor médio: R$ {resultado['avaliacao_planilha']['valor_medio_imovel']:,.2f}")
+        print(f"   Valor liquidez: R$ {resultado['avaliacao_planilha']['valor_liquidez']:,.2f}")
+        print(f"   Tempo estimado: {resultado['liquidez_experimental']['tempo_estimado']}")
     except Exception as e:
         print(f"\n❌ ERRO: {e}")
         import traceback

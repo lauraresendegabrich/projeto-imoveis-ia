@@ -113,21 +113,37 @@ def normalizar_padrao(padrao: str) -> str:
 
 def calcular_media_aparada(valores: List[float], proporcao: float = 0.5) -> float:
     """
-    Media aparada (TRIMMEAN): remove proporcao/2 de cada extremo.
-    Se poucos dados, usa mediana.
+    Media aparada (TRIMMEAN): reproduz exatamente o TRIMMEAN(range, 0.5) do Excel.
+
+    Passos:
+      1. Remove valores invalidos/nulos (mantém apenas > 0)
+      2. Ordena os valores
+      3. Calcula n * proporcao como quantidade total candidata a exclusao
+      4. Arredonda para baixo ate o multiplo de 2 mais proximo (floor par)
+      5. Remove metade do inicio e metade do final
+      6. Calcula a media aritmetica dos valores restantes
+      7. Se quantidade a remover = 0, calcula media de todos os valores validos
+
+    Nunca usa mediana como fallback.
     """
     valores = sorted([v for v in valores if v and v > 0])
     if not valores:
         raise ValueError("Lista de valores vazia.")
-    if len(valores) < 4:
-        return median(valores)
-    quantidade_remover = int(len(valores) * proporcao)
+    n = len(valores)
+    quantidade_remover = int(n * proporcao)
+    # Arredonda para baixo ate multiplo de 2
     if quantidade_remover % 2 != 0:
         quantidade_remover -= 1
+    # Se quantidade a remover >= n, reduz ate sobrar pelo menos 1 valor
+    while quantidade_remover >= n:
+        quantidade_remover -= 2
+    if quantidade_remover < 0:
+        quantidade_remover = 0
     remover_cada_lado = quantidade_remover // 2
-    valores_filtrados = valores[remover_cada_lado: len(valores) - remover_cada_lado]
-    if not valores_filtrados:
-        return median(valores)
+    if remover_cada_lado > 0:
+        valores_filtrados = valores[remover_cada_lado: n - remover_cada_lado]
+    else:
+        valores_filtrados = valores
     return mean(valores_filtrados)
 
 
@@ -678,14 +694,13 @@ def executar_agente5(
     valor_liquidez = valor_medio_imovel * (1 - desconto_liquidez)
 
     # ========================================================
-    # 7. LIQUIDEZ (planilha nao calcula — campos null)
-    # Score de liquidez e tempo estimado nao fazem parte
-    # da metodologia da planilha. Serao adicionados em versao futura.
+    # 7. LIQUIDEZ EXPERIMENTAL (nao faz parte da planilha)
+    # Heuristica multiagente para discussao metodologica.
+    # NAO modifica valor_minimo, valor_medio nem valor_liquidez.
     # ========================================================
 
-    score_liquidez = None
-    classificacao_liquidez = None
-    tempo_estimado = None
+    score_liquidez = calcular_score_liquidez(score_agente3, score_agente4, desconto_liquidez)
+    classificacao_liquidez, tempo_estimado = classificar_tempo_liquidez(score_liquidez)
 
     # ========================================================
     # 8. RESULTADO FINAL
@@ -745,18 +760,22 @@ def executar_agente5(
             "valor_construcao_minimo": round(valor_construcao_minimo, 2),
             "valor_construcao_medio": round(valor_construcao_medio, 2),
         },
-        "avaliacao": {
+        "avaliacao_planilha": {
             "valor_minimo_imovel": round(valor_minimo_imovel, 2),
             "valor_medio_imovel": round(valor_medio_imovel, 2),
             "desconto_liquidez_percentual": round(desconto_liquidez * 100, 1),
             "valor_liquidez": round(valor_liquidez, 2),
             "valor_liquidez_arredondado": arredondar_mil(valor_liquidez),
         },
-        "liquidez": {
-            "score_liquidez": None,
-            "classificacao": None,
-            "tempo_estimado": None,
-            "nota": "Score de liquidez e tempo de venda nao sao calculados nesta versao (fidelidade a planilha).",
+        "liquidez_experimental": {
+            "score_liquidez": round(score_liquidez, 3),
+            "classificacao": classificacao_liquidez,
+            "tempo_estimado": tempo_estimado,
+            "metodo": "heuristica_experimental",
+            "pesos": "qualidade 35% + infraestrutura 40% + fator_preco 25%",
+            "score_agente3_usado": round(score_agente3, 3) if score_agente3 is not None else None,
+            "score_agente4_usado": round(score_agente4, 3) if score_agente4 is not None else None,
+            "aviso": "Resultado experimental ainda nao validado com Days on Market dos comparaveis.",
         },
         "auditoria": {
             "valores_m2_terreno": [round(v, 2) for v in valores_m2_terreno],
@@ -832,10 +851,10 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
     salvar_json(resultado, CAMINHO_SAIDA)
     logger.info(f"Agente 5: resultado salvo em {CAMINHO_SAIDA}")
     logger.info(
-        f"  Valor medio: R$ {resultado['avaliacao']['valor_medio_imovel']:,.2f}"
+        f"  Valor medio: R$ {resultado['avaliacao_planilha']['valor_medio_imovel']:,.2f}"
     )
     logger.info(
-        f"  Valor liquidez: R$ {resultado['avaliacao']['valor_liquidez']:,.2f}"
+        f"  Valor liquidez: R$ {resultado['avaliacao_planilha']['valor_liquidez']:,.2f}"
     )
 
     return resultado

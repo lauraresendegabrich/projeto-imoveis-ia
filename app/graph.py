@@ -266,7 +266,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
         logger.info("Agente 5: estimando preço e liquidez...")
         resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
         logger.info(
-            f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao', {}).get('valor_medio_imovel', '?'):,.2f}"
+            f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao_planilha', {}).get('valor_medio_imovel', '?'):,.2f}"
         )
     except Exception as e:
         falhas.append(f"Agente 5 falhou: {str(e)}")

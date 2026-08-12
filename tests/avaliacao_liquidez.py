@@ -653,10 +653,10 @@ def rodar_avaliacao(amostra: list[dict]) -> list[dict]:
             # Extrai preço do Agente 5
             ag5 = resultado_pipeline.get("preco_estimado", {})
             if ag5 and isinstance(ag5, dict):
-                avaliacao = ag5.get("avaliacao", {})
+                avaliacao = ag5.get("avaliacao_planilha", {})
                 preco_sistema = avaliacao.get("valor_medio_imovel", 0)
                 preco_liquidez = avaliacao.get("valor_liquidez", 0)
-                liquidez_info = ag5.get("liquidez", {})
+                liquidez_info = ag5.get("liquidez_experimental", {})
                 tempo_estimado = liquidez_info.get("tempo_estimado", "N/A")
                 score_liquidez = liquidez_info.get("score_liquidez", 0)
                 classificacao = liquidez_info.get("classificacao", "N/A")

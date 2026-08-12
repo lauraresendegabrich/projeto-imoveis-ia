@@ -2,318 +2,337 @@
 
 ## Objetivo
 
-Coletar imóveis comparáveis ao imóvel alvo a partir de portais imobiliários brasileiros, enriquecendo cada registro com data de publicação (`publishedAt`) e descrição completa do anúncio. O resultado alimenta o Agente 2 para identificação de comparáveis.
-
-A coleta precisa ser **automatizada, escalável e gratuita** — sem depender de scraping manual ou APIs pagas por volume.
+Coletar imóveis comparáveis ao imóvel alvo. Usa Amazon Athena como fonte principal e Apify como fallback. Normaliza campos, filtra leilões/duplicatas e ordena por proximidade.
 
 ---
 
-## Problema Central: Dados Estruturados em Portais Imobiliários
+## Fontes de Dados
 
-Portais como VivaReal, ZAP e OLX não oferecem APIs públicas. Os dados estão em páginas HTML renderizadas por JavaScript, o que impede scraping simples com `requests.get`. Além disso, cada portal tem estrutura diferente, mecanismos de proteção distintos (Cloudflare, rate limiting) e campos inconsistentes entre si.
-
-O campo `publishedAt` (data de publicação do anúncio) é especialmente crítico para a avaliação imobiliária — imóveis publicados há mais de 6 meses com preço inalterado indicam sobrepreço. Esse campo não é retornado pela maioria dos scrapers e exigiu solução específica.
-
----
-
-## Abordagem Final
-
-### Fonte principal: Apify (actor `ocrad/brazil-real-estate-scraper`)
-
-O Apify é uma plataforma de web scraping que executa "actors" — scripts de scraping em nuvem. O actor `ocrad/brazil-real-estate-scraper` foi desenvolvido especificamente para portais imobiliários brasileiros: recebe URLs de listagem, executa JavaScript no navegador headless e extrai os anúncios.
-
-**Por que Apify e não scraping local?**
-- Portais imobiliários detectam e bloqueiam scrapers locais (Cloudflare, fingerprinting de browser)
-- O Apify roda em infraestrutura com IPs rotativos e browsers reais
-- O free tier ($5/mês de crédito) é suficiente para o volume do projeto (~$0.10 por run)
-
-### Enriquecimento: `requests.get` + regex
-
-O actor retorna dados básicos (título, preço, localização, features). Para obter `publishedAt` e `description`, acessamos a **página individual** de cada anúncio com `requests.get` simples — sem JavaScript, sem Apify. O VivaReal embute um JSON no HTML estático da página com todos os dados estruturados, incluindo `createdAt`.
-
-**Por que não usar o Apify para isso também?**
-- Custo: cada request no Apify consome créditos. Com 100 imóveis, seriam 100 requests extras (~$0.10 adicionais)
-- `requests.get` é gratuito, ilimitado e suficiente para HTML estático
-- O VivaReal não bloqueia `requests.get` simples (sem JavaScript necessário)
+| Fonte | Papel | Quando roda |
+|-------|-------|-------------|
+| **Amazon Athena** | Fonte principal — banco S3 com milhares de anúncios | Sempre (se AWS configurado) |
+| **Apify (ocrad)** | Fallback — scraping em tempo real | Só se Athena retornar < 10 imóveis |
 
 ---
 
-## Fluxo Completo
+## Fluxo Completo (8 etapas)
 
 ```
-1. Monta URLs de listagem por portal e tipo de imóvel
-   → VivaReal: /venda/{estado}/{cidade}/bairros/{bairro}/{tipo}/
-   → LugarCerto: /busca/compra-e-venda/{estado}/{cidade}/{bairro}/{tipo}
-   → Limites: 20 itens/URL (casa), 10 itens/URL (terreno), 30 itens/URL (apto)
-
-2. Envia URLs para o actor Apify (ocrad/brazil-real-estate-scraper)
-   → Actor abre cada URL no browser headless, executa JavaScript
-   → Extrai anúncios: título, preço, localização, features, URL
-   → Aguarda conclusão via polling (status RUNNING → SUCCEEDED)
-   → Salva brutos em data/imoveis_brutos_ocrad.json
-
-3. Normaliza o schema do ocrad para o schema padrão do projeto
-   → Extrai preço (regex em string "R$ 530.000Cond. não informado...")
-   → Extrai área, quartos, banheiros, vagas (features → URL → título)
-   → Extrai localização (location → from_url)
-   → Extrai IPTU e condomínio do campo price_raw
-   → Identifica portal de origem (VivaReal, LugarCerto, etc.)
-
-4. Enriquece cada imóvel com requests.get na página individual
-   → VivaReal (100%): extrai createdAt, description, bathrooms,
-     parkingSpaces, street, streetNumber do JSON embutido no HTML
-   → LugarCerto (parcial): extrai dt_insercao e meta description
-   → OLX: bloqueado por Cloudflare (403) — sem enriquecimento
-   → Pausa de 1s entre requests para não sobrecarregar os servidores
-
-5. Aplica filtros de qualidade
-   → Remove duplicatas por URL
-   → Remove leilões (palavras-chave: "leilão", "hasta pública", "judicial"...)
-   → Remove imóveis sem preço ou sem localização mínima
-   → Filtra por bairro alvo (escopo geográfico)
-   → Normaliza nomes de bairros (acentos, prefixos "Bairro X" → "X")
-
-6. Ordena por proximidade ao imóvel alvo
-   → Mesma rua primeiro
-   → Mesmo bairro depois
-   → Restante da cidade por último
-
-7. Salva resultados
-   → data/imoveis_coletados.json  — todos os imóveis normalizados
-   → data/imoveis_completos.json  — apenas imóveis com publishedAt
+ETAPA 1 — ATHENA (fonte principal)
+ETAPA 2 — APIFY (fallback se Athena < 10)
+ETAPA 3 — NORMALIZAÇÃO DE CAMPOS
+ETAPA 4 — COMBINAÇÃO (athena + apify)
+ETAPA 5 — FILTROS (leilão, campos, duplicatas)
+ETAPA 6 — ESCOPO (mantém só rua/bairro)
+ETAPA 7 — ENRIQUECIMENTO (fotos)
+ETAPA 8 — ORDENAÇÃO (rua > bairro > cidade)
 ```
 
 ---
 
-## Ferramentas Testadas e Descartadas
+## ETAPA 1 — Amazon Athena
 
-### 1. Apify viralanalyzer
-**O que é:** Actor do Apify para portais imobiliários, alternativa ao ocrad.
-**Resultado:** Retornava apenas 10 resultados no free tier — insuficiente para análise estatística de comparáveis.
-**Decisão:** Descartado. Substituído pelo ocrad que retorna 20–30 por URL.
+Queries SQL na tabela `vivareal` (S3/Parquet).
 
-### 2. ZAP Imóveis via ocrad
-**O que é:** Portal imobiliário do grupo OLX Brasil, mesmo grupo do VivaReal.
-**Resultado:** Testado com 26 anúncios — 25 tinham o mesmo `posting_id` do VivaReal. 95% de duplicatas.
-**Decisão:** Removido do código. Gastar créditos do Apify para coletar duplicatas não faz sentido.
+### Limites por tipo (rua + bairro somados)
 
-### 3. Bright Data MCP para OLX
-**O que é:** Serviço de proxy residencial que contorna Cloudflare. Testado para obter `publishedAt` da OLX.
-**Resultado:** Funcionou tecnicamente — conseguiu acessar as páginas da OLX. Porém, a data na página individual aparece como "16/12 às 23:52" (sem ano), tornando o dado impreciso para análise temporal.
-**Decisão:** Descartado. Dado impreciso não justifica o custo ($8/GB).
+**Para `house`:**
 
-### 4. Playwright local
-**O que é:** Biblioteca Python para automação de browser headless (Chromium).
-**Resultado:** Cloudflare detecta e bloqueia Playwright mesmo com configurações de evasão (user-agent, viewport, etc.).
-**Decisão:** Descartado.
+| Tipo SQL | Limite total |
+|----------|-------------|
+| casa | 200 |
+| two_story_house | 50 |
+| village_house | 50 |
+| residential_allotment_land | 60 |
+| allotment_land | 60 |
 
-### 5. ScraperAPI
-**O que é:** Serviço de proxy + rendering que contorna bloqueios.
-**Resultado:** Funcionou no trial de 7 dias. Porém, o plano pago custa $49/mês — inviável para o projeto.
-**Decisão:** Descartado.
+**Para `apartment`:**
 
-### 6. Bright Data Browser API
-**O que é:** API de browser headless gerenciado pela Bright Data.
-**Resultado:** Funcionou. Custo: $8/GB de dados trafegados.
-**Decisão:** Descartada. Custo variável e imprevisível para um projeto acadêmico.
+| Tipo SQL | Limite total |
+|----------|-------------|
+| apartamento | 200 |
+| flat | 50 |
+| cobertura | 50 |
 
-### 7. LLM para acessar URLs e extrair dados
-**O que é:** Tentativa de usar Groq (llama-3.1-8b) e Ollama local para acessar URLs e extrair `publishedAt`.
-**Resultado:** LLMs não acessam a internet via API. São processadores de texto puro — recebem texto e geram texto. Quando o ChatGPT "acessa" uma URL, é uma ferramenta de browsing externa acoplada ao modelo, não o modelo em si. Via API (nosso caso), essa ferramenta não existe. Testado: Groq responde "I'm not able to directly access the URL".
-**Decisão:** Descartado. Confirmou-se empiricamente o que a teoria já indicava.
+### Lógica de busca (para cada tipo)
 
-### 8. Apify Proxy (free tier)
-**O que é:** Recurso do Apify para rotacionar IPs durante a coleta.
-**Resultado:** Com `useApifyProxy: true`, o actor retornou 0 resultados. Sem proxy: funciona normalmente.
-**Decisão:** Descartado. A documentação do ocrad recomenda proxy para melhores resultados, mas é recurso pago e desnecessário para o volume atual.
+Para cada tipo na lista acima, faz:
 
----
-
-## Portais: Resultado de Cada Um
-
-| Portal | Coleta (ocrad) | publishedAt | Motivo |
-|---|:-:|:-:|---|
-| VivaReal | ✅ ~20–30/URL | ✅ 100% | `createdAt` no HTML estático |
-| LugarCerto | ✅ 1–5/URL | ✅ parcial | `dt_insercao` no HTML, poucos resultados |
-| OLX | ❌ comentado | ❌ | Cloudflare bloqueia `requests.get` — sem publishedAt |
-| ImovelWeb | ❌ comentado | — | Actor não extrai resultados (motivo desconhecido) |
-| MercadoLivre | ❌ comentado | — | Mesmo problema do ImovelWeb |
-| ZAP Imóveis | ❌ removido | — | 95% duplicata do VivaReal |
-
-### Por que OLX foi comentado e não removido
-A OLX retorna resultados via ocrad (~30/URL), mas sem `publishedAt` e sem `description` (Cloudflare bloqueia o enriquecimento). Para o Agente 2, imóveis sem data de publicação são menos confiáveis para análise temporal. A decisão foi comentar a URL para não gastar créditos do Apify com dados incompletos, mas manter o código para reativação futura caso o problema de enriquecimento seja resolvido.
-
----
-
-## Enriquecimento via `requests.get`
-
-### Como o VivaReal expõe os dados
-O VivaReal renderiza a página com JavaScript, mas embute um objeto JSON no HTML estático (dentro de uma tag `<script>`) com todos os dados estruturados do anúncio. Esse JSON inclui `createdAt`, `description`, `bathrooms`, `parkingSpaces`, `street` e `streetNumber`. Um `requests.get` simples (sem JavaScript) já retorna esse HTML com o JSON embutido.
-
-```
-requests.get(url_vivareal) → HTML estático (247KB)
-  → regex: "createdAt":"2026-04-08T00:01:45.354Z"  → publishedAt
-  → regex: "description":"MOBILIADA..."             → description
-  → regex: "bathrooms":4                            → bathrooms
-  → regex: "parkingSpaces":2                        → parkingSpaces
-  → regex: "street":"Rua Franklin Máximo Pereira"   → street
+1. **Busca na RUA** (prioridade)
+```sql
+SELECT * FROM vivareal 
+WHERE cidade='Campinas' AND bairro='Jardim Guanabara' 
+  AND rua LIKE '%Conego Nery%' AND tipo='casa' 
+  AND finalidade='venda' 
+LIMIT 200
 ```
 
-Taxa de sucesso: **100%** nos testes realizados.
+2. **Se rua < limite, complementa com BAIRRO**
+```sql
+-- restante = limite - qtd_rua
+SELECT * FROM vivareal 
+WHERE cidade='Campinas' AND bairro='Jardim Guanabara' 
+  AND tipo='casa' AND finalidade='venda' 
+LIMIT restante
+```
+Remove duplicatas que já vieram na rua.
 
-### LugarCerto
-Não bloqueia `requests.get`. Expõe `dt_insercao` (data de inserção) no HTML e `description` via meta tag. Taxa de sucesso parcial — a meta description é um resumo, não a descrição completa.
+3. **Se TODOS os tipos retornaram 0 → expande pra CIDADE**
+```sql
+SELECT * FROM vivareal 
+WHERE cidade='Campinas' AND tipo='casa' AND finalidade='venda' 
+LIMIT 200
+```
 
-### OLX
-Retorna HTTP 403 (Cloudflare) para qualquer `requests.get`. A data existe na listagem ("16/12/2024, 23:52") mas o actor ocrad não extrai esse campo. Na página individual, a data aparece sem ano ("16/12 às 23:52"), tornando-a imprecisa.
+### Quando o fallback cidade ativa
+
+Só quando **nenhum tipo** encontrou nada (rua + bairro = 0 para TODOS). Exemplo: bairro digitado errado ou não existe no banco.
+
+Se pelo menos 1 tipo trouxe resultados, o fallback cidade NÃO ativa.
+
+### Normalização de acentos
+
+As funções `buscar_rua` e `buscar_bairro` tentam múltiplas variações para lidar com diferenças de acentuação entre o input do usuário e o banco:
+
+**buscar_bairro** (3 tentativas sequenciais):
+1. Nome exato como informado → `bairro = 'Cambuí'`
+2. Sem acento → `bairro = 'Cambui'`
+3. LIKE com parte final (sem prefixos "Jardim", "Vila", "Parque") → `bairro LIKE '%Guanabara%'`
+
+**buscar_rua** (3 tentativas sequenciais):
+1. Nome completo → `rua LIKE '%Rua Doutor Liraucio Gomes%'`
+2. Sem acento → `rua LIKE '%Rua Doutor Liraucio Gomes%'` (se diferente)
+3. Só a parte final (última palavra, ≥4 chars) → `rua LIKE '%Gomes%'`
+
+**Cobertura:**
+- ✅ Input com acento + banco com acento → match direto
+- ✅ Input com acento + banco sem acento → fallback sem acento
+- ✅ Input sem acento + banco sem acento → match direto
+- ✅ Rua com acento diferente → fallback parte final (ex: "Liraucio" → busca "Gomes")
+- ⚠️ Bairro sem acento + banco com acento → pode falhar, expande pra cidade
+
+**Limitação:** Athena/Presto não ignora acentos no LIKE. Se "Cambui" ≠ "Cambuí", a busca falha. Solução: a interface deve preservar acentos.
+
+### Exemplo real (Jardim Eulina, Campinas — house)
+
+```
+casa:                        96 rua + 92 bairro = 188 (limite 200)
+two_story_house:             0
+village_house:               0
+residential_allotment_land:  0 rua + 60 bairro = 60 (limite 60)
+allotment_land:              0 rua + 8 bairro = 8 (limite 60)
+Total: 177 (após dedup)
+Ordenação: 48 na rua | 129 no bairro
+```
+### Exemplo real (Cambuí, Campinas — apartment)
+
+```
+apartamento: 25 rua + 169 bairro = 194 (limite 200)
+flat:        0 rua + 1 bairro = 1 (limite 50)
+cobertura:   0 rua + 10 bairro = 10 (limite 50)
+Total: 199 (após dedup)
+Ordenação: 23 na rua | 176 no bairro
+```
 
 ---
 
-## Limites de Coleta por Tipo de URL
+## ETAPA 2 — Apify (fallback)
 
-Definidos em `_montar_urls_listagem()` e enviados individualmente no payload do Apify:
+Só roda se o total do Athena ficou **< 10 imóveis**.
 
-| Tipo de imóvel | Limite por URL | Justificativa |
+| Portal | URL | Max itens |
+|--------|-----|-----------|
+| VivaReal | `/venda/{estado}/{cidade}/bairros/{bairro}/{tipo}/` | 30 |
+| LugarCerto | `/busca/compra-e-venda/{estado}/{cidade}/{bairro}/{tipo}` | 30 |
+
+Usa o actor `ocrad/brazil-real-estate-scraper` no Apify:
+- Envia URLs de listagem
+- Actor abre com navegador headless, executa JavaScript
+- Retorna anúncios
+
+Depois acessa cada URL individual com `requests.get` para extrair:
+- `publishedAt` (data publicação) do JSON embutido no HTML do VivaReal
+- `description`, `bathrooms`, `parkingSpaces`
+
+**Portais desativados:** OLX (Cloudflare), ImovelWeb (não retorna), MercadoLivre (não retorna), ZAP (95% duplicata do VivaReal).
+
+---
+
+## ETAPA 3 — Normalização de Campos
+
+O Athena retorna strings. O código converte para tipos corretos:
+
+| Campo Athena | Campo normalizado | Tipo |
 |---|---|---|
-| Casa | 20 | Volume adequado para análise sem exceder créditos |
-| Terreno | 10 | Terrenos não passam pelo clustering — volume menor é suficiente |
-| Apartamento | 30 | Maior variação de preço/m² exige mais amostras |
+| preco | price | float |
+| area_construida | area | float |
+| quartos | bedrooms | int |
+| banheiros | bathrooms | int |
+| vagas | parkingSpaces | int |
+| bairro | neighborhood | str |
+| cidade | city | str |
+| estado | state | str |
+| rua | street | str |
+| data_publicacao | publishedAt | str |
+| descricao | description | str |
+| titulo | title | str |
+| latitude / longitude | lat / lon | float |
+| fotos_urls | images | list (split por `\|`) |
+| tipo | propertyType | "Casas" / "Apartamentos" / "Terrenos" |
 
-Antes dessa mudança, o limite era fixo em 30 para todas as URLs (`max_items_per_url: 30`). A diferenciação por tipo reduz o consumo de créditos do Apify e evita coletar terrenos em excesso (que não serão ranqueados pelo Agente 2).
+Templates das fotos resolvidos:
+- `{description}` → "imovel"
+- `{action}` → "fit-in"
+- `{width}x{height}` → "870x653"
+
+Os campos originais do Athena são **preservados** (strings). Os normalizados são **adicionados**. Ambos coexistem no JSON.
 
 ---
 
-## Filtros Aplicados Após Coleta
+## ETAPA 4 — Combinação
 
-1. **Remoção de duplicatas por URL** — mais confiável que hash de campos, pois o mesmo imóvel pode ter área/preço ligeiramente diferente entre portais
-2. **Remoção de leilões** — palavras-chave no título: "leilão", "hasta pública", "judicial", "lance inicial", etc. Leilões têm preços artificialmente baixos que distorceriam a estimativa de valor justo
-3. **Filtro por campos obrigatórios** — descarta imóveis sem preço ou sem localização mínima
-4. **Filtro por bairro (escopo)** — mantém apenas imóveis do bairro alvo para garantir comparabilidade geográfica
-5. **Normalização de bairros** — remove acentos e prefixos ("Bairro Centro" → "Centro") para comparação consistente
-6. **Ordenação por proximidade** — mesma rua primeiro, depois mesmo bairro, depois cidade
+```python
+todos = athena_imoveis + apify_imoveis
+```
+
+Athena primeiro na lista.
 
 ---
 
-## Arquivos Gerados
+## ETAPA 5 — Filtros
+
+| Filtro | O que remove |
+|--------|-------------|
+| **Leilão** | Título contém: "leilão", "hasta publica", "judicial", "caixa economica", "lance inicial", etc. |
+| **Campos obrigatórios** | Não tem `price` OU não tem `city`/`neighborhood` |
+| **Duplicatas URL** | Mesma URL aparece mais de 1 vez → fica só 1 |
+
+---
+
+## ETAPA 6 — Escopo
+
+Verifica cada imóvel:
+- `street` contém o nome da rua do alvo? OU
+- `neighborhood` contém o nome do bairro do alvo?
+
+Se sim → mantém. Se nenhum → descarta.
+
+Normaliza acentos antes de comparar.
+
+Se NENHUM imóvel passar → fallback: usa todos (cidade toda).
+
+---
+
+## ETAPA 7 — Enriquecimento
+
+Imóveis sem fotos: `requests.get` na URL do VivaReal para extrair imagens do HTML.
+
+---
+
+## ETAPA 8 — Ordenação Final
+
+| Prioridade | Critério |
+|---|---|
+| 0 (primeiro) | Mesma rua no campo `street` |
+| 1 | Mesmo bairro no campo `neighborhood` |
+| 2 (último) | Restante |
+
+---
+
+## Arquivos de Saída
 
 | Arquivo | Conteúdo | Usado por |
-|---|---|---|
-| `data/imoveis_brutos_ocrad.json` | Schema original do actor, sem normalização | Debug |
-| `data/imoveis_coletados.json` | Normalizados, filtrados, todos os imóveis | Referência |
-| `data/imoveis_completos.json` | Apenas imóveis com `publishedAt` | Agente 2 |
+|---------|----------|-----------|
+| `data/imoveis_coletados_ag1.json` | Todos os imóveis (filtrados + ordenados) | Agente 2 (fallback) |
+| `data/imoveis_completos_ag1.json` | Só os que têm `publishedAt` | **Agente 2** (entrada principal) |
+| `data/imoveis_brutos_ocrad_ag1.json` | Brutos do Apify (debug) | Ninguém |
 
-A separação entre `imoveis_coletados.json` e `imoveis_completos.json` permite ao Agente 2 trabalhar com o subconjunto de dados mais completo, sem descartar imóveis que podem ser úteis para análise exploratória.
+**Diferença:** `completos` = tem data de publicação. `coletados` = todos.
 
 ---
 
-## Schema de Saída
+## Schema de Saída (exemplo real)
 
 ```json
 {
-  "id": "2877438284",
-  "title": "Casa para comprar com 170 m², 3 quartos, 4 banheiros, 2 vagas em Centro, Itajaí",
-  "description": "MOBILIADA, PRONTA PARA MORAR - Casa com 154m² privativos...",
-  "price": 1395000,
-  "priceFormatted": "R$ 1.395.000",
-  "condominiumFee": null,
-  "iptu": 150,
-  "transactionType": "sale",
-  "propertyType": "Casas",
-  "area": 170,
-  "bedrooms": 3,
-  "bathrooms": 4,
+  "url": "https://www.vivareal.com.br/imovel/2752976859",
+  "titulo": "Apartamento 2 quartos à venda, 78 m² - Jardim Guanabara - Campinas/SP",
+  "descricao": "Apartamento moderno no Condomínio Vizzi...",
+  "tipo": "apartamento",
+  "finalidade": "venda",
+  "preco": "989990.0",
+  "preco_condominio": "800.0",
+  "iptu": "280.0",
+  "area_construida": "78.0",
+  "area_terreno": "88.0",
+  "quartos": "2",
+  "suites": "1",
+  "banheiros": "2",
+  "vagas": "2",
+  "rua": "Rua Cônego Nery",
+  "bairro": "Jardim Guanabara",
+  "cidade": "Campinas",
+  "estado": "SP",
+  "cep": "13073180",
+  "latitude": "-22.886324",
+  "longitude": "-47.060136",
+  "fotos_urls": "https://...{description}.jpg?action={action}...|...",
+  "image_count": "31",
+  "data_publicacao": "2024-10-30T17:37:51.871Z",
+  "data_ultima_atualizacao": "2026-08-09T03:30:54.467Z",
+  "amenities": "POOL|GOURMET_BALCONY|AIR_CONDITIONING|...",
+  "preco_por_m2": "12692.18",
+  "usage_types": "RESIDENTIAL",
+  "property_sub_type": "APARTMENT",
+  "andar": "0",
+  "status_anuncio": "ACTIVE",
+  "anunciante_nome": "Mega Imob",
+  "listing_id": "2752976859",
+  "portal": "vivareal",
+  "data_coleta": "2026-08-09T12:35:41.217234",
+
+  "source": "Athena/S3",
+  "price": 989990.0,
+  "area": 78.0,
+  "bedrooms": 2,
+  "bathrooms": 2,
   "parkingSpaces": 2,
-  "street": "Rua Franklin Máximo Pereira",
-  "neighborhood": "Centro",
-  "city": "Itajai",
-  "state": "SC",
-  "url": "https://www.vivareal.com.br/imovel/...",
-  "publishedAt": "2026-03-26T17:43:38.524Z",
-  "pricePerSqm": 8205.88,
-  "source": "VivaReal",
-  "scrapedAt": "2026-05-12T19:24:05.392865"
+  "neighborhood": "Jardim Guanabara",
+  "city": "Campinas",
+  "state": "SP",
+  "street": "Rua Cônego Nery",
+  "publishedAt": "2024-10-30T17:37:51.871Z",
+  "description": "Apartamento moderno no Condomínio Vizzi...",
+  "title": "Apartamento 2 quartos à venda, 78 m² - Jardim Guanabara - Campinas/SP",
+  "lat": -22.886324,
+  "lon": -47.060136,
+  "propertyType": "Apartamentos",
+  "images": ["https://...870x653...jpg", "..."],
+  "imageCount": 30
 }
 ```
 
 ---
 
-## Resultado dos Testes (Centro de Itajaí/SC)
+## Dependências
 
-```
-URLs enviadas ao actor:
-  [20 itens] VivaReal — casas
-  [10 itens] VivaReal — terrenos
-  [20 itens] LugarCerto — casas
-  [10 itens] LugarCerto — terrenos
-
-Brutos coletados:  102
-Após filtros:       99
-Após escopo:        95
-
-Portais:  VivaReal: 95  (LugarCerto retornou 0 nesta execução)
-Tipos:    Casas: 77 | Terrenos: 18
-Com rua:  62/95
-Com data: 95/95  ← 100% publishedAt
-Tempo:    ~4.7 minutos
-```
-
----
-
-## Dependências Externas
-
-| Serviço | Uso | Custo | Configuração |
-|---|---|---|---|
-| Apify | Coleta via actor ocrad | $5/mês grátis (~$0.10/run) | `APIFY_TOKEN_2` no `.env` |
-| requests (Python) | Enriquecimento HTML | Gratuito, sem limite | Sem configuração |
+| Pacote/Serviço | Uso | Configuração |
+|---|---|---|
+| `boto3` | Consultas Athena | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` no `.env` |
+| `requests` | Enriquecimento HTML + API Apify | Nenhuma |
+| Apify (ocrad) | Scraping portais (fallback) | `APIFY_TOKEN_2` no `.env` |
 
 ---
 
 ## Como Rodar
 
 ```bash
-.venv/Scripts/python.exe -m tests.test_coleta
+# Pipeline completo
+.venv/Scripts/python.exe -m app.main
+
+# Teste isolado
+.venv/Scripts/python.exe tests/test_ag1_isolado.py
+
+# Teste casa + apartamento
+.venv/Scripts/python.exe tests/test_ag1_casa_apto.py
 ```
-
-Configurar o imóvel alvo em `tests/test_coleta.py`:
-```python
-IMOVEL_ALVO = {
-    "rua":         "Rua Franklin Maximo Pereira",
-    "bairro":      "Centro",
-    "cidade":      "Itajai",
-    "estado":      "SC",
-    "localizacao": "Itajai, SC",
-    "tipo":        "house",   # "house" ou "apartment"
-}
-```
-
----
-
-## Entrada
-
-### Parâmetros da função `coletar_imoveis()`
-
-| Parâmetro | Tipo | Descrição |
-|---|---|---|
-| `localizacao` | str | Cidade e estado no formato "Cidade, UF" (ex: "Itajai, SC") |
-| `tipo_imovel` | str | `"house"` (casas + terrenos) ou `"apartment"` (apartamentos) |
-| `bairro` | str | Bairro do imóvel alvo — usado para montar URLs e filtrar resultados |
-| `rua` | str | Rua do imóvel alvo — usada para ordenação por proximidade |
-
----
-
-## Instalação das Dependências
-
-```bash
-# Dependências do requirements.txt (já instaladas no setup inicial)
-.venv/Scripts/pip install -r requirements.txt
-
-# Pacotes adicionais necessários para o Agente 1
-.venv/Scripts/pip install apify-client
-```
-
-Pacotes utilizados pelo Agente 1:
-| Pacote | Uso |
-|---|---|
-| `requests` | Coleta via Apify REST API + enriquecimento HTML |
-| `apify-client` | Cliente oficial do Apify (alternativo à REST API) |
-| `python-dotenv` | Leitura do `.env` (APIFY_TOKEN_2) |

@@ -85,7 +85,7 @@ with st.sidebar:
             estado = st.selectbox("UF", estados_br, index=estado_idx)
 
         st.markdown("**🏗️ Características**")
-        tipo = st.selectbox("Tipo", ["Casa", "Apartamento", "Terreno"], index=["Casa", "Apartamento", "Terreno"].index(preset.get("tipo", "Casa")))
+        tipo = st.selectbox("Tipo", ["Casa", "Apartamento"], index=["Casa", "Apartamento"].index(preset.get("tipo", "Casa")))
         col_a, col_b = st.columns(2)
         with col_a:
             area = st.number_input("Área construída (m²)", min_value=0, value=preset.get("area", 0))
@@ -148,11 +148,9 @@ elif submitted:
         erros_validacao.append("Cidade é obrigatória")
     if not estado.strip():
         erros_validacao.append("Estado é obrigatório")
-    if area <= 0 and tipo != "Terreno":
+    if area <= 0:
         erros_validacao.append("Área construída deve ser maior que zero")
-    if area_terreno <= 0 and tipo == "Terreno":
-        erros_validacao.append("Área do terreno deve ser maior que zero para terrenos")
-    if quartos <= 0 and tipo != "Terreno":
+    if quartos <= 0:
         erros_validacao.append("Número de quartos deve ser maior que zero")
 
     if erros_validacao:
@@ -162,8 +160,8 @@ elif submitted:
         st.stop()
 
     # Monta o dict do imóvel alvo
-    tipo_map = {"Casa": "house", "Apartamento": "apartment", "Terreno": "house"}
-    property_type_map = {"Casa": "Casas", "Apartamento": "Apartamentos", "Terreno": "Terrenos"}
+    tipo_map = {"Casa": "house", "Apartamento": "apartment"}
+    property_type_map = {"Casa": "Casas", "Apartamento": "Apartamentos"}
 
     imovel_alvo = {
         "rua": rua,
@@ -442,9 +440,9 @@ elif submitted:
     resultado_ag5 = {}
     try:
         resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
-        valor = resultado_ag5.get("avaliacao", {}).get("valor_medio_imovel", 0)
-        liquidez_val = resultado_ag5.get("avaliacao", {}).get("valor_liquidez_arredondado", 0)
-        tempo_venda = resultado_ag5.get("liquidez", {}).get("tempo_estimado", "?")
+        valor = resultado_ag5.get("avaliacao_planilha", {}).get("valor_medio_imovel", 0)
+        liquidez_val = resultado_ag5.get("avaliacao_planilha", {}).get("valor_liquidez_arredondado", 0)
+        tempo_venda = resultado_ag5.get("liquidez_experimental", {}).get("tempo_estimado", "?")
         with log_area:
             st.success(f"✅ Avaliação concluída!")
     except Exception as e:
@@ -490,8 +488,8 @@ if "resultado" in st.session_state:
     # Preço estimado
     preco = resultado.get("preco_estimado", {})
     if preco and isinstance(preco, dict):
-        avaliacao = preco.get("avaliacao", {})
-        liquidez_info = preco.get("liquidez", {})
+        avaliacao = preco.get("avaliacao_planilha", {})
+        liquidez_info = preco.get("liquidez_experimental", {})
 
         col_a, col_b, col_c = st.columns(3)
         with col_a:

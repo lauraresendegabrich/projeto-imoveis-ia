@@ -20,26 +20,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 IMOVEL_ALVO = {
     # Localização (obrigatório para Agente 1)
-    "rua":           "Rua Frederico Soares",
-    "numero":        "499",
-    "bairro":        "Santa Fe",
-    "cidade":        "Campo Grande",
-    "estado":        "MS",
-    "localizacao":   "Campo Grande, MS",
+    "rua":           "Rua Doutor Sylvio Carvalhaes",
+    "numero":        "68",
+    "bairro":        "Jardim Ipiranga",
+    "cidade":        "Campinas",
+    "estado":        "SP",
+    "localizacao":   "Campinas, SP",
 
     # Tipo (obrigatório para Agente 1)
-    "tipo":          "house",   # "house" (casas + terrenos) ou "apartment"
+    "tipo":          "apartment",   # "house" (casas + terrenos) ou "apartment"
 
     # Características do imóvel (para Agente 2 — score de similaridade)
-    "propertyType":  "Casas",
-    "area":          230,
-    "area_terreno":  360,       # área do terreno em m² (para Agente 5)
-    "bedrooms":      3,
-    "bathrooms":     2,
+    "propertyType":  "Apartamentos",
+    "area":          54,
+    "area_terreno":  0,
+    "bedrooms":      2,
+    "bathrooms":     1,
     "parkingSpaces": 1,
-    "neighborhood":  "Santa Fe",
-    "street":        "Rua Frederico Soares",
-    "description":   "Casa com 3 quartos, 1 vaga na garagem, varanda/sacada, área de serviço, 2 WC, sala, lavabo, cozinha. Equipamento de segurança, espaço com churrasqueira. Área privativa 230m², terreno 360m². Bairro Santa Fé, Campo Grande/MS.",
+    "neighborhood":  "Jardim Ipiranga",
+    "street":        "Rua Doutor Sylvio Carvalhaes",
+    "description":   "Apartamento com 2 quartos, 1 banheiro, 1 vaga, 54m². Aceita animais, piscina, playground. Jardim Ipiranga, Campinas/SP.",
     "images": [],
 }
 

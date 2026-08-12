@@ -35,11 +35,11 @@ from agents.price_liquidity import estimar_preco
 resultado = estimar_preco({"area_terreno": 360})
 
 assert resultado, "Resultado vazio!"
-assert "avaliacao" in resultado, "Falta seção 'avaliacao'"
-assert "liquidez" in resultado, "Falta seção 'liquidez'"
+assert "avaliacao_planilha" in resultado, "Falta seção 'avaliacao_planilha'"
+assert "liquidez_experimental" in resultado, "Falta seção 'liquidez_experimental'"
 
-avaliacao = resultado["avaliacao"]
-liquidez = resultado["liquidez"]
+avaliacao = resultado["avaliacao_planilha"]
+liquidez = resultado["liquidez_experimental"]
 
 print(f"  Valor mínimo:  R$ {avaliacao['valor_minimo_imovel']:,.2f}")
 print(f"  Valor médio:   R$ {avaliacao['valor_medio_imovel']:,.2f}")
@@ -48,7 +48,6 @@ print(f"  Desconto:      {avaliacao['desconto_liquidez_percentual']}%")
 print(f"  Score liquidez: {liquidez['score_liquidez']}")
 print(f"  Classificação:  {liquidez['classificacao']}")
 print(f"  Tempo estimado: {liquidez['tempo_estimado']}")
-print(f"  Tempo regional: {liquidez.get('tempo_liquidez_regional_ag4', '?')}")
 
 # Validações
 assert avaliacao["valor_medio_imovel"] > 0, "Valor médio deve ser > 0"
@@ -77,19 +76,19 @@ assert 600 <= resultado_trim <= 700, f"Esperado ~650, got {resultado_trim}"
 print("  ✅ TRIMMEAN funcionando corretamente!")
 
 # ==============================================================
-# TESTE 3: Fallback com poucos dados (usa mediana)
+# TESTE 3: Com poucos dados (sem fallback mediana — usa media)
 # ==============================================================
-print("\n--- TESTE 3: Fallback com poucos dados ---")
+print("\n--- TESTE 3: Poucos dados (TRIMMEAN sem fallback) ---")
 
 from agents.price_liquidity import calcular_estatistica
 
-# Com 3 valores, deve usar mediana
+# Com 3 valores: n*0.5=1, floor par=0, remove 0 => media de todos
 valores_poucos = [100, 500, 900]
 resultado_poucos = calcular_estatistica(valores_poucos, "media_aparada")
 print(f"  Valores: {valores_poucos}")
-print(f"  Resultado (mediana): {resultado_poucos}")
+print(f"  Resultado (media de todos): {resultado_poucos}")
 assert resultado_poucos == 500, f"Esperado 500, got {resultado_poucos}"
-print("  ✅ Fallback para mediana funcionando!")
+print("  ✅ TRIMMEAN com poucos dados = média aritmética!")
 
 # ==============================================================
 # TESTE 4: Imóvel condominial (sem terreno)
@@ -111,10 +110,10 @@ resultado_apto = executar_agente5(
 
 print(f"  Tipo: {resultado_apto['imovel_alvo']['tipo']}")
 print(f"  Terreno aplicado: {resultado_apto['calculo_terreno']['aplicado']}")
-print(f"  Valor médio: R$ {resultado_apto['avaliacao']['valor_medio_imovel']:,.2f}")
+print(f"  Valor médio: R$ {resultado_apto['avaliacao_planilha']['valor_medio_imovel']:,.2f}")
 
 assert resultado_apto["calculo_terreno"]["aplicado"] == False, "Apartamento não deve ter terreno"
-assert resultado_apto["avaliacao"]["valor_medio_imovel"] > 0, "Valor deve ser > 0"
+assert resultado_apto["avaliacao_planilha"]["valor_medio_imovel"] > 0, "Valor deve ser > 0"
 print("  ✅ Apartamento calculado sem terreno!")
 
 # ==============================================================
@@ -129,7 +128,7 @@ with open(caminho, encoding="utf-8") as f:
     dados = json.load(f)
 
 campos_obrigatorios = ["agente", "metodo", "imovel_alvo", "valor_m2_zona_homogenea",
-                       "calculo_terreno", "calculo_construcao", "avaliacao", "liquidez", "justificativa"]
+                       "calculo_terreno", "calculo_construcao", "avaliacao_planilha", "liquidez_experimental", "justificativa"]
 
 for campo in campos_obrigatorios:
     assert campo in dados, f"Falta campo '{campo}' no JSON!"

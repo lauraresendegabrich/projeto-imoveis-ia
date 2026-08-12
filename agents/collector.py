@@ -2,66 +2,107 @@
 Agente 1 - Coletor de Dados Imobiliarios
 ==========================================
 
-COMO FUNCIONA:
-==============
+RESPONSABILIDADE:
+    Coleta imoveis comparaveis ao imovel alvo a partir de duas fontes:
+    Amazon Athena (principal) e Apify/ocrad (fallback).
+    Normaliza os campos, filtra leiloes/duplicatas, ordena por proximidade.
 
-Usa o Apify (ocrad) como fonte unica + requests.get pra publishedAt.
-Funciona pra qualquer bairro, cidade e estado do Brasil.
-O resultado final e um JSON ordenado por proximidade ao imovel alvo.
+ENTRADA:
+    - localizacao (cidade, estado)
+    - tipo_imovel ("apartment" ou "house")
+    - bairro e rua do imovel alvo
 
-FONTE: Apify (ocrad~brazil-real-estate-scraper)
-─────────────────────────────────────────────────
-  Portais: ImovelWeb, VivaReal, LugarCerto, OLX, MercadoLivre
-  Input:   URLs de listagem montadas automaticamente com bairro/cidade/estado
-  Token:   APIFY_TOKEN_2 (conta separada, $5/mes gratis)
-  Como:    o actor abre cada URL, executa JS, e extrai os anuncios
-  Retorna: ~15-50 imoveis (depende do bairro)
-  Limite:  20 casas / 10 terrenos / 30 apartamentos por URL (maxItems por URL)
-  NOTA:    ZAP removido (95% duplicata do VivaReal, mesmo grupo OLX Brasil)
-
-ENRIQUECIMENTO: publishedAt via requests.get + regex
-─────────────────────────────────────────────────────
-  O ocrad nao retorna publishedAt. Mas o VivaReal coloca
-  a data de criacao no HTML estatico como JSON embutido:
-    "createdAt":"2026-04-08T00:01:45.354Z"
-
-  OLX: bloqueia requests.get com Cloudflare (403).
-  A data aparece na listagem como "16/12/2024, 23:52" (com ano),
-  mas na pagina individual so mostra "16/12 às 23:52" (sem ano).
-  O ocrad nao extrai esse campo. Resultado: OLX fica sem publishedAt.
-
-  Solucao (gratis, sem limite, sem LLM):
-    1. requests.get(url) — pega o HTML estatico da pagina
-    2. Regex extrai createdAt do JSON embutido (VivaReal: 100% sucesso)
-    3. OLX/ImovelWeb/LugarCerto/MercadoLivre: sem publishedAt (bloqueio)
-    4. ~1s por imovel (pausa entre requests)
+SAIDA:
+    - data/imoveis_coletados_ag1.json (todos os imoveis finais)
+    - data/imoveis_completos_ag1.json (so os que tem publishedAt)
+    - data/imoveis_brutos_ocrad_ag1.json (brutos Apify, debug)
 
 FLUXO COMPLETO:
-───────────────
-  1. ocrad coleta brutos dos 5 portais (com JS)
-  2. Normaliza (preco, quartos, area, rua, bairro, cidade, estado, iptu)
-  3. Extrai publishedAt via requests.get + regex (VivaReal/ZAP)
-  4. Remove duplicatas por URL
-  5. Remove leiloes e imoveis sem preco/cidade
-  6. Filtra por bairro (escopo)
-  7. Normaliza bairros (acentos, prefixos)
-  8. Ordena: mesma rua -> mesmo bairro -> cidade
-  9. Salva em imoveis_coletados.json
+===============
 
-SCHEMA DE SAIDA:
-────────────────
-  id, title, price, priceFormatted, condominiumFee, iptu,
-  transactionType, propertyType, propertySubType,
-  area, bedrooms, bathrooms, parkingSpaces,
-  amenities, complexAmenities,
-  street, neighborhood, city, state,
-  images, imageCount, url,
-  publishedAt, pricePerSqm, source, scrapedAt, data_coleta
+  ETAPA 1 — ATHENA (fonte principal)
+  ───────────────────────────────────
+    Consulta SQL na tabela vivareal (S3/Parquet).
+    Executa queries sequenciais com controle de limite total (230).
 
-ARQUIVOS GERADOS:
-─────────────────
-  data/imoveis_brutos_ocrad.json -> brutos do ocrad (schema original)
-  data/imoveis_coletados.json    -> resultado final combinado e filtrado
+    Passo 1: Busca todos da mesma RUA (limit 230)
+      SELECT * FROM vivareal
+      WHERE cidade='X' AND bairro='Y' AND rua LIKE '%Z%'
+        AND tipo='apartamento' AND finalidade='venda' LIMIT 230
+
+    Passo 2: Se rua < 230, complementa com BAIRRO
+      Para apartment: apartamento → flat → cobertura (sequencial, respeitando teto)
+      Para house: casa → two_story_house → village_house (teto 230)
+                  + terrenos: residential_allotment_land (50) + allotment_land (50)
+                  Terrenos tem limit fixo 50, FORA do teto de 230.
+
+    Passo 3: Se rua + bairro = 0, expande pra CIDADE
+      SELECT * FROM vivareal WHERE cidade='X' AND tipo='apartamento' LIMIT 200
+
+    Resultado: rua primeiro + bairro depois. Maximo 230 construidos + 100 terrenos.
+
+  ETAPA 2 — APIFY (fallback, so roda se Athena < 10)
+  ────────────────────────────────────────────────────
+    Portais: VivaReal (30 itens) + LugarCerto (30 itens)
+    Actor: ocrad~brazil-real-estate-scraper (navegador headless)
+    Depois: requests.get em cada URL para extrair publishedAt do HTML
+
+  ETAPA 3 — NORMALIZACAO DE CAMPOS
+  ─────────────────────────────────
+    Athena retorna campos com nomes diferentes. O codigo mapeia:
+      preco → price (float)
+      area_construida → area (float)
+      quartos → bedrooms (int)
+      banheiros → bathrooms (int)
+      vagas → parkingSpaces (int)
+      bairro → neighborhood
+      rua → street
+      data_publicacao → publishedAt
+      fotos_urls → images (split por |, resolve templates)
+      tipo → propertyType ("Casas"/"Apartamentos"/"Terrenos")
+
+    Templates das fotos:
+      {description} → "imovel"
+      {action} → "fit-in"
+      {width}x{height} → "870x653"
+
+  ETAPA 4 — COMBINACAO
+  ─────────────────────
+    todos = athena_imoveis + apify_imoveis
+    Athena fica primeiro na lista.
+
+  ETAPA 5 — FILTROS
+  ──────────────────
+    1. Remove LEILOES (palavras-chave no titulo: leilao, judicial, caixa, etc.)
+    2. Remove sem PRECO ou sem CIDADE/BAIRRO
+    3. Remove DUPLICATAS por URL
+
+  ETAPA 6 — ESCOPO
+  ─────────────────
+    Filtra so imoveis que contem a rua OU o bairro no campo correspondente.
+    Normaliza acentos antes de comparar.
+    Se nenhum match → fallback cidade toda.
+
+  ETAPA 7 — ENRIQUECIMENTO
+  ─────────────────────────
+    Imoveis sem fotos: requests.get na URL (VivaReal) para extrair imagens.
+
+  ETAPA 8 — ORDENACAO FINAL
+  ──────────────────────────
+    Prioridade 0: mesma rua (ex: "Conego Nery" no campo street)
+    Prioridade 1: mesmo bairro
+    Prioridade 2: restante (cidade)
+
+DEPENDENCIAS:
+─────────────
+  - requests (HTTP)
+  - boto3 (Athena/AWS)
+  - Apify token (APIFY_TOKEN_2 no .env)
+  - AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY no .env)
+
+COMO RODAR:
+───────────
+  .venv/Scripts/python.exe -m app.main
 """
 
 import os
@@ -877,17 +918,16 @@ def coletar_imoveis(
     arquivo_processados: str = "imoveis_coletados_ag1.json",
 ) -> list[dict]:
     """
-    Coleta imoveis comparaveis usando Apify (ocrad).
+    Coleta imoveis comparaveis. Athena primeiro, Apify como fallback.
 
     Fluxo:
-        1. ocrad raspa listagens de 5 portais (ImovelWeb, VivaReal, LugarCerto, OLX, MercadoLivre)
-        2. Normaliza (preco, quartos, area, rua, bairro, cidade, estado, iptu)
-        3. Extrai publishedAt via requests.get + regex
+        1. Athena (S3/Parquet) — banco com milhares de anuncios historicos
+        2. Se Athena retornar < 10, usa Apify (ocrad) como fallback
+        3. Normaliza (preco, quartos, area, rua, bairro, cidade, estado, iptu)
         4. Remove duplicatas, leiloes, sem preco
         5. Filtra por bairro (escopo)
-        6. Normaliza bairros (acentos)
-        7. Ordena: mesma rua -> bairro -> cidade
-        8. Salva em imoveis_coletados.json
+        6. Ordena: mesma rua -> bairro -> cidade
+        7. Salva em imoveis_coletados.json
 
     Parametros
     ----------
@@ -918,14 +958,9 @@ def coletar_imoveis(
     t_total = time.time()
     logger.info(f"Iniciando coleta | {localizacao} | tipo={tipo_imovel} | bairro={bairro} | rua={rua}")
 
-    # ── FONTE: Apify (ocrad) ──────────────────────────────────────────
-    logger.info("=" * 55)
-    logger.info("FONTE: Apify (ocrad) — ImovelWeb, VivaReal, LugarCerto, OLX, MercadoLivre")
-    logger.info("=" * 55)
-    t0 = time.time()
-    ocrad = _coletar_ocrad(localizacao, tipo_imovel, bairro)
-    t_ocrad = time.time() - t0
-    logger.info(f"Apify ocrad: {len(ocrad)} imoveis | tempo: {t_ocrad:.1f}s")
+    partes = [p.strip() for p in localizacao.split(",")]
+    cidade_nome = partes[0]
+    estado_nome = partes[1].strip().upper() if len(partes) > 1 else "MG"
 
     # ── FONTE PRINCIPAL: Amazon Athena (S3/Parquet) ───────────────────
     # Base de dados com milhares de anúncios já coletados
@@ -933,99 +968,91 @@ def coletar_imoveis(
     if os.getenv("AWS_ACCESS_KEY_ID"):
         try:
             from services.athena_client import AthenaClient
-            cidade_nome = localizacao.split(",")[0].strip()
-            estado_nome = localizacao.split(",")[1].strip() if "," in localizacao else None
 
+            logger.info("=" * 55)
+            logger.info("FONTE PRINCIPAL: Amazon Athena (S3/Parquet)")
+            logger.info("=" * 55)
             logger.info(f"Athena: buscando dados em {cidade_nome}/{bairro or 'cidade toda'}...")
             client = AthenaClient()
 
-            # Monta query com mesmos filtros do Apify: cidade + bairro + tipo + limites
-            # Apify "house": casas (20) + terrenos (10) = 30
-            # Apify "apartment": apartamentos (30)
+            # ── ESTRATEGIA DE BUSCA ───────────────────────────────────
+            # Limite TOTAL por tipo (rua + bairro + cidade somados):
+            #   house:     casas=200, sobrados=50, casas de vila=50, terrenos_res=60, lotes=60
+            #   apartment: apartamentos=200, flats=50, coberturas=50
+            # Busca primeiro na rua, depois complementa com bairro até o limite.
+            # Se rua + bairro = 0, expande pra cidade.
+            # ──────────────────────────────────────────────────────────
+
+            LIMITES_POR_TIPO = {
+                "house": {
+                    "casa": 200,
+                    "two_story_house": 50,
+                    "village_house": 50,
+                    "residential_allotment_land": 60,
+                    "allotment_land": 60,
+                },
+                "apartment": {
+                    "apartamento": 200,
+                    "flat": 50,
+                    "cobertura": 50,
+                },
+            }
+
+            limites = LIMITES_POR_TIPO.get(tipo_imovel, LIMITES_POR_TIPO["house"])
             athena_imoveis = []
 
-            if tipo_imovel == "house":
-                # Busca casas + terrenos direto no SQL com tipo
-                if bairro:
-                    casas = client.buscar_bairro(cidade_nome, bairro, tipo="casa")
-                    casas2 = client.buscar_bairro(cidade_nome, bairro, tipo="two_story_house", limit=50)
-                    casas3 = client.buscar_bairro(cidade_nome, bairro, tipo="village_house", limit=50)
-                    terrenos_athena = client.buscar_bairro(cidade_nome, bairro, tipo="residential_allotment_land", limit=50)
-                    terrenos2 = client.buscar_bairro(cidade_nome, bairro, tipo="allotment_land", limit=50)
-                    athena_imoveis = casas + casas2 + casas3 + terrenos_athena + terrenos2
-                else:
-                    casas = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa")
-                    terrenos_athena = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="residential_allotment_land")
-                    athena_imoveis = casas + terrenos_athena
-            elif tipo_imovel == "apartment":
-                if bairro:
-                    aptos = client.buscar_bairro(cidade_nome, bairro, tipo="apartamento")
-                    flats = client.buscar_bairro(cidade_nome, bairro, tipo="flat", limit=50)
-                    coberturas = client.buscar_bairro(cidade_nome, bairro, tipo="cobertura", limit=50)
-                    athena_imoveis = aptos + flats + coberturas
-                else:
-                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento")
-            else:
-                if bairro:
-                    terrenos1 = client.buscar_bairro(cidade_nome, bairro, tipo="residential_allotment_land")
-                    terrenos2 = client.buscar_bairro(cidade_nome, bairro, tipo="allotment_land", limit=50)
-                    athena_imoveis = terrenos1 + terrenos2
-                else:
-                    terrenos1 = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="residential_allotment_land")
-                    terrenos2 = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="allotment_land")
-                    athena_imoveis = terrenos1 + terrenos2
+            for tipo_sql, limite_tipo in limites.items():
+                # PASSO 1: Busca na rua
+                imoveis_tipo_rua = []
+                if rua and bairro:
+                    imoveis_tipo_rua = client.buscar_rua(cidade_nome, bairro, rua, tipo=tipo_sql, limit=limite_tipo)
 
-            # Filtro de bairro já feito no SQL — não precisa filtrar de novo
+                # PASSO 2: Se rua < limite, complementa com bairro
+                restante = limite_tipo - len(imoveis_tipo_rua)
+                imoveis_tipo_bairro = []
+                if restante > 0 and bairro:
+                    imoveis_tipo_bairro = client.buscar_bairro(cidade_nome, bairro, tipo=tipo_sql, limit=restante)
+                    # Remove duplicatas que já vieram na rua
+                    urls_rua = {im.get("url") for im in imoveis_tipo_rua if im.get("url")}
+                    imoveis_tipo_bairro = [im for im in imoveis_tipo_bairro if im.get("url") not in urls_rua]
+                    # Corta no restante
+                    imoveis_tipo_bairro = imoveis_tipo_bairro[:restante]
 
-            # Se bairro não retornou nada, expande pra cidade
-            if bairro and not athena_imoveis:
+                total_tipo = imoveis_tipo_rua + imoveis_tipo_bairro
+                if total_tipo:
+                    logger.info(f"  {tipo_sql}: {len(imoveis_tipo_rua)} rua + {len(imoveis_tipo_bairro)} bairro = {len(total_tipo)} (limite {limite_tipo})")
+                athena_imoveis.extend(total_tipo)
+
+            # PASSO 3: Se nada encontrado, expande pra cidade
+            if not athena_imoveis and bairro:
                 logger.info(f"Athena: bairro '{bairro}' sem resultados, expandindo pra cidade toda...")
-                if tipo_imovel == "house":
-                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="casa")
-                elif tipo_imovel == "apartment":
-                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo="apartamento")
-                else:
-                    athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome)
+                tipo_principal = list(limites.keys())[0]  # casa ou apartamento
+                athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo=tipo_principal)
 
-            logger.info(f"Athena: {len(athena_imoveis)} imoveis encontrados")
+            # Remove duplicatas globais (mesmo URL em tipos diferentes)
+            urls_vistas = set()
+            athena_unicos = []
+            for im in athena_imoveis:
+                url_im = im.get("url", "")
+                if url_im and url_im in urls_vistas:
+                    continue
+                if url_im:
+                    urls_vistas.add(url_im)
+                athena_unicos.append(im)
+            athena_imoveis = athena_unicos
 
-            # Prioriza imóveis da mesma rua — busca ANTES no SQL
-            if rua and bairro:
-                # Query 1: busca todos da rua (sem limit restritivo)
-                tipo_rua = None
-                if tipo_imovel == "house":
-                    tipo_rua = "casa"
-                elif tipo_imovel == "apartment":
-                    tipo_rua = "apartamento"
-                imoveis_rua = client.buscar_rua(cidade_nome, bairro, rua, tipo=tipo_rua, limit=50)
-                if imoveis_rua:
-                    # Remove duplicatas (URL) que já vieram no bairro
-                    urls_bairro = {im.get("url") for im in athena_imoveis if im.get("url")}
-                    novos_rua = [im for im in imoveis_rua if im.get("url") not in urls_bairro]
-                    # Coloca os da rua no início
-                    athena_imoveis = novos_rua + athena_imoveis
-                    logger.info(f"  Rua '{rua}': {len(imoveis_rua)} encontrados ({len(novos_rua)} novos + {len(imoveis_rua) - len(novos_rua)} já no bairro)")
-            elif rua and athena_imoveis:
-                # Fallback: reordena os que já vieram
-                rua_lower = rua.lower().strip()
-                na_rua = [im for im in athena_imoveis if rua_lower in (im.get("rua") or "").lower()]
-                fora_rua = [im for im in athena_imoveis if rua_lower not in (im.get("rua") or "").lower()]
-                athena_imoveis = na_rua + fora_rua
-                if na_rua:
-                    logger.info(f"  {len(na_rua)} na mesma rua, {len(fora_rua)} no restante do bairro")
+            logger.info(f"Athena: {len(athena_imoveis)} imoveis total")
 
             # Normaliza campos do Athena para o schema padrao
             for im in athena_imoveis:
                 im["source"] = "Athena/S3"
 
-                # Fotos: vem em 'fotos_urls' separadas por '|' com template
                 fotos_raw = im.get("fotos_urls") or ""
                 if fotos_raw:
                     fotos_list = []
                     for foto_url in fotos_raw.split("|"):
                         foto_url = foto_url.strip()
                         if foto_url:
-                            # Substitui templates por valores padrão
                             foto_url = foto_url.replace("{description}", "imovel")
                             foto_url = foto_url.replace("{action}", "fit-in")
                             foto_url = foto_url.replace("{width}x{height}", "870x653")
@@ -1038,7 +1065,6 @@ def coletar_imoveis(
                     im["images"] = []
                     im["imageCount"] = 0
 
-                # Mapeia campos
                 if im.get("preco") and not im.get("price"):
                     try:
                         im["price"] = float(im["preco"])
@@ -1071,14 +1097,12 @@ def coletar_imoveis(
                 im.setdefault("publishedAt", im.get("data_publicacao"))
                 im.setdefault("description", im.get("descricao"))
                 im.setdefault("title", im.get("titulo"))
-                # Coordenadas
                 if im.get("latitude") and im.get("longitude"):
                     try:
                         im["lat"] = float(im["latitude"])
                         im["lon"] = float(im["longitude"])
                     except (ValueError, TypeError):
                         pass
-                # Tipo
                 tipo_raw = im.get("tipo", "")
                 if tipo_raw in ("casa", "two_story_house", "village_house"):
                     im["propertyType"] = "Casas"
@@ -1092,7 +1116,21 @@ def coletar_imoveis(
         except Exception as e:
             logger.warning(f"Athena indisponivel: {e}")
 
-    # Combina: Athena (principal) + Apify (complemento com fotos)
+    # ── FALLBACK: Apify (ocrad) — só roda se Athena retornou pouco ───
+    ocrad = []
+    t_ocrad = 0.0
+    if len(athena_imoveis) < 10:
+        logger.info("=" * 55)
+        logger.info("FALLBACK: Apify (ocrad) — Athena retornou poucos resultados")
+        logger.info("=" * 55)
+        t0 = time.time()
+        ocrad = _coletar_ocrad(localizacao, tipo_imovel, bairro)
+        t_ocrad = time.time() - t0
+        logger.info(f"Apify ocrad: {len(ocrad)} imoveis | tempo: {t_ocrad:.1f}s")
+    else:
+        logger.info(f"Athena suficiente ({len(athena_imoveis)} imoveis) — Apify nao necessario")
+
+    # Combina: Athena (principal) + Apify (fallback)
     todos = athena_imoveis + ocrad
     logger.info(f"Total combinado: {len(athena_imoveis)} Athena + {len(ocrad)} Apify = {len(todos)} imoveis")
 
@@ -1142,7 +1180,8 @@ def coletar_imoveis(
     logger.info(f"  Com rua    : {com_rua}/{len(combinados)}")
     logger.info(f"  Com data   : {com_data}/{len(combinados)}")
     logger.info(f"  Com banheir: {com_bath}/{len(combinados)}")
-    logger.info(f"  Tempo ocrad: {t_ocrad:.1f}s")
+    if t_ocrad > 0:
+        logger.info(f"  Tempo ocrad: {t_ocrad:.1f}s")
     logger.info(f"  TEMPO TOTAL: {t_total_final:.1f}s ({t_total_final/60:.1f} min)")
     logger.info("=" * 55)
 
