@@ -797,12 +797,28 @@ def avaliar_infraestrutura(
     estado = imovel_alvo.get("estado", "") or imovel_alvo.get("state", "")
     endereco = f"{rua}, {numero}, {bairro}, {cidade}, {estado}, Brasil".strip(", ")
 
-    logger.info(f"Geocodificando: {endereco}")
-    lat, lon = _geocodificar(endereco)
+    # Tenta reutilizar coordenadas já calculadas pelo Agente 2 (zona homogênea)
+    lat, lon = None, None
+    caminho_zona = os.path.join(DATA_DIR, "zona_homogenea_ag2.json")
+    if os.path.exists(caminho_zona):
+        try:
+            with open(caminho_zona, "r", encoding="utf-8") as f:
+                zona_data = json.load(f)
+            coords = zona_data.get("coordenadas_alvo", {})
+            if coords.get("lat") and coords.get("lon"):
+                lat, lon = coords["lat"], coords["lon"]
+                logger.info(f"Coordenadas reutilizadas do Agente 2: {lat:.6f}, {lon:.6f}")
+        except Exception:
+            pass
+
+    # Fallback: geocodifica se não encontrou coordenadas anteriores
     if not lat:
-        logger.error("Nao foi possivel geocodificar o endereco")
-        return {}
-    logger.info(f"Coordenadas: {lat:.6f}, {lon:.6f}")
+        logger.info(f"Geocodificando: {endereco}")
+        lat, lon = _geocodificar(endereco)
+        if not lat:
+            logger.error("Nao foi possivel geocodificar o endereco")
+            return {}
+        logger.info(f"Coordenadas: {lat:.6f}, {lon:.6f}")
 
     # ── BUSCA POR FAIXAS ──────────────────────────────────────────
     logger.info(f"Buscando POIs nas faixas 0-400m / 401-800m / 801-1500m via osmnx...")

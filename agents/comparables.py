@@ -1139,6 +1139,7 @@ def analisar_zona_homogenea(
         "comparaveis_confirmados": confirmados,
         "fora_zona": fora,
         "imagem_satelite": img_path,
+        "coordenadas_alvo": {"lat": lat_alvo, "lon": lon_alvo},
     }
 
     # Salva resultado em JSON
