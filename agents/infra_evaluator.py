@@ -98,9 +98,9 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 # Faixas de distancia (cada POI fica so na faixa da sua distancia real)
 FAIXAS = [
-    (0,   400,  "microentorno_imediato"),
-    (401, 800,  "entorno_caminhavel"),
-    (801, 1500, "infraestrutura_ampliada"),
+    (0,   400,  "0_400"),
+    (401, 800,  "401_800"),
+    (801, 1500, "801_1500"),
 ]
 
 # Tolerancia de 5% nos limites de faixa
@@ -109,16 +109,44 @@ TOLERANCIA = 0.05
 # Raios maximos para busca (o maior raio da ultima faixa)
 RAIO_MAX = 1500
 
-# Pesos por categoria e faixa
-# None = nao e relevante nessa faixa para essa categoria
-PESOS_CATEGORIA = {
-    "comercio":           {"microentorno_imediato": 1.0, "entorno_caminhavel": 0.6, "infraestrutura_ampliada": None},
-    "educacao":           {"microentorno_imediato": 1.0, "entorno_caminhavel": 0.6, "infraestrutura_ampliada": None},
-    "saude_basica":       {"microentorno_imediato": 1.0, "entorno_caminhavel": 0.6, "infraestrutura_ampliada": None},
-    "transporte":         {"microentorno_imediato": 1.0, "entorno_caminhavel": 0.6, "infraestrutura_ampliada": None},
-    "lazer":              {"microentorno_imediato": 1.0, "entorno_caminhavel": 0.6, "infraestrutura_ampliada": None},
-    "hospital":           {"microentorno_imediato": None, "entorno_caminhavel": 0.6, "infraestrutura_ampliada": 1.0},
-    "grande_equipamento": {"microentorno_imediato": None, "entorno_caminhavel": 0.6, "infraestrutura_ampliada": 1.0},
+# Pesos por distancia e categoria
+# Todas as categorias tem peso em todas as faixas (quanto mais perto, mais vale)
+PESOS_DISTANCIA = {
+    "comercio": {
+        "0_400": 1.00,
+        "401_800": 0.60,
+        "801_1500": 0.20
+    },
+    "educacao": {
+        "0_400": 1.00,
+        "401_800": 0.70,
+        "801_1500": 0.30
+    },
+    "saude_basica": {
+        "0_400": 1.00,
+        "401_800": 0.65,
+        "801_1500": 0.25
+    },
+    "transporte": {
+        "0_400": 1.00,
+        "401_800": 0.70,
+        "801_1500": 0.30
+    },
+    "lazer": {
+        "0_400": 1.00,
+        "401_800": 0.70,
+        "801_1500": 0.35
+    },
+    "hospital": {
+        "0_400": 1.00,
+        "401_800": 0.90,
+        "801_1500": 0.70
+    },
+    "grande_equipamento": {
+        "0_400": 1.00,
+        "401_800": 0.90,
+        "801_1500": 0.70
+    },
 }
 
 # Mapeamento de tags OSM para categorias
@@ -152,16 +180,16 @@ TAG_PARA_CATEGORIA = {
     "restaurant":    "lazer",
     "cafe":          "lazer",
     "playground":    "lazer",
-    # Hospital (faixa maior)
+    # Hospital
     "hospital":      "hospital",
-    # Grande equipamento (faixa maior)
+    # Grande equipamento
     "university":    "grande_equipamento",
     "shopping_mall": "grande_equipamento",
     "mall":          "grande_equipamento",
 }
 
-# Normalizador por categoria (qtd esperada para score = 1.0)
-NORMALIZADOR = {
+# Normalizador por categoria (qtd ponderada esperada para score = 1.0)
+NORMALIZADORES = {
     "comercio":           5,
     "educacao":           3,
     "saude_basica":       4,
@@ -369,7 +397,7 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
         gdf = ox.features_from_point((lat, lon), tags=tags, dist=RAIO_MAX)
 
         resultado = {
-            nome: {cat: [] for cat in PESOS_CATEGORIA}
+            nome: {cat: [] for cat in PESOS_DISTANCIA}
             for _, _, nome in FAIXAS
         }
 
@@ -413,7 +441,7 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
             if faixa is None:
                 continue
 
-            peso = PESOS_CATEGORIA.get(categoria, {}).get(faixa)
+            peso = PESOS_DISTANCIA.get(categoria, {}).get(faixa)
             if peso is None:
                 continue
 
@@ -439,7 +467,7 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
 
     except Exception as e:
         logger.warning(f"osmnx falhou: {e}")
-        return {nome: {cat: [] for cat in PESOS_CATEGORIA} for _, _, nome in FAIXAS}
+        return {nome: {cat: [] for cat in PESOS_DISTANCIA} for _, _, nome in FAIXAS}
 
 
 
@@ -464,7 +492,7 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
 
         # Inicializa estrutura de resultado
         resultado = {
-            nome: {cat: [] for cat in PESOS_CATEGORIA}
+            nome: {cat: [] for cat in PESOS_DISTANCIA}
             for _, _, nome in FAIXAS
         }
 
@@ -512,7 +540,7 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
                 continue
 
             # Verifica se a categoria e relevante nessa faixa
-            peso = PESOS_CATEGORIA.get(categoria, {}).get(faixa)
+            peso = PESOS_DISTANCIA.get(categoria, {}).get(faixa)
             if peso is None:
                 continue
 
@@ -540,92 +568,141 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
 
     except Exception as e:
         logger.warning(f"osmnx falhou: {e}")
-        return {nome: {cat: [] for cat in PESOS_CATEGORIA} for _, _, nome in FAIXAS}
+        return {nome: {cat: [] for cat in PESOS_DISTANCIA} for _, _, nome in FAIXAS}
 
 
 # =============================================================================
-# BLOCO 3 - SCORE MULTIFAIXA COM TRATAMENTO DE TRANSPORTE
+# BLOCO 3 - SCORE POR CATEGORIA COM PESOS POR DISTANCIA
 # =============================================================================
 
 def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
     """
-    Calcula score de infraestrutura por categoria usando pesos por faixa.
-
-    Tratamento especial para transporte (tags expandidas):
-      - "servido": score baseado na quantidade de paradas por faixa
-      - "possui_indicios_de_atendimento": score 0.4 (indicios sem paradas mapeadas)
-      - "dados_insuficientes": score 0.5 neutro, sem penalizacao
+    Calcula score de infraestrutura por categoria usando pesos por distancia.
 
     Formula por categoria:
-        score_cat = sum(qtd_faixa * peso_faixa) / normalizador
-        score_cat = min(score_cat, 1.0)
+        poi_efetivo = (qtd_0_400 × peso_0_400) + (qtd_401_800 × peso_401_800) + (qtd_801_1500 × peso_801_1500)
+        score_categoria = poi_efetivo / normalizador
+        score_categoria = max(0.0, min(1.0, score_categoria))
 
-    Score final = media dos scores por categoria.
+    Tratamento especial para transporte:
+      - "servido": calcula score pela quantidade de paradas por faixa
+      - "possui_indicios_de_atendimento": score 0.4
+      - "dados_insuficientes": score 0.5 neutro
+
+    Score final = media simples dos 7 scores de categoria.
     """
-    scores = {}
+    scores_categoria = {}
+    detalhes_score = {}
     transporte_insuficiente = False
 
-    for categoria, pesos_faixa in PESOS_CATEGORIA.items():
+    for categoria, pesos_faixa in PESOS_DISTANCIA.items():
         if categoria == "transporte":
             # Tratamento especial com dados expandidos
             status = transporte.get("status", "dados_insuficientes")
             if status == "servido":
                 # Calcula score pela quantidade de paradas por faixa
+                qtd_por_faixa = {}
                 total_ponderado = 0.0
                 for _, _, nome_faixa in FAIXAS:
-                    peso = pesos_faixa.get(nome_faixa)
-                    if peso is None:
-                        continue
+                    peso = pesos_faixa.get(nome_faixa, 0)
                     paradas_faixa = [
                         p for p in transporte.get("paradas", []) + transporte.get("estacoes", [])
                         if p.get("faixa") == nome_faixa
                     ]
-                    total_ponderado += len(paradas_faixa) * peso
-                normalizador = NORMALIZADOR.get("transporte", 6)
-                scores["transporte"] = min(round(total_ponderado / normalizador, 3), 1.0)
+                    qtd = len(paradas_faixa)
+                    qtd_por_faixa[nome_faixa] = qtd
+                    total_ponderado += qtd * peso
+
+                normalizador = NORMALIZADORES.get("transporte", 6)
+                score = max(0.0, min(1.0, round(total_ponderado / normalizador, 3)))
+                scores_categoria["transporte"] = score
+                detalhes_score["transporte"] = {
+                    "qtd_0_400": qtd_por_faixa.get("0_400", 0),
+                    "qtd_401_800": qtd_por_faixa.get("401_800", 0),
+                    "qtd_801_1500": qtd_por_faixa.get("801_1500", 0),
+                    "poi_efetivo": round(total_ponderado, 3),
+                    "normalizador": normalizador,
+                    "score": score,
+                    "status": status,
+                }
             elif status == "possui_indicios_de_atendimento":
-                scores["transporte"] = 0.4  # indicios sem paradas mapeadas
+                scores_categoria["transporte"] = 0.4
                 transporte_insuficiente = True
+                detalhes_score["transporte"] = {
+                    "qtd_0_400": 0, "qtd_401_800": 0, "qtd_801_1500": 0,
+                    "poi_efetivo": 0, "normalizador": NORMALIZADORES.get("transporte", 6),
+                    "score": 0.4, "status": status,
+                }
             else:  # dados_insuficientes
-                scores["transporte"] = 0.5  # neutro, sem penalizacao
+                scores_categoria["transporte"] = 0.5
                 transporte_insuficiente = True
+                detalhes_score["transporte"] = {
+                    "qtd_0_400": 0, "qtd_401_800": 0, "qtd_801_1500": 0,
+                    "poi_efetivo": 0, "normalizador": NORMALIZADORES.get("transporte", 6),
+                    "score": 0.5, "status": status,
+                }
             continue
 
+        # Calcula para categorias normais
+        qtd_por_faixa = {}
         total_ponderado = 0.0
         for _, _, nome_faixa in FAIXAS:
-            peso = pesos_faixa.get(nome_faixa)
-            if peso is None:
-                continue
+            peso = pesos_faixa.get(nome_faixa, 0)
             qtd = len(pois_por_faixa.get(nome_faixa, {}).get(categoria, []))
+            qtd_por_faixa[nome_faixa] = qtd
             total_ponderado += qtd * peso
 
-        normalizador = NORMALIZADOR.get(categoria, 3)
-        scores[categoria] = min(round(total_ponderado / normalizador, 3), 1.0)
+        normalizador = NORMALIZADORES.get(categoria, 3)
+        score = max(0.0, min(1.0, round(total_ponderado / normalizador, 3)))
+        scores_categoria[categoria] = score
+        detalhes_score[categoria] = {
+            "qtd_0_400": qtd_por_faixa.get("0_400", 0),
+            "qtd_401_800": qtd_por_faixa.get("401_800", 0),
+            "qtd_801_1500": qtd_por_faixa.get("801_1500", 0),
+            "poi_efetivo": round(total_ponderado, 3),
+            "normalizador": normalizador,
+            "score": score,
+        }
 
-    score_final = round(sum(scores.values()) / len(scores), 3)
-    scores["score_final"] = score_final
-    scores["transporte_status"] = transporte.get("status", "dados_insuficientes")
-    scores["transporte_dados_insuficientes"] = transporte_insuficiente
+    # Score final = media simples dos 7 scores
+    score_final = round(
+        max(0.0, min(1.0, sum(scores_categoria.values()) / len(scores_categoria))),
+        3
+    )
 
-    return scores
+    return {
+        "score_final": score_final,
+        "scores_categoria": scores_categoria,
+        "detalhes_score": detalhes_score,
+        "transporte_status": transporte.get("status", "dados_insuficientes"),
+        "transporte_dados_insuficientes": transporte_insuficiente,
+    }
 
 
 # =============================================================================
-# BLOCO 4 - ANALISE VIA LLM COM CLASSIFICACOES EXPANDIDAS
+# BLOCO 4 - CLASSIFICACAO E ANALISE VIA LLM
 # =============================================================================
 
 def _classificar_infraestrutura(score: float) -> str:
     """
     Classifica o nivel de infraestrutura com base no score final.
+    Intervalos:
+      < 0.30 → insuficiente
+      0.30 até < 0.50 → basica
+      0.50 até < 0.70 → moderada
+      0.70 até < 0.85 → boa
+      >= 0.85 → excelente
     """
-    if score >= 0.80:
-        return "excelente"
-    elif score >= 0.65:
-        return "boa"
-    elif score >= 0.45:
-        return "regular"
-    else:
+    if score < 0.30:
         return "insuficiente"
+    elif score < 0.50:
+        return "basica"
+    elif score < 0.70:
+        return "moderada"
+    elif score < 0.85:
+        return "boa"
+    else:
+        return "excelente"
 
 
 def _analisar_infra_llm(pois_por_faixa: dict, scores: dict, endereco: str, transporte: dict) -> dict:
@@ -829,12 +906,12 @@ def avaliar_infraestrutura(
     transporte = _buscar_transporte(lat, lon)
 
     # ── SCORE MULTIFAIXA ──────────────────────────────────────────
-    scores = _calcular_score(pois_por_faixa, transporte)
+    resultado_score = _calcular_score(pois_por_faixa, transporte)
+    scores = resultado_score
     logger.info(f"Scores por categoria:")
-    for cat, score in scores.items():
-        if cat not in ("score_final", "transporte_dados_insuficientes", "transporte_status"):
-            sufixo = f" [{scores.get('transporte_status','?')}]" if cat == "transporte" and scores.get("transporte_dados_insuficientes") else ""
-            logger.info(f"  {cat:20}: {score:.3f}{sufixo}")
+    for cat, score in scores.get("scores_categoria", {}).items():
+        sufixo = f" [{scores.get('transporte_status','?')}]" if cat == "transporte" and scores.get("transporte_dados_insuficientes") else ""
+        logger.info(f"  {cat:20}: {score:.3f}{sufixo}")
     logger.info(f"  {'score_final':20}: {scores['score_final']:.3f}")
     if scores.get("transporte_dados_insuficientes"):
         logger.info(f"  AVISO: transporte status={scores.get('transporte_status')}")
@@ -861,19 +938,22 @@ def avaliar_infraestrutura(
     saida = {
         "imovel_alvo":   imovel_alvo,
         "coordenadas":   {"lat": lat, "lon": lon},
-        "faixas_metros": {"microentorno_imediato": "0-400m",
-                          "entorno_caminhavel":    "401-800m",
-                          "infraestrutura_ampliada": "801-1500m"},
+        "faixas_metros": {"0_400": "0-400m",
+                          "401_800": "401-800m",
+                          "801_1500": "801-1500m"},
         "tolerancia_pct": TOLERANCIA * 100,
         "pois_por_faixa": pois_por_faixa,
         "transporte":     transporte,
-        "scores":         scores,
+        "scores":         {
+            "score_final": scores["score_final"],
+            "scores_categoria": scores.get("scores_categoria", {}),
+            "detalhes_score": scores.get("detalhes_score", {}),
+        },
         "resumo_scores": {
             "score_final":                  scores.get("score_final"),
             "classificacao_infraestrutura": classificacao,
             "perfil_regiao":                analise.get("perfil_regiao"),
-            "impacto_estimado_no_valor":    analise.get("impacto_estimado_no_valor"),
-            "tempo_liquidez_regional":      analise.get("tempo_liquidez_regional"),
+            "impacto_infraestrutura":       analise.get("impacto_infraestrutura", analise.get("impacto_estimado_no_valor")),
             "pontos_fortes":                analise.get("pontos_fortes", []),
             "pontos_de_atencao":            analise.get("pontos_de_atencao", []),
             "limitacoes":                   analise.get("limitacoes", []),
