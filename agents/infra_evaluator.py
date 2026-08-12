@@ -149,44 +149,67 @@ PESOS_DISTANCIA = {
     },
 }
 
-# Mapeamento de tags OSM para categorias
-TAG_PARA_CATEGORIA = {
-    # Comercio
-    "supermarket":   "comercio",
-    "marketplace":   "comercio",
-    "bakery":        "comercio",
-    "bank":          "comercio",
-    "atm":           "comercio",
-    "convenience":   "comercio",
-    "butcher":       "comercio",
-    "greengrocer":   "comercio",
-    # Educacao
-    "school":        "educacao",
-    "college":       "educacao",
-    "kindergarten":  "educacao",
-    # Saude basica
-    "pharmacy":      "saude_basica",
-    "clinic":        "saude_basica",
-    "doctors":       "saude_basica",
-    "dentist":       "saude_basica",
-    # Transporte
-    "bus_stop":      "transporte",
-    "bus_station":   "transporte",
-    "taxi":          "transporte",
-    # Lazer
-    "park":          "lazer",
-    "fitness_centre":"lazer",
-    "sports_centre": "lazer",
-    "restaurant":    "lazer",
-    "cafe":          "lazer",
-    "playground":    "lazer",
-    # Hospital
-    "hospital":      "hospital",
-    # Equipamentos regionais
-    "university":    "equipamentos_regionais",
-    "shopping_mall": "equipamentos_regionais",
-    "mall":          "equipamentos_regionais",
+# Mapeamento de POIs por categoria usando (chave_osm, valor_osm)
+# Cada POI pertence a UMA ÚNICA categoria (sem dupla contagem)
+POIS_POR_CATEGORIA = {
+    "comercio": [
+        ("shop", "supermarket"),
+        ("amenity", "marketplace"),
+        ("shop", "bakery"),
+        ("shop", "convenience"),
+        ("shop", "butcher"),
+        ("shop", "greengrocer"),
+    ],
+    "educacao": [
+        ("amenity", "school"),
+        ("amenity", "kindergarten"),
+    ],
+    "saude_basica": [
+        ("amenity", "pharmacy"),
+        ("amenity", "clinic"),
+        ("amenity", "doctors"),
+        ("amenity", "dentist"),
+    ],
+    "transporte": [
+        ("highway", "bus_stop"),
+        ("amenity", "bus_station"),
+        ("public_transport", "platform"),
+        ("public_transport", "stop_position"),
+        ("public_transport", "station"),
+    ],
+    "lazer": [
+        ("leisure", "park"),
+        ("leisure", "fitness_centre"),
+        ("leisure", "sports_centre"),
+        ("leisure", "playground"),
+    ],
+    "hospital": [
+        ("amenity", "hospital"),
+    ],
+    "equipamentos_regionais": [
+        ("amenity", "university"),
+        ("amenity", "college"),
+        ("shop", "mall"),
+    ],
 }
+
+# Mapeamento reverso: (chave, valor) → categoria (para classificação rápida)
+TAG_PARA_CATEGORIA = {}
+for categoria, tags in POIS_POR_CATEGORIA.items():
+    for chave, valor in tags:
+        TAG_PARA_CATEGORIA[(chave, valor)] = categoria
+
+# Tags OSM para consulta agrupadas por chave (para montar query ao osmnx)
+TAGS_CONSULTA = {}
+for categoria, tags in POIS_POR_CATEGORIA.items():
+    for chave, valor in tags:
+        if chave not in TAGS_CONSULTA:
+            TAGS_CONSULTA[chave] = []
+        if valor not in TAGS_CONSULTA[chave]:
+            TAGS_CONSULTA[chave].append(valor)
+
+# Distancia para deduplicacao de paradas de transporte (metros)
+DEDUP_TRANSPORTE_METROS = 40
 
 # Normalizador por categoria (qtd ponderada esperada para score = 1.0)
 NORMALIZADORES = {
@@ -336,6 +359,26 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
 
                 resultado["paradas"].sort(key=lambda x: x["distancia_metros"])
                 resultado["estacoes"].sort(key=lambda x: x["distancia_metros"])
+
+                # Deduplicacao espacial: remove paradas muito proximas (~mesmo ponto fisico)
+                def _dedup_transporte(paradas: list, dist_min: int = DEDUP_TRANSPORTE_METROS) -> list:
+                    """Remove paradas que estao a menos de dist_min metros entre si."""
+                    if not paradas:
+                        return paradas
+                    resultado_dedup = [paradas[0]]
+                    for p in paradas[1:]:
+                        muito_perto = False
+                        for aceita in resultado_dedup:
+                            diff = abs(p["distancia_metros"] - aceita["distancia_metros"])
+                            if diff < dist_min:
+                                muito_perto = True
+                                break
+                        if not muito_perto:
+                            resultado_dedup.append(p)
+                    return resultado_dedup
+
+                resultado["paradas"] = _dedup_transporte(resultado["paradas"])
+                resultado["estacoes"] = _dedup_transporte(resultado["estacoes"])
         except Exception as e:
             logger.warning(f"  Busca de paradas falhou: {e}")
 
@@ -378,108 +421,18 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
         return {"paradas": [], "estacoes": [], "rotas": [], "status": "dados_insuficientes"}
 
 
+
 def _buscar_pois_classificados(lat: float, lon: float) -> dict:
     """
     Busca todos os POIs relevantes (exceto transporte) ate RAIO_MAX via osmnx.
-    Classifica cada POI na faixa correta pela sua distancia real — sem duplicacao.
+    Classifica cada POI usando combinacao (chave, valor) para evitar dupla contagem.
+    Um POI pertence a apenas UMA categoria.
     Retorna dict: { nome_faixa: { categoria: [pois] } }
     """
     try:
         import osmnx as ox
 
-        tags = {
-            "amenity": True,
-            "shop": True,
-            "leisure": True,
-        }
-
-        logger.info(f"  Buscando todos os POIs ate {RAIO_MAX}m via osmnx...")
-        gdf = ox.features_from_point((lat, lon), tags=tags, dist=RAIO_MAX)
-
-        resultado = {
-            nome: {cat: [] for cat in PESOS_DISTANCIA}
-            for _, _, nome in FAIXAS
-        }
-
-        if gdf.empty:
-            logger.info("  Nenhum POI encontrado")
-            return resultado
-
-        logger.info(f"  {len(gdf)} elementos brutos encontrados")
-
-        vistos = set()
-        for _, row in gdf.iterrows():
-            tipo = (
-                row.get("amenity") or
-                row.get("shop") or
-                row.get("leisure") or
-                "?"
-            )
-            if not isinstance(tipo, str):
-                continue
-
-            categoria = TAG_PARA_CATEGORIA.get(tipo)
-            if not categoria or categoria == "transporte":
-                continue  # transporte tratado separadamente
-
-            nome = row.get("name") or row.get("name:pt") or tipo
-            if not isinstance(nome, str):
-                nome = tipo
-
-            geom = row.get("geometry")
-            if geom is not None:
-                try:
-                    c = geom.centroid
-                    lat_poi, lon_poi = c.y, c.x
-                except Exception:
-                    lat_poi, lon_poi = lat, lon
-            else:
-                lat_poi, lon_poi = lat, lon
-
-            dist = _haversine(lat, lon, lat_poi, lon_poi)
-            faixa = _faixa_de(dist)
-            if faixa is None:
-                continue
-
-            peso = PESOS_DISTANCIA.get(categoria, {}).get(faixa)
-            if peso is None:
-                continue
-
-            chave = f"{nome}_{tipo}_{dist}"
-            if chave not in vistos:
-                vistos.add(chave)
-                resultado[faixa][categoria].append({
-                    "nome":             nome,
-                    "tipo":             tipo,
-                    "categoria":        categoria,
-                    "distancia_metros": dist,
-                })
-
-        for faixa_data in resultado.values():
-            for cat in faixa_data:
-                faixa_data[cat].sort(key=lambda x: x["distancia_metros"])
-
-        for _, _, nome_faixa in FAIXAS:
-            total = sum(len(v) for v in resultado[nome_faixa].values())
-            logger.info(f"  {nome_faixa}: {total} POIs")
-
-        return resultado
-
-    except Exception as e:
-        logger.warning(f"osmnx falhou: {e}")
-        return {nome: {cat: [] for cat in PESOS_DISTANCIA} for _, _, nome in FAIXAS}
-
-
-
-    """
-    Busca todos os POIs ate RAIO_MAX via osmnx e classifica por faixa.
-    Cada POI fica somente na faixa da sua distancia real — sem duplicacao.
-
-    Retorna dict: { nome_faixa: { categoria: [pois] } }
-    """
-    try:
-        import osmnx as ox
-
+        # Monta tags para consulta ao osmnx
         tags = {
             "amenity": True,
             "shop": True,
@@ -490,9 +443,8 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
         logger.info(f"  Buscando todos os POIs ate {RAIO_MAX}m via osmnx...")
         gdf = ox.features_from_point((lat, lon), tags=tags, dist=RAIO_MAX)
 
-        # Inicializa estrutura de resultado
         resultado = {
-            nome: {cat: [] for cat in PESOS_DISTANCIA}
+            nome: {cat: [] for cat in POIS_POR_CATEGORIA}
             for _, _, nome in FAIXAS
         }
 
@@ -504,23 +456,26 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
 
         vistos = set()
         for _, row in gdf.iterrows():
-            tipo = (
-                row.get("amenity") or
-                row.get("shop") or
-                row.get("leisure") or
-                row.get("highway") or
-                "?"
-            )
-            if not isinstance(tipo, str):
-                continue
+            # Identifica a combinacao (chave, valor) do elemento
+            # Prioridade garante que cada POI pertence a UMA UNICA categoria
+            categoria = None
+            tipo_encontrado = None
 
-            categoria = TAG_PARA_CATEGORIA.get(tipo)
+            for chave in ("amenity", "shop", "leisure", "highway"):
+                valor = row.get(chave)
+                if valor and isinstance(valor, str):
+                    cat = TAG_PARA_CATEGORIA.get((chave, valor))
+                    if cat and cat != "transporte":  # transporte tratado separado
+                        categoria = cat
+                        tipo_encontrado = valor
+                        break
+
             if not categoria:
                 continue
 
-            nome = row.get("name") or row.get("name:pt") or tipo
+            nome = row.get("name") or row.get("name:pt") or tipo_encontrado
             if not isinstance(nome, str):
-                nome = tipo
+                nome = tipo_encontrado
 
             geom = row.get("geometry")
             if geom is not None:
@@ -533,26 +488,22 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
                 lat_poi, lon_poi = lat, lon
 
             dist = _haversine(lat, lon, lat_poi, lon_poi)
-
-            # Classifica na faixa correta (sem duplicacao)
             faixa = _faixa_de(dist)
             if faixa is None:
                 continue
 
-            # Verifica se a categoria e relevante nessa faixa
-            peso = PESOS_DISTANCIA.get(categoria, {}).get(faixa)
-            if peso is None:
+            # Evita dupla contagem do mesmo POI
+            chave_dedup = f"{tipo_encontrado}_{round(lat_poi, 5)}_{round(lon_poi, 5)}"
+            if chave_dedup in vistos:
                 continue
+            vistos.add(chave_dedup)
 
-            chave = f"{nome}_{tipo}_{dist}"
-            if chave not in vistos:
-                vistos.add(chave)
-                resultado[faixa][categoria].append({
-                    "nome":             nome,
-                    "tipo":             tipo,
-                    "categoria":        categoria,
-                    "distancia_metros": dist,
-                })
+            resultado[faixa][categoria].append({
+                "nome":             nome,
+                "tipo":             tipo_encontrado,
+                "categoria":        categoria,
+                "distancia_metros": dist,
+            })
 
         # Ordena cada categoria por distancia
         for faixa_data in resultado.values():
@@ -568,7 +519,7 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
 
     except Exception as e:
         logger.warning(f"osmnx falhou: {e}")
-        return {nome: {cat: [] for cat in PESOS_DISTANCIA} for _, _, nome in FAIXAS}
+        return {nome: {cat: [] for cat in POIS_POR_CATEGORIA} for _, _, nome in FAIXAS}
 
 
 # =============================================================================
@@ -646,11 +597,15 @@ def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
         # Calcula para categorias normais
         qtd_por_faixa = {}
         total_ponderado = 0.0
+        tipos_encontrados = set()
         for _, _, nome_faixa in FAIXAS:
             peso = pesos_faixa.get(nome_faixa, 0)
-            qtd = len(pois_por_faixa.get(nome_faixa, {}).get(categoria, []))
+            pois_faixa = pois_por_faixa.get(nome_faixa, {}).get(categoria, [])
+            qtd = len(pois_faixa)
             qtd_por_faixa[nome_faixa] = qtd
             total_ponderado += qtd * peso
+            for poi in pois_faixa:
+                tipos_encontrados.add(poi.get("tipo", "?"))
 
         normalizador = NORMALIZADORES.get(categoria, 3)
         score = max(0.0, min(1.0, round(total_ponderado / normalizador, 3)))
@@ -659,6 +614,7 @@ def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
             "qtd_0_400": qtd_por_faixa.get("0_400", 0),
             "qtd_401_800": qtd_por_faixa.get("401_800", 0),
             "qtd_801_1500": qtd_por_faixa.get("801_1500", 0),
+            "tipos_encontrados": sorted(tipos_encontrados),
             "poi_efetivo": round(total_ponderado, 3),
             "normalizador": normalizador,
             "score": score,
