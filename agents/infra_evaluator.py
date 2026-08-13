@@ -4,76 +4,111 @@ Agente 4 — Avaliador de Infraestrutura
 
 RESPONSABILIDADE:
     Analisa o entorno do imovel alvo buscando pontos de interesse (POIs)
-    em tres raios diferentes via osmnx (OpenStreetMap). Usa pesos por
-    categoria e raio para calcular um score de infraestrutura. Usa LLM
-    para classificar o perfil da regiao e inferir o impacto no valor.
+    via osmnx (OpenStreetMap) em 3 faixas de distancia. Calcula score
+    de infraestrutura 100% deterministico por categoria. LLM apenas
+    interpreta os scores (nao modifica valores).
 
 ENTRADA:
-    data/imoveis_analisados_ag3.json (gerado pelo Agente 3)
-    Usa apenas o imovel_alvo (rua, numero, bairro, cidade, estado)
+    - data/zona_homogenea_ag2.json (coordenadas do alvo — reutiliza lat/lon do Agente 2)
+    - data/imoveis_analisados_ag3.json (imovel_alvo: rua, numero, bairro, cidade, estado)
 
-SAIDA: data/infra_avaliada_ag4.json
-
-COMO FUNCIONA:
-==============
-
-  ETAPA 1 — GEOCODIFICACAO:
-  ─────────────────────────
-    Geocodifica o endereco do alvo via Nominatim (OpenStreetMap).
-    Fallback: Google Geocoding API (GOOGLE_MAPS_KEY no .env).
-
-  ETAPA 2 — BUSCA DE POIs (osmnx / OpenStreetMap):
-  ──────────────────────────────────────────────────
-    Busca POIs em 3 raios diferentes, cada um capturando um tipo
-    de infraestrutura relevante para avaliacao imobiliaria:
-
-    400m  — microentorno imediato (~5 min a pe)
-            Comercio essencial, escolas, farmacias, transporte, lazer
-    800m  — entorno caminhavel ampliado (~10 min a pe)
-            Supermercados, praças, academias, hospitais, servicos
-    1500m — infraestrutura de maior impacto regional (~15-20 min a pe)
-            Hospitais, shoppings, universidades, grandes vias
-
-  ETAPA 3 — SCORE MULTIRRAIO:
-  ────────────────────────────
-    Cada categoria tem raios relevantes e pesos diferentes:
-
-    Categoria        | 400m | 800m | 1500m | Justificativa
-    ─────────────────|──────|──────|───────|──────────────────────────────
-    comercio         | 1.0  | 0.6  |  —    | Precisa estar perto
-    educacao         | 1.0  | 0.6  |  —    | Escola proxima e diferencial
-    saude_basica     | 1.0  | 0.6  |  —    | Farmacia/clinica: uso cotidiano
-    transporte       | 1.0  | 0.6  |  —    | Onibus: quanto mais perto melhor
-    lazer            | 1.0  | 0.6  |  —    | Parque/academia: uso frequente
-    hospital         |  —   | 0.6  | 1.0   | Nao precisa estar a 400m
-    equipamentos_regionais|  —  | 0.6  | 1.0   | Shopping/universidade: regional
-
-    score_categoria = (qtd_raio × peso_raio) / normalizador
-    score_final = media ponderada dos scores por categoria
-
-  ETAPA 4 — ANALISE VIA LLM:
-  ───────────────────────────
-    Envia o resumo dos POIs por raio para o Groq (llama-3.1-8b-instant).
-    LLM classifica o perfil da regiao e retorna impacto no valor.
+SAIDA:
+    - data/infra_avaliada_ag4.json
 
 FLUXO COMPLETO:
-───────────────
-  1. Carrega imovel_alvo de imoveis_analisados_ag3.json
-  2. Geocodifica endereco (Nominatim → lat/lng)
-  3. Busca POIs via osmnx nos 3 raios (400m, 800m, 1500m)
-  4. Calcula score multirraio por categoria
-  5. Envia resumo para LLM classificar perfil e impacto
-  6. Salva em data/infra_avaliada_ag4.json
+===============
+
+  ETAPA 1 — COORDENADAS DO ALVO
+  ──────────────────────────────
+    Reutiliza lat/lon do Agente 2 (zona_homogenea_ag2.json).
+    Se nao disponivel: Nominatim → fallback Google Geocoding.
+
+  ETAPA 2 — BUSCA DE POIs (osmnx / OpenStreetMap)
+  ─────────────────────────────────────────────────
+    Busca todos os POIs ate 1500m numa unica query ao osmnx.
+    Classifica cada POI pela distancia real (Haversine) em 3 faixas:
+
+    0-400m   — microentorno imediato (~5 min a pe)
+    401-800m — entorno caminhavel (~10 min a pe)
+    801-1500m — infraestrutura regional (~15-20 min a pe)
+
+    Tolerancia de 5% nos limites de faixa.
+    Transporte: busca separada com deduplicacao espacial inteligente (40m).
+
+  ETAPA 3 — SCORE POR CATEGORIA (100% deterministico)
+  ────────────────────────────────────────────────────
+    8 categorias, cada uma com pesos por faixa de distancia:
+
+    Categoria               | 0-400m | 401-800m | 801-1500m | Normalizador
+    ────────────────────────|────────|──────────|───────────|─────────────
+    comercio                |  1.00  |   0.60   |   0.20    |     5
+    educacao                |  1.00  |   0.70   |   0.30    |     3
+    saude_basica            |  1.00  |   0.65   |   0.25    |     4
+    transporte              |  1.00  |   0.70   |   0.30    |     6
+    lazer                   |  1.00  |   0.70   |   0.35    |     3
+    hospital                |  1.00  |   0.90   |   0.70    |     2
+    equipamentos_regionais  |  1.00  |   0.90   |   0.70    |     2
+    servicos_e_alimentacao  |  1.00  |   0.60   |   0.20    |     4
+
+    Formula:
+      poi_efetivo = (qtd_0_400 × peso_0_400) + (qtd_401_800 × peso_401_800) + (qtd_801_1500 × peso_801_1500)
+      score_categoria = min(1.0, poi_efetivo / normalizador)
+      score_final = media simples dos 8 scores de categoria
+
+    servicos_e_alimentacao: limite por subtipo (restaurant 2, cafe 2, bank 1, atm 1)
+      evita inflacao por concentracao de restaurantes.
+
+    Transporte: deduplicacao espacial inteligente
+      paradas < 40m com mesmo nome/ref = mesma parada fisica.
+      Sem dados confiavel: score neutro 0.5.
+
+  ETAPA 4 — CLASSIFICACAO (deterministico)
+  ─────────────────────────────────────────
+    < 0.30 → insuficiente
+    0.30-0.49 → basica
+    0.50-0.69 → moderada
+    0.70-0.84 → boa
+    >= 0.85 → excelente
+
+    perfil_infraestrutura e impacto_infraestrutura: calculados em Python
+    (nao pela LLM). Mapeamento fixo classificacao → perfil → impacto.
+
+  ETAPA 5 — INTERPRETACAO VIA LLM (Groq, llama-3.1-8b-instant)
+  ──────────────────────────────────────────────────────────────
+    A LLM recebe os scores prontos (100% deterministicos) e produz
+    APENAS interpretacao qualitativa:
+      - Perfil da regiao (texto)
+      - Pontos fortes (lista)
+      - Pontos de atencao (lista)
+
+    A LLM NAO modifica nenhum score numerico.
+    A LLM NAO calcula impacto_infraestrutura (ja vem pronto do Python).
+
+CATEGORIAS DE POIs (tags OSM):
+──────────────────────────────
+    comercio:               supermarket, marketplace, bakery, convenience, butcher, greengrocer
+    educacao:               school, kindergarten
+    saude_basica:           pharmacy, clinic, doctors, dentist
+    transporte:             bus_stop, bus_station, platform, stop_position, station
+    lazer:                  park, fitness_centre, sports_centre, playground
+    hospital:               hospital
+    equipamentos_regionais: university, college, mall
+    servicos_e_alimentacao: restaurant, cafe, bank, atm
+
+QUEM USA A SAIDA:
+─────────────────
+    Agente 5 → score_final (liquidez experimental, peso 40%)
+    Interface → scores por categoria + perfil + pontos fortes/atencao
 
 DEPENDENCIAS:
 ─────────────
-  - osmnx (pip install osmnx)
-  - Groq (gratis, 14.400 req/dia) — modelo llama-3.1-8b-instant
-  - langchain-groq (pip install langchain-groq)
+    - osmnx (busca POIs no OpenStreetMap)
+    - Groq (llama-3.1-8b-instant) — apenas interpretacao textual
+    - Nominatim / Google Geocoding (fallback geocodificacao)
 
 COMO RODAR:
 ───────────
-  .venv/Scripts/python.exe -m tests.test_infra_evaluator
+    .venv/Scripts/python.exe -m tests.test_infra_evaluator
 """
 
 import os
