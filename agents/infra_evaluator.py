@@ -477,31 +477,12 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
         except Exception as e:
             logger.warning(f"  Busca de paradas falhou: {e}")
 
-        # 2. Busca rotas de onibus (relations)
-        tags_rotas = {
-            "route": "bus",
-            "route_master": "bus",
-        }
-        try:
-            gdf_rotas = ox.features_from_point((lat, lon), tags=tags_rotas, dist=RAIO_MAX)
-            if not gdf_rotas.empty:
-                for _, row in gdf_rotas.iterrows():
-                    nome = row.get("name") or row.get("ref") or "rota"
-                    if not isinstance(nome, str):
-                        nome = "rota"
-                    resultado["rotas"].append({"nome": nome, "tipo": row.get("route", "bus")})
-        except Exception as e:
-            logger.warning(f"  Busca de rotas falhou: {e}")
-
-        # 3. Determina status
+        # Determina status (baseado apenas em paradas/estacoes)
         tem_paradas  = len(resultado["paradas"]) > 0
         tem_estacoes = len(resultado["estacoes"]) > 0
-        tem_rotas    = len(resultado["rotas"]) > 0
 
         if tem_paradas or tem_estacoes:
             resultado["status"] = "servido"
-        elif tem_rotas:
-            resultado["status"] = "possui_indicios_de_atendimento"
         else:
             resultado["status"] = "dados_insuficientes"
 
