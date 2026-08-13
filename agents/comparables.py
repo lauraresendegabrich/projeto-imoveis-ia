@@ -206,78 +206,54 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
         if desc:
             candidatos_texto += f"  Descricao: {desc}\n"
 
-    prompt = f"""Voce e um avaliador imobiliario responsavel por identificar imoveis comparaveis para avaliacao de mercado.
+    prompt = f"""Classifique imóveis candidatos quanto à comparabilidade com um imóvel alvo.
 
-Seu objetivo NAO e determinar o preco correto do imovel alvo nesta etapa. Seu objetivo e identificar quais imoveis possuem caracteristicas suficientemente semelhantes para servirem como comparaveis em uma avaliacao imobiliaria.
-
+IMOVEL ALVO:
 {alvo_resumo}
 
-IMOVEIS CANDIDATOS ({len(candidatos)} imoveis):
+CANDIDATOS ({len(candidatos)} imoveis):
 {candidatos_texto}
 
-TAREFA
-Para cada imovel candidato:
-1. Compare-o SOMENTE com o imovel alvo.
-2. Classifique-o como: CLUSTER A = comparavel; CLUSTER B = nao comparavel.
-3. Atribua um score_similaridade entre 0 e 100.
-4. Justifique a decisao em uma frase curta e objetiva.
-5. Ao final, atribua um ranking unico, em que 1 representa o imovel mais semelhante ao alvo.
+Para cada candidato, retorne:
+- id
+- cluster: A = comparável, B = não comparável
+- score_similaridade: inteiro de 0 a 100
+- justificativa: uma frase curta
 
-PRINCIPIO GERAL
-Um imovel comparavel nao precisa ser identico ao imovel alvo. Ele deve possuir caracteristicas suficientemente proximas para que possa ser utilizado como referencia de mercado. Nao elimine um imovel apenas por pequenas diferencas em quartos, banheiros, vagas, preco ou caracteristicas secundarias.
+REGRAS:
 
-CRITERIOS ELIMINATORIOS
-Classifique como CLUSTER B quando houver pelo menos uma incompatibilidade estrutural relevante:
-- tipo de imovel incompativel (apartamento vs terreno)
-- uso diferente (comercial vs residencial)
-- area extremamente diferente (mais que o dobro ou menos que a metade)
-- padrao imobiliario claramente incompativel (kitnet popular vs cobertura de luxo)
-- localizacao claramente pertencente a um mercado imobiliario nao comparavel
+Classifique como B se houver incompatibilidade estrutural relevante:
+- tipo incompatível;
+- uso residencial/comercial incompatível;
+- área menor que 50% ou maior que 200% da área do alvo;
+- padrão claramente incompatível.
 
-CRITERIOS PRINCIPAIS DE SIMILARIDADE (em ordem de importancia):
-1. TIPO DO IMOVEL - mesmo tipo e fortemente preferivel
-2. LOCALIZACAO - mesmo bairro e forte evidencia de comparabilidade
-3. AREA - diferenca ate 25% muito semelhante; 25-50% semelhante; 50-100% pode ser comparavel; acima de 100% forte indicacao de B
-4. QUARTOS - mesmo numero muito semelhante; diferenca de 1 aceitavel; diferenca de 2+ reduz significativamente
+Para os demais, avalie principalmente:
+1. tipo do imóvel;
+2. localização;
+3. área;
+4. quartos.
 
-CRITERIOS SECUNDARIOS (fatores complementares):
-- numero de banheiros, vagas, suites
-- condominio
-- diferenciais/amenities
-- caracteristicas da descricao
-Diferenca de 1 banheiro, 1 vaga ou 1 suite NAO deve, isoladamente, colocar um imovel no Cluster B.
+Banheiros, vagas, suítes, condomínio e diferenciais são secundários.
+Diferença pequena nesses campos não deve, isoladamente, causar Cluster B.
 
-PRECO E PRECO/M2
-O preco anunciado e o preco/m2 NAO sao criterios eliminatorios. O imovel alvo pode estar subavaliado ou superavaliado. Nao descarte um candidato apenas porque seu preco e muito diferente. Use preco/m2 apenas como informacao secundaria.
+Preço e preço/m² são apenas informações secundárias e nunca eliminam um imóvel sozinhos.
 
-DADOS AUSENTES
-Campos ausentes ou nulos NAO devem ser interpretados como valor zero ou ausencia da caracteristica. Falta de informacao isolada nao e motivo para Cluster B.
+Campos ausentes não significam zero ou ausência da característica.
 
-SCORE DE SIMILARIDADE
-90-100 = extremamente comparavel
-80-89 = muito comparavel
-70-79 = bom comparavel
-60-69 = comparavel com diferencas relevantes
+SCORE:
+90-100 = extremamente semelhante
+80-89 = muito semelhante
+70-79 = bom comparável
+60-69 = comparável com diferenças
 40-59 = baixa comparabilidade
-0-39 = incompativel
-Regra geral: Cluster A >= 60, Cluster B < 60
+0-39 = incompatível
 
-IMPORTANTE
-- Seja tolerante com pequenas diferencas
-- Priorize HOMOGENEIDADE de mercado e caracteristicas fisicas
-- Nao escolha imoveis simplesmente porque possuem preco semelhante ao alvo
-- O ranking deve refletir a similaridade geral
-- Todos os IDs devem aparecer exatamente uma vez
-- Rankings devem ser numeros inteiros unicos de 1 ate N, sem empates
+Regra geral: score >= 60 → A, score < 60 → B
 
-RESPONDA SOMENTE com JSON valido, sem Markdown, explicacoes ou texto antes ou depois:
-{{
-  "classificacao": [
-    {{"id": 1, "cluster": "A", "score_similaridade": 92, "ranking": 1, "justificativa": "..."}},
-    {{"id": 2, "cluster": "B", "score_similaridade": 31, "ranking": 15, "justificativa": "..."}},
-    ...
-  ]
-}}"""
+Compare cada candidato somente com o imóvel alvo.
+Todos os IDs recebidos devem aparecer exatamente uma vez.
+A justificativa deve ser curta."""
 
     return prompt
 
@@ -316,21 +292,54 @@ def _chamar_llm(prompt: str) -> str:
 
 
 def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") -> str:
-    """Chama Groq. Retorna "" se falhar."""
+    """Chama Groq com Structured Outputs (JSON Schema strict). Retorna "" se falhar."""
     if not api_key:
         return ""
     try:
-        from langchain_groq import ChatGroq
-        llm = ChatGroq(
+        from groq import Groq
+        client = Groq(api_key=api_key)
+
+        response = client.chat.completions.create(
             model=model,
-            api_key=api_key,
-            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+            reasoning_effort="low",
+            reasoning_format="hidden",
+            temperature=0.1,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "classificacao_comparaveis",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "classificacao": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "integer"},
+                                        "cluster": {"type": "string", "enum": ["A", "B"]},
+                                        "score_similaridade": {"type": "integer"},
+                                        "justificativa": {"type": "string"}
+                                    },
+                                    "required": ["id", "cluster", "score_similaridade", "justificativa"],
+                                    "additionalProperties": False
+                                }
+                            }
+                        },
+                        "required": ["classificacao"],
+                        "additionalProperties": False
+                    }
+                }
+            },
+            max_completion_tokens=3000,
         )
-        resposta = llm.invoke(prompt)
-        if hasattr(resposta, "content"):
+
+        texto = response.choices[0].message.content or ""
+        if texto:
             logger.info(f"    [LLM] Groq {model} respondeu OK")
-            return resposta.content
-        return str(resposta)
+        return texto
     except Exception as e:
         logger.warning(f"    [LLM] Groq {model} falhou: {e}")
         return ""
@@ -381,7 +390,6 @@ def _parsear_resposta_llm(resposta: str, candidatos: list[dict]) -> list[dict]:
         idx = item.get("id", 0) - 1  # 1-indexed -> 0-indexed
         if 0 <= idx < len(candidatos):
             candidatos[idx]["cluster"] = item.get("cluster", "B")
-            candidatos[idx]["ranking_llm"] = item.get("ranking")
             candidatos[idx]["justificativa"] = item.get("justificativa", "")
             # Score da LLM (0-100) sobrescreve o numérico se disponivel
             llm_score = item.get("score_similaridade")
@@ -541,6 +549,11 @@ def identificar_comparaveis(
                 time.sleep(5)
 
         candidatos_llm = todos_classificados
+
+        # Ranking global: ordena por score_similaridade (maior primeiro) e atribui ranking 1-N
+        candidatos_llm.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
+        for ranking, c in enumerate(candidatos_llm, 1):
+            c["ranking_llm"] = ranking
     else:
         logger.info("LLM desativada — usando apenas score numerico")
         candidatos_llm = _fallback_numerico(filtrados)
