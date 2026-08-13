@@ -518,11 +518,11 @@ def identificar_comparaveis(
                     f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
 
     # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Envia todos os candidatos para a LLM em lotes de 35
-    # (openai/gpt-oss-120b: 250K tokens/min, 500K req/dia)
+    # Envia todos os candidatos para a LLM em lotes de 15
+    # (openai/gpt-oss-120b: limite de ~8.000 tokens por request no free tier)
     # JSON Schema strict garante formato valido
     # Cadeia de fallback: Groq 1 → Groq 2 → Gemini → numerico
-    TAMANHO_LOTE = 35
+    TAMANHO_LOTE = 15
 
     if usar_llm:
         todos_classificados = []
