@@ -800,7 +800,7 @@ RESPONDA SOMENTE JSON válido. Todos os campos são OBRIGATÓRIOS:
         # Parseia JSON — tenta no texto limpo E no original
         resultado_json = None
         for fonte in [texto_limpo, texto]:
-            m = re.search(r'\{[^{}]*"raio_sugerido_metros"[^{}]*\}', fonte)
+            m = re.search(r'\{[\s\S]*?"raio_sugerido_metros"[\s\S]*?\}', fonte)
             if m:
                 try:
                     resultado_json = json.loads(m.group(0))
