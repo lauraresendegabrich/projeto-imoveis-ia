@@ -391,12 +391,12 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         cidade    = imovel.get("city", "") or imovel.get("cidade", "") or ""
         images    = imovel.get("images", []) or []
 
-        # Groq aceita max 5 imagens por request
-        if len(images) <= 5:
+        # Groq aceita max 3 imagens por request (qwen3.6-27b)
+        if len(images) <= 3:
             fotos_selecionadas = images
         else:
-            step = len(images) / 5
-            indices = [int(i * step) for i in range(5)]
+            step = len(images) / 3
+            indices = [int(i * step) for i in range(3)]
             fotos_selecionadas = [images[i] for i in indices]
 
         prompt_texto = (
