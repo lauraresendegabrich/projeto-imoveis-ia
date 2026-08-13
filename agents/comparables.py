@@ -778,25 +778,39 @@ RESPONDA SOMENTE JSON válido:
         if not texto_limpo:
             texto_limpo = texto
 
-        # Parseia JSON
-        m = re.search(r'\{[\s\S]+\}', texto_limpo)
-        if m:
-            try:
-                resultado = json.loads(m.group(0))
-                # Normaliza campo de raio
-                if "raio_sugerido_metros" in resultado:
-                    resultado["raio_metros"] = resultado["raio_sugerido_metros"]
-                # Garante raio discreto valido (300/500/700/1000/1500)
-                raios_validos = [300, 500, 700, 1000, 1500]
-                raio = resultado.get("raio_metros", 700)
+        # Parseia JSON — tenta no texto limpo E no original
+        resultado_json = None
+        for fonte in [texto_limpo, texto]:
+            m = re.search(r'\{[^{}]*"raio_sugerido_metros"[^{}]*\}', fonte)
+            if m:
+                try:
+                    resultado_json = json.loads(m.group(0))
+                    break
+                except json.JSONDecodeError:
+                    pass
+            # Tenta regex mais amplo
+            m = re.search(r'\{[\s\S]+\}', fonte)
+            if m:
+                try:
+                    resultado_json = json.loads(m.group(0))
+                    break
+                except json.JSONDecodeError:
+                    pass
+
+        if resultado_json:
+            # Normaliza campo de raio
+            if "raio_sugerido_metros" in resultado_json:
+                resultado_json["raio_metros"] = resultado_json["raio_sugerido_metros"]
+            # Garante raio discreto valido (300/500/700/1000/1500)
+            raios_validos = [300, 500, 700, 1000, 1500]
+            raio = resultado_json.get("raio_metros", 700)
+            if isinstance(raio, (int, float)):
+                raio = int(raio)
                 if raio not in raios_validos:
-                    # Pega o mais proximo
                     raio = min(raios_validos, key=lambda x: abs(x - raio))
-                    resultado["raio_metros"] = raio
-                    resultado["raio_sugerido_metros"] = raio
-                return resultado
-            except json.JSONDecodeError:
-                logger.warning("JSON truncado — extraindo campos do texto")
+                    resultado_json["raio_metros"] = raio
+                    resultado_json["raio_sugerido_metros"] = raio
+            return resultado_json
 
         # Fallback: extrai campos do texto usando regex
         # Remove bloco <think> do texto limpo pra descricao
