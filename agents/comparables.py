@@ -658,8 +658,9 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     import base64
 
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-    if not nvidia_key:
-        logger.warning("NVIDIA_API_KEY nao configurada — pulando analise visual")
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if not nvidia_key and not groq_key:
+        logger.warning("Nenhuma API key de visao configurada — usando raio padrao")
         return {"raio_metros": 500}
 
     # Converte pra JPEG com qualidade 85 (mantém resolução original 1280x1280)

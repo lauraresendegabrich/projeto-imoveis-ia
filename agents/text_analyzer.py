@@ -900,6 +900,7 @@ def _analisar_imovel(imovel: dict) -> dict:
         "evidencias":            evidencias,
         "fotos_analisadas":      min(len(images), 8),
         "total_fotos_disponiveis": len(images),
+        "llm_usada":             dados.get("llm_usada", "fallback"),
         "observacoes":           observacoes,
         "scores":                {"score_qualitativo": score},
         "detalhes_calculo":      detalhes_calculo,
