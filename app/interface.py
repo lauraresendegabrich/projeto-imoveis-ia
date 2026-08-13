@@ -405,7 +405,7 @@ elif submitted:
         try:
             resultado_ag4 = future_ag4.result()
             score_infra = resultado_ag4.get("scores", {}).get("score_final", 0)
-            classif = resultado_ag4.get("resumo_scores", {}).get("classificacao_infraestrutura", "?")
+            classif = resultado_ag4.get("scores", {}).get("classificacao_infraestrutura", "?")
             with log_area:
                 st.success(f"✅ Mapeou escolas, hospitais, comércio e transporte no entorno. Classificação: **{classif}**")
                 if classif == "insuficiente":
