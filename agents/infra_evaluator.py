@@ -375,8 +375,8 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
 
         # Configura servidor Overpass com fallback
         servidores = [
-            "https://overpass-api.de/api/interpreter",
             "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass-api.de/api/interpreter",
         ]
         for servidor in servidores:
             try:
@@ -539,8 +539,8 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
         
         # Tenta servidor principal, fallback pra alternativo
         servidores = [
-            "https://overpass-api.de/api/interpreter",
             "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass-api.de/api/interpreter",
         ]
         gdf = None
         for servidor in servidores:
