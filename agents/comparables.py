@@ -727,15 +727,15 @@ Priorize o MENOR raio que represente adequadamente uma área semelhante ao entor
 Não aumente o raio apenas para encontrar mais comparáveis.
 Se a imagem tiver pouca resolução ou abrangência, escolha um raio conservador e reduza a confiança.
 
-RESPONDA SOMENTE JSON válido:
+RESPONDA SOMENTE JSON válido. Todos os campos são OBRIGATÓRIOS:
 {{
   "padrao_construtivo": "casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido",
   "homogeneidade_visual": "alta | media | baixa | indefinida",
   "densidade_urbana": "baixa | media | alta | indefinida",
   "transicao_visual": "nenhuma_relevante | proxima | intermediaria | distante | indefinida",
   "raio_sugerido_metros": 700,
-  "justificativa_raio": "frase curta",
-  "descricao_zona_homogenea": "descricao curta baseada apenas na imagem",
+  "justificativa_raio": "OBRIGATORIO - explique em uma frase por que escolheu este raio",
+  "descricao_zona_homogenea": "OBRIGATORIO - descreva em uma frase as caracteristicas urbanas observadas",
   "confianca": "alta | media | baixa"
 }}"""
 
