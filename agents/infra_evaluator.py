@@ -942,7 +942,7 @@ Responda SOMENTE com JSON valido:
   "conclusao": ""
 }}"""
 
-        llm = ChatGroq(model="llama-3.1-8b-instant", api_key=api_key, temperature=0)
+        llm = ChatGroq(model="openai/gpt-oss-20b", api_key=api_key, temperature=0)
         resposta = llm.invoke(prompt)
         conteudo = resposta.content if hasattr(resposta, "content") else str(resposta)
 

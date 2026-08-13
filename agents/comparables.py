@@ -285,28 +285,34 @@ RESPONDA SOMENTE com JSON valido, sem Markdown, explicacoes ou texto antes ou de
 def _chamar_llm(prompt: str) -> str:
     """
     Chama a LLM com cadeia de fallback:
-      1. Groq (GROQ_API_KEY) — llama-3.3-70b-versatile
-      2. Groq (GROQ_API_KEY_2) — llama-3.3-70b-versatile (2a conta)
-      3. Gemini (GOOGLE_API_KEY) — gemini-2.5-flash
+      1. Groq — openai/gpt-oss-120b (200k tokens/dia, melhor qualidade)
+      2. Groq — openai/gpt-oss-20b (200k tokens/dia, mais leve)
+      3. Gemini — gemini-2.5-flash (20 req/min)
       4. Se tudo falhar → retorna "" (fallback numerico)
     """
-    # Tentativa 1: Groq com chave principal
-    resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""))
+    # Tentativa 1: Groq gpt-oss-120b (principal)
+    resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b")
     if resposta:
         return resposta
 
-    # Tentativa 2: Groq com chave secundaria
+    # Tentativa 2: Groq gpt-oss-20b (fallback leve)
+    logger.info("  gpt-oss-120b falhou — tentando gpt-oss-20b...")
+    resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-20b")
+    if resposta:
+        return resposta
+
+    # Tentativa 3: Groq com chave secundaria (gpt-oss-120b)
     groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
     if groq_key_2:
-        logger.info("  Groq 1 falhou — tentando GROQ_API_KEY_2...")
-        resposta = _chamar_groq(prompt, groq_key_2)
+        logger.info("  KEY 1 esgotada — tentando GROQ_API_KEY_2...")
+        resposta = _chamar_groq(prompt, groq_key_2, model="openai/gpt-oss-120b")
         if resposta:
             return resposta
 
-    # Tentativa 3: Gemini
+    # Tentativa 4: Gemini
     google_key = os.getenv("GOOGLE_API_KEY", "")
     if google_key:
-        logger.info("  Groq 1+2 falhou — tentando Gemini...")
+        logger.info("  Groq esgotado — tentando Gemini...")
         resposta = _chamar_gemini(prompt, google_key)
         if resposta:
             return resposta
@@ -315,24 +321,24 @@ def _chamar_llm(prompt: str) -> str:
     return ""
 
 
-def _chamar_groq(prompt: str, api_key: str) -> str:
-    """Chama Groq (llama-3.3-70b-versatile). Retorna "" se falhar."""
+def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") -> str:
+    """Chama Groq. Retorna "" se falhar."""
     if not api_key:
         return ""
     try:
         from langchain_groq import ChatGroq
         llm = ChatGroq(
-            model="llama-3.3-70b-versatile",
+            model=model,
             api_key=api_key,
             temperature=0,
         )
         resposta = llm.invoke(prompt)
         if hasattr(resposta, "content"):
-            logger.info("    [LLM] Groq llama-3.3-70b respondeu OK")
+            logger.info(f"    [LLM] Groq {model} respondeu OK")
             return resposta.content
         return str(resposta)
     except Exception as e:
-        logger.warning(f"    [LLM] Groq falhou: {e}")
+        logger.warning(f"    [LLM] Groq {model} falhou: {e}")
         return ""
 
 
