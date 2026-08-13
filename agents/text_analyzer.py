@@ -392,27 +392,20 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         cidade    = imovel.get("city", "") or imovel.get("cidade", "") or ""
         images    = imovel.get("images", []) or []
 
-        # Groq: max 2 imagens pra caber no limite de 8000 TPM do free tier
-        if len(images) <= 2:
-            fotos_selecionadas = images
-        else:
-            # Pega primeira e do meio (cobre fachada + interior)
-            fotos_selecionadas = [images[0], images[len(images) // 2]]
+        # Groq qwen3.6-27b: max 1 imagem pra caber no limite de 8000 TPM
+        fotos_selecionadas = [images[0]] if images else []
 
         prompt_texto = (
-            f"Avaliador imobiliario. Analise com base no texto e fotos.\n"
-            f"Titulo: {titulo[:150]}\nDescricao: {descricao[:200]}\n"
-            f"Tipo: {tipo} | Area: {area}m2 | Quartos: {quartos} | Banheiros: {banheiros} | "
-            f"Vagas: {vagas} | Preco: {preco} | Bairro: {bairro}\n\n"
-            f"Retorne SOMENTE JSON valido:\n"
-            f'{{"estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",'
-            f'"padrao_acabamento": "alto_padrao|medio|simples|desconhecido",'
-            f'"pontos_positivos": [],'
-            f'"pontos_negativos": [],'
-            f'"qualidade_imagens": "boa|razoavel|ruim",'
-            f'"confianca_extracao": "baixa|media|alta",'
-            f'"evidencias": {{"conservacao": [], "acabamento": []}},'
-            f'"observacoes": []}}'
+            f"Analise este imovel. Retorne JSON.\n"
+            f"Tipo: {tipo} | Area: {area}m2 | Quartos: {quartos} | Bairro: {bairro}\n"
+            f"Descricao: {descricao[:150]}\n\n"
+            f"JSON: {{\"estado_conservacao\": \"novo|reformado|bom|regular|precisa_reforma|desconhecido\","
+            f"\"padrao_acabamento\": \"alto_padrao|medio|simples|desconhecido\","
+            f"\"pontos_positivos\": [],\"pontos_negativos\": [],"
+            f"\"qualidade_imagens\": \"boa|razoavel|ruim\","
+            f"\"confianca_extracao\": \"baixa|media|alta\","
+            f"\"evidencias\": {{\"conservacao\": [], \"acabamento\": []}},"
+            f"\"observacoes\": []}}"
         )
 
         # Monta content com texto + fotos como URLs
