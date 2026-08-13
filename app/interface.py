@@ -440,9 +440,9 @@ elif submitted:
     resultado_ag5 = {}
     try:
         resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
-        valor = resultado_ag5.get("avaliacao_planilha", {}).get("valor_medio_imovel", 0)
-        liquidez_val = resultado_ag5.get("avaliacao_planilha", {}).get("valor_liquidez_arredondado", 0)
-        tempo_venda = resultado_ag5.get("liquidez_experimental", {}).get("tempo_estimado", "?")
+        valor = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_medio_imovel", 0)
+        liquidez_val = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_liquidez_arredondado", 0)
+        tempo_venda = (resultado_ag5.get("liquidez_experimental") or resultado_ag5.get("liquidez", {})).get("tempo_estimado", "?")
         with log_area:
             st.success(f"✅ Avaliação concluída!")
     except Exception as e:
@@ -488,8 +488,8 @@ if "resultado" in st.session_state:
     # Preço estimado
     preco = resultado.get("preco_estimado", {})
     if preco and isinstance(preco, dict):
-        avaliacao = preco.get("avaliacao_planilha", {})
-        liquidez_info = preco.get("liquidez_experimental", {})
+        avaliacao = preco.get("avaliacao_planilha") or preco.get("avaliacao", {})
+        liquidez_info = preco.get("liquidez_experimental") or preco.get("liquidez", {})
 
         col_a, col_b, col_c = st.columns(3)
         with col_a:
@@ -566,8 +566,13 @@ if "resultado" in st.session_state:
             # Tabela de comparáveis
             st.markdown("---")
             st.caption("Imóveis usados no cálculo")
-            zona_data = resultado.get("zona_homogenea", {})
-            comparaveis_tabela = zona_data.get("comparaveis_confirmados", []) if zona_data else resultado.get("comparaveis", [])
+            # Usa comparáveis do Ag.3 (têm análise qualitativa) se disponível
+            ag3_comps = resultado.get("analise_qualitativa", {})
+            comparaveis_tabela = ag3_comps.get("comparaveis", []) if ag3_comps else []
+            # Fallback: zona homogênea (sem análise qualitativa)
+            if not comparaveis_tabela:
+                zona_data = resultado.get("zona_homogenea", {})
+                comparaveis_tabela = zona_data.get("comparaveis_confirmados", []) if zona_data else resultado.get("comparaveis", [])
             if comparaveis_tabela:
                 import pandas as pd
                 dados_tabela = []
@@ -578,11 +583,17 @@ if "resultado" in st.session_state:
                     estado_cons = analise.get("estado_conservacao", "-")
                     padrao_tab = analise.get("padrao_acabamento", "-")
                     score_q = analise.get("scores", {}).get("score_qualitativo", "-")
+                    # Preço: tenta price (float) ou preco (string do Athena)
+                    preco_val = comp.get("price") or comp.get("preco") or 0
+                    try:
+                        preco_val = float(preco_val)
+                    except (ValueError, TypeError):
+                        preco_val = 0
                     dados_tabela.append({
-                        "Preço": f"R$ {comp.get('price', 0):,.0f}",
-                        "Área": f"{comp.get('area', 0)}m²",
-                        "Quartos": comp.get("bedrooms", "?"),
-                        "Bairro": comp.get("neighborhood", "?"),
+                        "Preço": f"R$ {preco_val:,.0f}" if preco_val else "-",
+                        "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
+                        "Quartos": comp.get("bedrooms") or comp.get("quartos", "?"),
+                        "Bairro": comp.get("neighborhood") or comp.get("bairro", "?"),
                         "Estado": estado_cons,
                         "Padrão": padrao_tab,
                         "Score": score_q,
@@ -592,7 +603,15 @@ if "resultado" in st.session_state:
                 st.markdown(df.to_markdown(index=False), unsafe_allow_html=True)
 
                 # Gráfico de preços
-                precos_hist = [c.get("price", 0) for c in comparaveis_tabela if c.get("price")]
+                precos_hist = []
+                for c in comparaveis_tabela:
+                    p = c.get("price") or c.get("preco") or 0
+                    try:
+                        p = float(p)
+                        if p > 0:
+                            precos_hist.append(p)
+                    except (ValueError, TypeError):
+                        pass
                 if precos_hist:
                     import plotly.express as px
                     fig = px.histogram(x=precos_hist, nbins=10, labels={"x": "Preço (R$)", "y": "Quantidade"})
