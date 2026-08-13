@@ -3,9 +3,10 @@ Agente 5 - Estimador de Preco e Liquidez
 ==========================================
 
 RESPONSABILIDADE:
-    Calcula o valor estimado do imovel alvo a partir do valor do metro
-    quadrado da zona homogenea, separando terreno e construcao por padrao.
-    Estima tambem o tempo de liquidez com base nos scores dos agentes 3 e 4.
+    Calcula o valor estimado do imovel alvo reproduzindo a metodologia
+    da planilha do professor. Separa terreno e construcao, usa TRIMMEAN(0.5),
+    e aplica desconto fixo de 10% para valor de liquidez.
+    Adicionalmente, gera estimativa experimental de liquidez (nao altera precos).
 
 ENTRADA:
     - data/zona_homogenea_ag2.json (comparaveis confirmados + terrenos)
@@ -16,15 +17,93 @@ ENTRADA:
 SAIDA:
     - data/preco_liquidez_ag5.json
 
-LOGICA:
-    1. Calcula valor m2 do terreno na zona homogenea (terrenos comparaveis)
-    2. Calcula valor m2 da construcao por padrao (baixo, medio, alto)
-    3. Para o imovel alvo, escolhe o padrao construtivo (do Ag. 3)
-    4. Valor minimo e medio do terreno
-    5. Valor minimo e medio da construcao
-    6. Soma terreno + construcao
-    7. Valor de liquidez = valor medio * (1 - desconto)
-    8. Estima tempo de liquidez usando scores dos agentes 3 e 4
+CALCULO OFICIAL (fiel a planilha):
+==================================
+
+  ETAPA 1 — VALOR M2 DO TERRENO
+  ──────────────────────────────
+    Para cada terreno da zona homogenea:
+      valor_m2 = preco / area
+      Se topografia "acentuado": valor_m2 *= 0.80 (desconto 20%)
+
+    menor_m2_terreno = MIN de todos
+    medio_m2_terreno = TRIMMEAN(0.5) de todos
+
+  ETAPA 2 — DECISAO: SEPARAR TERRENO OU NAO
+  ───────────────────────────────────────────
+    Apartamento/Sala: terreno = 0 (condominial)
+    Terreno puro: so terreno, construcao = 0
+    Casa com area_terreno: separa
+    Casa sem area_terreno: usa preco/m2 total (nao separa)
+
+  ETAPA 3 — DUAS SERIES DE M2 CONSTRUCAO
+  ────────────────────────────────────────
+    Para cada comparavel construido:
+      Se condominial: m2 = preco / area_construida (nas duas series)
+      Se casa (separando terreno):
+        Serie MIN/TERRENO: m2 = (preco - menor_m2_terreno * area_terreno_comp) / area_construida
+        Serie MED/TERRENO: m2 = (preco - medio_m2_terreno * area_terreno_comp) / area_construida
+      Valores <= 0: descartados (terreno vale mais que o imovel)
+
+    Combina as duas series:
+      menor_m2_construcao = MIN da lista combinada
+      medio_m2_construcao = TRIMMEAN(0.5) da lista combinada
+
+  ETAPA 4 — VALOR DO TERRENO DO ALVO
+  ────────────────────────────────────
+    Se separa: valor_terreno = m2_terreno * area_terreno_alvo
+    Se condominial: valor_terreno = 0
+
+  ETAPA 5 — VALOR DA CONSTRUCAO DO ALVO
+  ───────────────────────────────────────
+    Se terreno puro: valor_construcao = 0
+    Senao: valor_construcao = m2_construcao * area_construida_alvo
+
+  ETAPA 6 — VALOR DO IMOVEL
+  ──────────────────────────
+    Casa/Loja/Galpao: valor = terreno + construcao
+    Apartamento/Sala: valor = construcao
+    Terreno: valor = terreno
+
+  ETAPA 7 — VALOR DE LIQUIDEZ
+  ────────────────────────────
+    valor_liquidez = valor_medio * 0.90 (desconto fixo 10%)
+    Agentes 3 e 4 NAO alteram este valor.
+
+TRIMMEAN(0.5) — REPRODUZ EXCEL EXATO:
+──────────────────────────────────────
+    1. Remove valores invalidos (nulos, <= 0)
+    2. Ordena
+    3. n * 0.5 = quantidade candidata a exclusao
+    4. Floor par (arredonda para baixo ate multiplo de 2)
+    5. Remove metade do inicio, metade do final
+    6. Media aritmetica dos restantes
+    7. Se quantidade = 0: media de todos
+    Nunca usa mediana como fallback.
+
+LIQUIDEZ EXPERIMENTAL (separada da planilha):
+=============================================
+    score_liquidez = 0.35 * score_ag3 + 0.40 * score_ag4 + 0.25 * (1 - desconto)
+    Classificacao: alta (>=0.80), media_alta (>=0.65), media (>=0.50), baixa (<0.50)
+    NAO modifica valor_minimo, valor_medio nem valor_liquidez.
+
+SAIDA JSON:
+───────────
+    "avaliacao_planilha": { valor_minimo, valor_medio, desconto, valor_liquidez }
+    "liquidez_experimental": { score, classificacao, tempo_estimado, aviso }
+    "auditoria": { todos os valores intermediarios }
+
+QUEM USA:
+─────────
+    Interface → exibe valor estimado + liquidez pro usuario
+
+DEPENDENCIAS:
+─────────────
+    Nenhuma LLM. Apenas Python puro (statistics, json).
+
+COMO RODAR:
+───────────
+    .venv/Scripts/python.exe -m agents.price_liquidity
 """
 
 import json
