@@ -824,15 +824,25 @@ RESPONDA SOMENTE com JSON válido, sem Markdown e sem qualquer texto antes ou de
                 }
             ],
             temperature=0,
-            max_completion_tokens=1024,
+            max_completion_tokens=4096,
         )
         texto = response.choices[0].message.content or ""
         logger.info(f"Groq Vision (qwen3.6-27b) respondeu ({len(texto)} chars)")
 
         # Remove bloco <think>...</think> se presente (qwen3.6-27b usa reasoning)
-        texto_limpo = re.sub(r'<think>[\s\S]*?</think>', '', texto).strip()
+        if '</think>' in texto:
+            texto_limpo = texto.split('</think>', 1)[1].strip()
+        elif '<think>' in texto:
+            texto_limpo = texto  # Tag aberta sem fechar — usa original
+        else:
+            texto_limpo = texto
+        
+        # Remove markdown code block se presente
+        texto_limpo = re.sub(r'```json\s*', '', texto_limpo)
+        texto_limpo = re.sub(r'```\s*', '', texto_limpo)
+        texto_limpo = texto_limpo.strip()
         if not texto_limpo:
-            texto_limpo = texto  # Se removeu tudo, usa original
+            texto_limpo = texto
 
         # Parseia JSON
         m = re.search(r'\{[\s\S]+\}', texto_limpo)
