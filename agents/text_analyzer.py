@@ -357,6 +357,7 @@ Não crie campos além dos especificados.
 
         resultado = json.loads(m.group(0))
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
+        resultado["llm_usada"] = "gemini-2.5-flash"
         return resultado
 
     except Exception as e:
@@ -435,6 +436,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
 
         resultado = json.loads(m.group(0))
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
+        resultado["llm_usada"] = "groq-qwen3.6-27b"
         return resultado
 
     except Exception as e:
@@ -546,7 +548,9 @@ Retorne exatamente este JSON:
             logger.warning("NVIDIA NIM nao retornou JSON valido")
             return {}
 
-        return json.loads(m.group(0))
+        resultado_nim = json.loads(m.group(0))
+        resultado_nim["llm_usada"] = "nvidia-llama-3.2-11b-vision"
+        return resultado_nim
 
     except json.JSONDecodeError:
         logger.warning("JSON invalido retornado pela NVIDIA NIM")
@@ -996,7 +1000,8 @@ def analisar_comparaveis(
         analise = _analisar_imovel(im)
         t1 = time.time()
         im["analise_qualitativa"] = analise
-        logger.info(f"    -> {t1-t0:.1f}s | estado={analise['estado_conservacao']} | score={analise['scores']['score_qualitativo']}")
+        llm_usada = analise.get("llm_usada", "fallback")
+        logger.info(f"    -> {t1-t0:.1f}s | estado={analise['estado_conservacao']} | score={analise['scores']['score_qualitativo']} | llm={llm_usada}")
         if analise["status"] == "ok":
             com_ok += 1
         else:

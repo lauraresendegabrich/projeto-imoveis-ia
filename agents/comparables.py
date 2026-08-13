@@ -328,10 +328,11 @@ def _chamar_groq(prompt: str, api_key: str) -> str:
         )
         resposta = llm.invoke(prompt)
         if hasattr(resposta, "content"):
+            logger.info("    [LLM] Groq llama-3.3-70b respondeu OK")
             return resposta.content
         return str(resposta)
     except Exception as e:
-        logger.warning(f"Groq falhou: {e}")
+        logger.warning(f"    [LLM] Groq falhou: {e}")
         return ""
 
 
@@ -344,9 +345,10 @@ def _chamar_gemini(prompt: str, api_key: str) -> str:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
         resposta = model.generate_content(prompt)
+        logger.info("    [LLM] Gemini 2.5 Flash respondeu OK")
         return resposta.text or ""
     except Exception as e:
-        logger.warning(f"Gemini falhou: {e}")
+        logger.warning(f"    [LLM] Gemini falhou: {e}")
         return ""
 
 
