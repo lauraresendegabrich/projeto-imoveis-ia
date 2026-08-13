@@ -799,7 +799,15 @@ RESPONDA SOMENTE JSON válido:
                 logger.warning("JSON truncado — extraindo campos do texto")
 
         # Fallback: extrai campos do texto usando regex
-        resultado_fallback = {"descricao_zona_homogenea": texto_limpo[:500], "raio_metros": 700}
+        # Remove bloco <think> do texto limpo pra descricao
+        desc_texto = texto_limpo
+        if '<think>' in desc_texto:
+            # Pega so o que vem depois do </think> ou apos o <think>
+            if '</think>' in desc_texto:
+                desc_texto = desc_texto.split('</think>', 1)[1].strip()
+            else:
+                desc_texto = ""
+        resultado_fallback = {"descricao_zona_homogenea": desc_texto[:300] if desc_texto else "Analise visual nao disponivel", "raio_metros": 700}
 
         # Tenta extrair raio
         raio_match = re.search(r'raio.*?(\d{3,4})\s*(?:metros|m)', texto_limpo)
