@@ -1109,6 +1109,13 @@ def coletar_imoveis(
                 im.setdefault("publishedAt", im.get("data_publicacao"))
                 im.setdefault("description", im.get("descricao"))
                 im.setdefault("title", im.get("titulo"))
+                # Preço por m2
+                if im.get("preco_por_m2") and not im.get("pricePerSqm"):
+                    try:
+                        im["pricePerSqm"] = float(im["preco_por_m2"])
+                    except (ValueError, TypeError):
+                        pass
+                # Coordenadas
                 if im.get("latitude") and im.get("longitude"):
                     try:
                         im["lat"] = float(im["latitude"])

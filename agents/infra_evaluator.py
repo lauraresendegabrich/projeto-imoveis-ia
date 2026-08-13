@@ -373,6 +373,20 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
             "status":   "dados_insuficientes",
         }
 
+        # Configura servidor Overpass com fallback
+        servidores = [
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+        ]
+        for servidor in servidores:
+            try:
+                ox.settings.overpass_url = servidor
+                # Testa com query minima
+                ox.features_from_point((lat, lon), tags={"highway": "bus_stop"}, dist=100)
+                break  # Servidor funciona
+            except Exception:
+                continue
+
         # 1. Busca paradas e plataformas (nodes/ways)
         tags_paradas = {
             "highway": "bus_stop",
@@ -522,7 +536,24 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
         }
 
         logger.info(f"  Buscando todos os POIs ate {RAIO_MAX}m via osmnx...")
-        gdf = ox.features_from_point((lat, lon), tags=tags, dist=RAIO_MAX)
+        
+        # Tenta servidor principal, fallback pra alternativo
+        servidores = [
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+        ]
+        gdf = None
+        for servidor in servidores:
+            try:
+                ox.settings.overpass_url = servidor
+                gdf = ox.features_from_point((lat, lon), tags=tags, dist=RAIO_MAX)
+                break
+            except Exception as e:
+                logger.warning(f"  Overpass ({servidor.split('//')[1].split('/')[0]}) falhou: {e}")
+                continue
+        
+        if gdf is None:
+            raise Exception("Todos os servidores Overpass falharam")
 
         resultado = {
             nome: {cat: [] for cat in POIS_POR_CATEGORIA}

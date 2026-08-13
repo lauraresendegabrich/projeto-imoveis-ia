@@ -401,10 +401,10 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
             fotos_selecionadas = [images[i] for i in indices]
 
         prompt_texto = (
-            f"Voce e um avaliador imobiliario. Analise este imovel com base no texto e fotos.\n"
-            f"Titulo: {titulo[:200]}\nDescricao: {descricao[:400]}\n"
+            f"Avaliador imobiliario. Analise com base no texto e fotos.\n"
+            f"Titulo: {titulo[:150]}\nDescricao: {descricao[:200]}\n"
             f"Tipo: {tipo} | Area: {area}m2 | Quartos: {quartos} | Banheiros: {banheiros} | "
-            f"Suites: {suites} | Vagas: {vagas} | Preco: {preco} | Bairro: {bairro} | Cidade: {cidade}\n\n"
+            f"Vagas: {vagas} | Preco: {preco} | Bairro: {bairro}\n\n"
             f"Retorne SOMENTE JSON valido:\n"
             f'{{"estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",'
             f'"padrao_acabamento": "alto_padrao|medio|simples|desconhecido",'

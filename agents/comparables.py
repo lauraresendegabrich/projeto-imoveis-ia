@@ -680,122 +680,56 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
 
     # Usa Groq (qwen3.6-27b) para analise visual da imagem de satelite
 
-    prompt = f"""Você é um assistente especializado em análise visual urbana para apoio à avaliação imobiliária.
-Sua tarefa é analisar uma imagem de satélite ou mapa híbrido centrada em um imóvel alvo e sugerir um raio para representar aproximadamente sua ZONA HOMOGÊNEA.
+    prompt = f"""Você é um assistente de análise visual urbana para avaliação imobiliária.
+Analise uma imagem de satélite ou mapa híbrido centrada no imóvel:
 
-IMÓVEL ALVO
 Endereço: {endereco_alvo}
-O imóvel alvo está identificado por um marcador vermelho na imagem.
+O imóvel alvo está identificado por um marcador vermelho.
 
 OBJETIVO
-Determine, apenas com base nos elementos visualmente observáveis na imagem, qual raio ao redor do imóvel alvo representa melhor uma área com características urbanas semelhantes.
+Sugira um raio aproximado para representar a ZONA HOMOGÊNEA ao redor do imóvel, usando SOMENTE elementos visíveis na imagem.
+Não use conhecimento externo sobre bairro, cidade ou endereço.
+Não faça inferências sobre renda, segurança, preço, valorização, perfil socioeconômico, qualidade interna ou idade dos imóveis.
 
-IMPORTANTE
-Analise SOMENTE aquilo que pode ser observado na imagem.
-Não utilize conhecimento externo sobre o bairro, endereço ou cidade.
-Não invente informações que não possam ser determinadas visualmente.
-Não faça inferências sobre:
-* renda dos moradores;
-* segurança;
-* valorização imobiliária;
-* preço dos imóveis;
-* qualidade interna das construções;
-* idade exata dos imóveis;
-* perfil socioeconômico;
-* qualidade de serviços públicos;
-* qualquer informação não visível na imagem.
+ANALISE:
+1. Padrão construtivo aparente:
+casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido
 
-A zona homogênea representa uma região em que o padrão urbano permanece relativamente semelhante ao observado no entorno imediato do imóvel alvo.
+2. Homogeneidade visual:
+alta | media | baixa | indefinida
 
-CRITÉRIOS DE ANÁLISE
-Analise principalmente os seguintes fatores:
+3. Densidade urbana:
+baixa | media | alta | indefinida
 
-1. PADRÃO CONSTRUTIVO APARENTE
-Identifique visualmente o tipo predominante de ocupação:
-* casas;
-* sobrados;
-* prédios baixos;
-* prédios médios;
-* torres altas;
-* misto;
-* indefinido.
-Considere apenas características externas que possam ser percebidas na imagem, como dimensão aparente das construções, altura relativa, formato das edificações e organização dos lotes.
+4. Transições visuais:
+Observe mudanças como casas para prédios, galpões, terrenos vazios, grandes avenidas, áreas verdes, cursos d'água ou alteração relevante de densidade.
+Classifique:
+nenhuma_relevante | proxima | intermediaria | distante | indefinida
 
-2. HOMOGENEIDADE VISUAL
-Avalie se o padrão urbano observado próximo ao imóvel alvo permanece semelhante à medida que se afasta dele.
-Classifique como:
-* alta: predominância clara de um mesmo padrão construtivo e de ocupação;
-* média: existem algumas variações, mas ainda há um padrão predominante;
-* baixa: existem mudanças frequentes ou mistura significativa de padrões;
-* indefinida: a imagem não permite avaliar adequadamente.
+RAIO
+Escolha SOMENTE:
+300 | 500 | 700 | 1000 | 1500 metros
 
-3. DENSIDADE URBANA
-Avalie visualmente o nível de ocupação da região considerando concentração de edificações, tamanho dos lotes, espaçamento entre construções e presença de áreas não edificadas.
-Classifique como:
-* baixa;
-* média;
-* alta;
-* indefinida.
+Orientação:
+300 = mudanças muito próximas
+500 = homogêneo apenas no entorno próximo
+700 = predominantemente homogêneo
+1000 = homogêneo em área ampla
+1500 = muito homogêneo e sem transições relevantes
 
-4. TRANSIÇÕES VISUAIS
-Observe se existem mudanças significativas na estrutura urbana à medida que se afasta do imóvel alvo.
-Exemplos:
-* mudança de casas para edifícios;
-* surgimento de grandes galpões;
-* áreas comerciais de grande porte;
-* grandes terrenos vazios;
-* áreas verdes extensas;
-* rodovias ou grandes avenidas;
-* cursos d'água;
-* mudança clara no tamanho dos lotes;
-* mudança significativa na densidade das construções.
-Uma transição visual relevante pode indicar o limite aproximado da zona homogênea.
+Priorize o MENOR raio que represente adequadamente uma área semelhante ao entorno do imóvel.
+Não aumente o raio apenas para encontrar mais comparáveis.
+Se a imagem tiver pouca resolução ou abrangência, escolha um raio conservador e reduza a confiança.
 
-DEFINIÇÃO DO RAIO
-Escolha APENAS um dos seguintes valores:
-300, 500, 700, 1000 ou 1500 metros.
-
-Use as seguintes orientações:
-* 300 m: região muito heterogênea, com mudanças urbanas relevantes muito próximas ao imóvel;
-* 500 m: região relativamente homogênea no entorno imediato, mas com mudanças perceptíveis a curta distância;
-* 700 m: região predominantemente homogênea, com algumas mudanças mais afastadas;
-* 1000 m: padrão urbano bastante uniforme em uma área ampla;
-* 1500 m: padrão urbano muito uniforme e sem transições visuais significativas dentro de grande parte da área observável.
-
-O raio NÃO deve ser escolhido apenas com base na densidade.
-Considere conjuntamente:
-* padrão construtivo;
-* homogeneidade;
-* densidade;
-* presença de transições visuais.
-
-Priorize o MENOR raio que ainda represente adequadamente uma quantidade relevante de área urbana semelhante ao entorno do imóvel alvo.
-Não aumente o raio apenas para obter mais imóveis comparáveis.
-Se houver uma mudança urbana significativa próxima ao imóvel, prefira um raio menor.
-Se a região continuar visualmente semelhante por uma grande distância, um raio maior pode ser utilizado.
-
-LIMITAÇÃO DA IMAGEM
-Não presuma que características existentes fora dos limites da imagem são semelhantes às observadas dentro dela.
-Se a imagem não possuir abrangência ou resolução suficiente para determinar adequadamente a zona homogênea:
-* escolha o raio mais conservador suportado pela imagem;
-* reduza o nível de confiança;
-* mencione a limitação na justificativa.
-
-CONFIANÇA
-Classifique a confiança como:
-* alta: imagem clara, ampla e com padrão urbano facilmente identificável;
-* média: existem algumas ambiguidades ou limitações;
-* baixa: resolução, abrangência ou características visuais são insuficientes para uma conclusão segura.
-
-RESPONDA SOMENTE com JSON válido, sem Markdown e sem qualquer texto antes ou depois:
+RESPONDA SOMENTE JSON válido:
 {{
   "padrao_construtivo": "casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido",
   "homogeneidade_visual": "alta | media | baixa | indefinida",
   "densidade_urbana": "baixa | media | alta | indefinida",
   "transicao_visual": "nenhuma_relevante | proxima | intermediaria | distante | indefinida",
   "raio_sugerido_metros": 700,
-  "justificativa_raio": "Explique em uma frase objetiva por que o raio escolhido representa adequadamente a região visualmente homogênea.",
-  "descricao_zona_homogenea": "Descreva em no máximo duas frases apenas as características urbanas visualmente observáveis.",
+  "justificativa_raio": "frase curta",
+  "descricao_zona_homogenea": "descricao curta baseada apenas na imagem",
   "confianca": "alta | media | baixa"
 }}"""
 
