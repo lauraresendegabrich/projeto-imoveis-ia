@@ -392,13 +392,12 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         cidade    = imovel.get("city", "") or imovel.get("cidade", "") or ""
         images    = imovel.get("images", []) or []
 
-        # Groq aceita max 3 imagens por request (qwen3.6-27b)
-        if len(images) <= 3:
+        # Groq: max 2 imagens pra caber no limite de 8000 TPM do free tier
+        if len(images) <= 2:
             fotos_selecionadas = images
         else:
-            step = len(images) / 3
-            indices = [int(i * step) for i in range(3)]
-            fotos_selecionadas = [images[i] for i in indices]
+            # Pega primeira e do meio (cobre fachada + interior)
+            fotos_selecionadas = [images[0], images[len(images) // 2]]
 
         prompt_texto = (
             f"Avaliador imobiliario. Analise com base no texto e fotos.\n"
