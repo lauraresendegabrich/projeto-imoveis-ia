@@ -829,8 +829,13 @@ RESPONDA SOMENTE com JSON válido, sem Markdown e sem qualquer texto antes ou de
         texto = response.choices[0].message.content or ""
         logger.info(f"Groq Vision (qwen3.6-27b) respondeu ({len(texto)} chars)")
 
+        # Remove bloco <think>...</think> se presente (qwen3.6-27b usa reasoning)
+        texto_limpo = re.sub(r'<think>[\s\S]*?</think>', '', texto).strip()
+        if not texto_limpo:
+            texto_limpo = texto  # Se removeu tudo, usa original
+
         # Parseia JSON
-        m = re.search(r'\{[\s\S]+\}', texto)
+        m = re.search(r'\{[\s\S]+\}', texto_limpo)
         if m:
             try:
                 resultado = json.loads(m.group(0))
@@ -850,12 +855,12 @@ RESPONDA SOMENTE com JSON válido, sem Markdown e sem qualquer texto antes ou de
                 logger.warning("JSON truncado — extraindo campos do texto")
 
         # Fallback: extrai campos do texto usando regex
-        resultado_fallback = {"descricao_zona_homogenea": texto[:500], "raio_metros": 700}
+        resultado_fallback = {"descricao_zona_homogenea": texto_limpo[:500], "raio_metros": 700}
 
         # Tenta extrair raio
-        raio_match = re.search(r'raio.*?(\d{3,4})\s*(?:metros|m)', texto)
+        raio_match = re.search(r'raio.*?(\d{3,4})\s*(?:metros|m)', texto_limpo)
         if not raio_match:
-            raio_match = re.search(r'(\d{3,4})\s*(?:metros|m)', texto)
+            raio_match = re.search(r'(\d{3,4})\s*(?:metros|m)', texto_limpo)
         if raio_match:
             raio_extraido = int(raio_match.group(1))
             raios_validos = [300, 500, 700, 1000, 1500]
@@ -863,11 +868,11 @@ RESPONDA SOMENTE com JSON válido, sem Markdown e sem qualquer texto antes ou de
             resultado_fallback["raio_sugerido_metros"] = resultado_fallback["raio_metros"]
 
         # Tenta extrair padrao construtivo
-        if "casas" in texto.lower() or "sobrados" in texto.lower():
+        if "casas" in texto_limpo.lower() or "sobrados" in texto_limpo.lower():
             resultado_fallback["padrao_construtivo"] = "casas"
-        elif "predios" in texto.lower() or "edificios" in texto.lower():
+        elif "predios" in texto_limpo.lower() or "edificios" in texto_limpo.lower():
             resultado_fallback["padrao_construtivo"] = "predios"
-        elif "misto" in texto.lower():
+        elif "misto" in texto_limpo.lower():
             resultado_fallback["padrao_construtivo"] = "misto"
 
         # Tenta extrair homogeneidade
