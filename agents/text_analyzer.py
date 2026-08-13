@@ -338,7 +338,7 @@ Não crie campos além dos especificados.
         for tentativa in range(2):
             try:
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash",
+                    model="gemini-3.5-flash-lite",
                     contents=[types.Content(role="user", parts=parts)],
                     config=types.GenerateContentConfig(temperature=0),
                 )
@@ -357,7 +357,7 @@ Não crie campos além dos especificados.
 
         resultado = json.loads(m.group(0))
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
-        resultado["llm_usada"] = "gemini-3.6-flash"
+        resultado["llm_usada"] = "gemini-3.5-flash-lite"
         return resultado
 
     except Exception as e:

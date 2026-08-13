@@ -42,7 +42,7 @@ FLUXO COMPLETO:
     Cadeia de fallback:
       1. Groq (GROQ_API_KEY) — llama-3.3-70b-versatile
       2. Groq (GROQ_API_KEY_2) — llama-3.3-70b-versatile (2a conta)
-      3. Gemini (GOOGLE_API_KEY) — gemini-3.6-flash
+      3. Gemini (GOOGLE_API_KEY) — gemini-3.5-flash-lite
       4. Fallback numerico — score >= 0.60 → A
 
     Lotes de 20 candidatos (~6.000 tokens, metade do limite Groq).
@@ -76,7 +76,7 @@ DEPENDENCIAS:
 ─────────────
     - Groq (llama-3.3-70b-versatile) — clustering
     - Groq (qwen3.6-27b) — analise visual
-    - Gemini (gemini-3.6-flash) — fallback clustering
+    - Gemini (gemini-3.5-flash-lite) — fallback clustering
     - Google Maps Static API — imagem de satelite
     - Nominatim / Google Geocoding — geocodificacao
     - langchain-groq, google-generativeai, openai, requests
@@ -287,7 +287,7 @@ def _chamar_llm(prompt: str) -> str:
     Chama a LLM com cadeia de fallback:
       1. Groq — openai/gpt-oss-120b (200k tokens/dia, melhor qualidade)
       2. Groq — openai/gpt-oss-20b (200k tokens/dia, mais leve)
-      3. Gemini — gemini-3.6-flash (20 req/min)
+      3. Gemini — gemini-3.5-flash-lite (20 req/min)
       4. Se tudo falhar → retorna "" (fallback numerico)
     """
     # Tentativa 1: Groq gpt-oss-120b (principal)
@@ -343,13 +343,13 @@ def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") 
 
 
 def _chamar_gemini(prompt: str, api_key: str) -> str:
-    """Chama Gemini (gemini-3.6-flash). Retorna "" se falhar."""
+    """Chama Gemini (gemini-3.5-flash-lite). Retorna "" se falhar."""
     if not api_key:
         return ""
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-3.6-flash")
+        model = genai.GenerativeModel("gemini-3.5-flash-lite")
         resposta = model.generate_content(prompt)
         logger.info("    [LLM] Gemini 2.5 Flash respondeu OK")
         return resposta.text or ""
