@@ -444,7 +444,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
 def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
     """
     Fallback: NVIDIA NIM (meta/llama-3.2-11b-vision-instruct).
-    Envia 1 foto principal + 7 extras (1 por vez).
+    Envia apenas 1 foto (a principal).
     """
     try:
         from openai import OpenAI
@@ -519,26 +519,6 @@ Retorne exatamente este JSON:
         )
 
         texto_resp = response.choices[0].message.content or ""
-
-        # Chamadas extras com mais fotos (1 foto por vez)
-        if len(fotos_selecionadas) > 1:
-            import time as time_mod
-            extras = [f for i, f in enumerate(fotos_selecionadas) if i != len(fotos_selecionadas) // 2]
-            for foto in extras[:7]:
-                time_mod.sleep(1)
-                try:
-                    r2 = client.chat.completions.create(
-                        model="meta/llama-3.2-11b-vision-instruct",
-                        messages=[{"role": "user", "content": [
-                            {"type": "text", "text": "Em uma frase: estado de conservacao (novo/bom/regular/precisa_reforma) e diferenciais visiveis."},
-                            {"type": "image_url", "image_url": {"url": foto}}
-                        ]}],
-                        max_tokens=80,
-                        temperature=0,
-                    )
-                    texto_resp += f"\n[Foto extra: {r2.choices[0].message.content}]"
-                except Exception:
-                    pass
 
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
