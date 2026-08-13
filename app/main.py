@@ -20,9 +20,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 IMOVEL_ALVO = {
     # Localização (obrigatório para Agente 1)
-    "rua":           "Rua Doutor Sylvio Carvalhaes",
-    "numero":        "68",
-    "bairro":        "Jardim Ipiranga",
+    "rua":           "Rua Doutor Liraucio Gomes",
+    "numero":        "119",
+    "bairro":        "Cambuí",
     "cidade":        "Campinas",
     "estado":        "SP",
     "localizacao":   "Campinas, SP",
@@ -32,14 +32,14 @@ IMOVEL_ALVO = {
 
     # Características do imóvel (para Agente 2 — score de similaridade)
     "propertyType":  "Apartamentos",
-    "area":          54,
+    "area":          89,
     "area_terreno":  0,
     "bedrooms":      2,
-    "bathrooms":     1,
-    "parkingSpaces": 1,
-    "neighborhood":  "Jardim Ipiranga",
-    "street":        "Rua Doutor Sylvio Carvalhaes",
-    "description":   "Apartamento com 2 quartos, 1 banheiro, 1 vaga, 54m². Aceita animais, piscina, playground. Jardim Ipiranga, Campinas/SP.",
+    "bathrooms":     3,
+    "parkingSpaces": 2,
+    "neighborhood":  "Cambuí",
+    "street":        "Rua Doutor Liraucio Gomes",
+    "description":   "Apartamento com 2 quartos, 3 banheiros, 2 vagas, 89m². Cambuí, Campinas/SP.",
     "images": [],
 }
 
