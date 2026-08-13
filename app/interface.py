@@ -590,6 +590,13 @@ if "resultado" in st.session_state:
                 fora = zona.get("fora_zona", [])
                 st.write(f"- Imóveis dentro da zona: **{len(confirmados)}**")
                 st.write(f"- Imóveis descartados (fora do raio): {len(fora)}")
+                # Justificativa da LLM
+                justificativa = zh.get("justificativa_raio") or zh.get("descricao_zona_homogenea", "")
+                # Remove <think> se presente
+                if "<think>" in justificativa:
+                    justificativa = ""
+                if justificativa:
+                    st.write(f"- **Justificativa da IA:** {justificativa}")
             else:
                 st.write("Zona homogênea não disponível nesta execução")
 
