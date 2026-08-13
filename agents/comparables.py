@@ -180,31 +180,24 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
         f"  Descricao: {(alvo.get('description') or '')[:200]}\n"
     )
 
-    # Lista de candidatos (caracteristicas completas, sem score pra nao enviesar)
+    # Lista de candidatos (resumida pra caber no limite de 8k tokens do Groq)
     candidatos_texto = ""
     for idx, c in enumerate(candidatos, 1):
-        desc = (c.get("description") or "")[:300]
-        suites = c.get("suites") or c.get("suites") or ""
-        condominio = c.get("preco_condominio") or c.get("condominiumFee") or ""
-        amenities = c.get("amenities") or ""
+        desc = (c.get("description") or "")[:100]
         area_terreno = c.get("area_terreno") or c.get("lotArea") or ""
-        iptu = c.get("iptu") or ""
         candidatos_texto += (
             f"\n[{idx}]\n"
             f"  Tipo: {c.get('propertyType', '?')} | Area: {c.get('area', '?')}m² | "
-            f"Quartos: {c.get('bedrooms', '?')} | Suites: {suites or '?'} | "
+            f"Quartos: {c.get('bedrooms', '?')} | "
             f"Banheiros: {c.get('bathrooms', '?')} | Vagas: {c.get('parkingSpaces', '?')}\n"
-            f"  Preco: {c.get('priceFormatted', '?')} | Preco/m²: R$ {c.get('pricePerSqm', '?')} | "
-            f"Condominio: R$ {condominio or '?'} | IPTU: R$ {iptu or '?'}\n"
+            f"  Preco: {c.get('priceFormatted', '?')} | Preco/m²: R$ {c.get('pricePerSqm', '?')}\n"
             f"  Bairro: {c.get('neighborhood', '?')} | Rua: {c.get('street', '?')}"
         )
         if area_terreno:
             candidatos_texto += f" | Terreno: {area_terreno}m²"
         candidatos_texto += "\n"
-        if amenities:
-            candidatos_texto += f"  Diferenciais: {amenities}\n"
         if desc:
-            candidatos_texto += f"  Descricao: {desc}\n"
+            candidatos_texto += f"  Desc: {desc}\n"
 
     prompt = f"""Classifique imóveis candidatos quanto à comparabilidade com um imóvel alvo.
 
@@ -346,15 +339,18 @@ def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") 
 
 
 def _chamar_gemini(prompt: str, api_key: str) -> str:
-    """Chama Gemini (gemini-3.5-flash-lite). Retorna "" se falhar."""
+    """Chama Gemini (gemini-3.5-flash-lite) com resposta JSON forcada. Retorna "" se falhar."""
     if not api_key:
         return ""
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-3.5-flash-lite")
+        model = genai.GenerativeModel(
+            "gemini-3.5-flash-lite",
+            generation_config={"response_mime_type": "application/json"},
+        )
         resposta = model.generate_content(prompt)
-        logger.info("    [LLM] Gemini 2.5 Flash respondeu OK")
+        logger.info("    [LLM] Gemini 3.5 Flash Lite respondeu OK")
         return resposta.text or ""
     except Exception as e:
         logger.warning(f"    [LLM] Gemini falhou: {e}")
@@ -373,7 +369,20 @@ def _parsear_resposta_llm(resposta: str, candidatos: list[dict]) -> list[dict]:
     resposta = re.sub(r'```\s*', '', resposta)
     
     # Tenta extrair JSON da resposta
+    # Primeiro tenta achar objeto com "classificacao"
     m = re.search(r'\{[\s\S]*"classificacao"[\s\S]*\}', resposta)
+    if not m:
+        # Fallback: tenta achar um array direto (Gemini pode retornar só o array)
+        m_arr = re.search(r'\[[\s\S]*\]', resposta)
+        if m_arr:
+            try:
+                arr = json.loads(m_arr.group(0))
+                if isinstance(arr, list) and len(arr) > 0:
+                    # Wrapa em {"classificacao": [...]}
+                    m_text = json.dumps({"classificacao": arr})
+                    m = type('Match', (), {'group': lambda self, x=0: m_text})()
+            except json.JSONDecodeError:
+                pass
     if not m:
         logger.warning("LLM nao retornou JSON valido — usando fallback numerico")
         return _fallback_numerico(candidatos)
