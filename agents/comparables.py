@@ -285,13 +285,13 @@ RESPONDA SOMENTE com JSON valido, sem Markdown, explicacoes ou texto antes ou de
 def _chamar_llm(prompt: str) -> str:
     """
     Chama a LLM com cadeia de fallback:
-      1. Groq (GROQ_API_KEY) — llama-3.3-70b-versatile
-      2. Groq (GROQ_API_KEY_2) — llama-3.3-70b-versatile (2a conta)
+      1. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
+      2. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b (2a conta)
       3. Gemini — gemini-3.5-flash-lite (500 req/dia)
       4. Se tudo falhar → retorna "" (fallback numerico)
     """
     # Tentativa 1: Groq conta 1
-    resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="llama-3.3-70b-versatile")
+    resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b")
     if resposta:
         return resposta
 
@@ -299,7 +299,7 @@ def _chamar_llm(prompt: str) -> str:
     groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
     if groq_key_2:
         logger.info("  Groq 1 falhou — tentando GROQ_API_KEY_2...")
-        resposta = _chamar_groq(prompt, groq_key_2, model="llama-3.3-70b-versatile")
+        resposta = _chamar_groq(prompt, groq_key_2, model="openai/gpt-oss-120b")
         if resposta:
             return resposta
 
@@ -315,7 +315,7 @@ def _chamar_llm(prompt: str) -> str:
     return ""
 
 
-def _chamar_groq(prompt: str, api_key: str, model: str = "llama-3.3-70b-versatile") -> str:
+def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") -> str:
     """Chama Groq. Retorna "" se falhar."""
     if not api_key:
         return ""
@@ -357,6 +357,12 @@ def _parsear_resposta_llm(resposta: str, candidatos: list[dict]) -> list[dict]:
     Parseia a resposta JSON da LLM e aplica nos candidatos.
     Se a LLM falhar, usa fallback baseado no score numerico.
     """
+    # Remove bloco <think>...</think> se presente
+    if '</think>' in resposta:
+        resposta = resposta.split('</think>', 1)[1].strip()
+    resposta = re.sub(r'```json\s*', '', resposta)
+    resposta = re.sub(r'```\s*', '', resposta)
+    
     # Tenta extrair JSON da resposta
     m = re.search(r'\{[\s\S]*"classificacao"[\s\S]*\}', resposta)
     if not m:
@@ -504,11 +510,11 @@ def identificar_comparaveis(
                     f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
 
     # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Envia todos os candidatos para a LLM em lotes de 20
-    # (llama-3.3-70b-versatile: limite de ~12.000 tokens/min no free tier)
-    # Lotes de 20 = ~6.000 tokens (metade do limite, evita 413/429)
+    # Envia todos os candidatos para a LLM em lotes de 15
+    # (openai/gpt-oss-120b: 250K tokens/min, 500K req/dia)
+    # Lotes de 15 = ~6.000 tokens (bem dentro do limite)
     # Cadeia de fallback: Groq 1 → Groq 2 → Gemini → numerico
-    TAMANHO_LOTE = 20
+    TAMANHO_LOTE = 15
 
     if usar_llm:
         todos_classificados = []
