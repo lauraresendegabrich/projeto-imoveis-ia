@@ -1011,7 +1011,7 @@ def analisar_comparaveis(
             com_ok += 1
         else:
             com_insuficiente += 1
-        time.sleep(2.0)  # 2s entre chamadas — Gemini 2.5 Flash
+        time.sleep(5.0)  # 5s entre chamadas — respeita 15 req/min do Gemini free tier
 
     scores_finais = [c["analise_qualitativa"]["scores"]["score_qualitativo"] for c in comparaveis]
 
