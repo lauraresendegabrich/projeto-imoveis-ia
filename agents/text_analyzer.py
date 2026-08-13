@@ -139,7 +139,7 @@ def _analisar_imovel_vision(imovel: dict) -> dict:
         from google import genai
         from google.genai import types
 
-        api_key = os.getenv("GOOGLE_API_KEY", "")
+        api_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
         if not api_key:
             # Fallback para NVIDIA NIM
             return _analisar_imovel_vision_nvidia(imovel)
