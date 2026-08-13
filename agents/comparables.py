@@ -1028,8 +1028,9 @@ def analisar_zona_homogenea(
                     f"homogeneidade={zona.get('homogeneidade_visual','?')} | "
                     f"densidade={zona.get('densidade_urbana','?')} | "
                     f"raio={zona.get('raio_sugerido_metros', zona.get('raio_metros','?'))}m")
-        if zona.get("descricao_zona_homogenea"):
-            logger.info(f"Descricao: {zona['descricao_zona_homogenea']}")
+        # Loga o JSON completo retornado pela LLM
+        campos_zona = {k: v for k, v in zona.items() if k != "descricao_zona_homogenea" or "<think>" not in str(v)}
+        logger.info(f"Zona JSON: {json.dumps(campos_zona, ensure_ascii=False)}")
 
     # ── 4. GEOCODING DOS IMOVEIS + CLASSIFICACAO POR DISTANCIA ────
     import time
