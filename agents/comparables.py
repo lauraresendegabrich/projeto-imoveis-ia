@@ -333,7 +333,7 @@ def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") 
                     }
                 }
             },
-            max_completion_tokens=3000,
+            max_completion_tokens=6000,
         )
 
         texto = response.choices[0].message.content or ""
@@ -518,11 +518,11 @@ def identificar_comparaveis(
                     f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
 
     # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Envia todos os candidatos para a LLM em lotes de 15
+    # Envia todos os candidatos para a LLM em lotes de 35
     # (openai/gpt-oss-120b: 250K tokens/min, 500K req/dia)
-    # Lotes de 15 = ~6.000 tokens (bem dentro do limite)
+    # JSON Schema strict garante formato valido
     # Cadeia de fallback: Groq 1 → Groq 2 → Gemini → numerico
-    TAMANHO_LOTE = 15
+    TAMANHO_LOTE = 35
 
     if usar_llm:
         todos_classificados = []
