@@ -286,16 +286,18 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
             todos_comparaveis = [c for c in ag2.get("comparaveis", []) if c.get("cluster") == "A"]
             logger_local.info(f"Fallback zona: usando {len(todos_comparaveis)} comparaveis do Cluster A")
 
-    # Separar terrenos dos construidos (sem duplicatas por id)
+    # Separar terrenos dos construidos (sem duplicatas por url)
     terrenos_zona = []
     comparaveis_zona = []
-    ids_vistos = set()
+    urls_vistos = set()
 
     for imovel in todos_comparaveis:
-        imovel_id = imovel.get("id", "")
-        if imovel_id in ids_vistos:
+        # Deduplicação por URL (mais confiável que id)
+        url = imovel.get("url", "")
+        if url and url in urls_vistos:
             continue
-        ids_vistos.add(imovel_id)
+        if url:
+            urls_vistos.add(url)
 
         tipo = normalizar_tipo(imovel.get("propertyType", ""))
         if tipo in TIPOS_TERRENO:
