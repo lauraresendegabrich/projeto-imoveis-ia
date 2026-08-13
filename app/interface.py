@@ -642,11 +642,11 @@ if "resultado" in st.session_state:
             # Gráfico radar
             infra_full = resultado.get("infraestrutura", {})
             if infra_full:
-                scores_cat = {k: v for k, v in infra_full.get("scores", {}).items() if k not in ("score_final", "transporte_dados_insuficientes", "transporte_status", "classificacao_infraestrutura", "perfil_regiao", "impacto_estimado_no_valor")}
+                scores_cat = {k: v for k, v in infra_full.get("scores", {}).items() if isinstance(v, (int, float)) and k != "score_final"}
                 if scores_cat:
                     import plotly.graph_objects as go
                     categorias = list(scores_cat.keys())
-                    valores_radar = [v if isinstance(v, (int, float)) else 0 for v in scores_cat.values()]
+                    valores_radar = list(scores_cat.values())
                     fig = go.Figure(data=go.Scatterpolar(
                         r=valores_radar + [valores_radar[0]],
                         theta=categorias + [categorias[0]],
