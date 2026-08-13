@@ -424,10 +424,15 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
             model="qwen/qwen3.6-27b",
             messages=[{"role": "user", "content": content}],
             temperature=0,
-            max_completion_tokens=1024,
+            max_completion_tokens=4096,
         )
 
         texto_resp = response.choices[0].message.content or ""
+        # Remove bloco <think>...</think> se presente
+        if '</think>' in texto_resp:
+            texto_resp = texto_resp.split('</think>', 1)[1].strip()
+        texto_resp = re.sub(r'```json\s*', '', texto_resp)
+        texto_resp = re.sub(r'```\s*', '', texto_resp)
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
             logger.warning("Groq qwen3.6-27b nao retornou JSON valido — tentando NVIDIA NIM")
