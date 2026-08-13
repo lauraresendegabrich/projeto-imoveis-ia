@@ -517,7 +517,7 @@ if "resultado" in st.session_state:
         resumo3 = ag3_data.get("resumo", {}) if ag3_data else {}
         infra_data = resultado.get("infraestrutura", {})
         scores_infra = infra_data.get("scores", {}) if infra_data else {}
-        resumo_infra = infra_data.get("resumo_scores", {}) if infra_data else {}
+        resumo_infra = scores_infra  # classificacao esta dentro de scores, nao em resumo_scores
         preco_data = resultado.get("preco_estimado", {})
         calc_constr = preco_data.get("calculo_construcao", {}) if preco_data else {}
         imovel_alvo_info = preco_data.get("imovel_alvo", {}) if preco_data else {}
@@ -560,7 +560,7 @@ if "resultado" in st.session_state:
 
         # Ag.5
         m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
-        padrao_usado = calc_constr.get("padrao_usado", "?")
+        padrao_usado = calc_constr.get("padrao_usado", "todos os comparáveis")
         area_calc = calc_constr.get("area_construida_m2", 0) or 0
         valor_med = avaliacao.get("valor_medio_imovel", 0)
         valor_liq = avaliacao.get("valor_liquidez", 0)
@@ -619,7 +619,7 @@ if "resultado" in st.session_state:
             infra = resultado.get("infraestrutura", {})
             if infra:
                 scores = infra.get("scores", {})
-                resumo = infra.get("resumo_scores", {})
+                resumo = scores  # classificacao esta dentro de scores
                 score_infra = scores.get("score_final", 0)
                 st.write(f"- Score final: **{score_infra}**")
                 st.write(f"- Classificação: **{resumo.get('classificacao_infraestrutura', 'não disponível')}**")
