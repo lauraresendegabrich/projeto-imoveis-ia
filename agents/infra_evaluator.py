@@ -863,99 +863,99 @@ def _calcular_impacto(score_final: float) -> str:
 
 def _analisar_infra_llm(pois_por_faixa: dict, scores: dict, endereco: str, transporte: dict) -> dict:
     """
-    Envia resumo dos POIs e scores para o Groq e retorna APENAS interpretacao textual.
+    Envia resumo dos POIs e scores para LLM e retorna APENAS interpretacao textual.
     A LLM NAO decide perfil, impacto ou classificacao — apenas interpreta.
+    Cadeia: NVIDIA NIM (principal) → Gemini (fallback)
     """
-    try:
-        from langchain_groq import ChatGroq
-        import re
+    import re
 
-        api_key = os.getenv("GROQ_API_KEY", "")
-        if not api_key:
-            logger.warning("GROQ_API_KEY nao configurada")
-            return {}
+    # Monta resumo de POIs por faixa
+    resumo_pois = ""
+    for _, _, nome_faixa in FAIXAS:
+        cats = pois_por_faixa.get(nome_faixa, {})
+        total = sum(len(v) for v in cats.values())
+        resumo_pois += f"\n  {nome_faixa} ({total} POIs):"
+        for cat, pois in cats.items():
+            if cat == "transporte":
+                continue
+            if pois:
+                nomes = [p["nome"] for p in pois[:3]]
+                resumo_pois += f"\n    {cat} ({len(pois)}): {', '.join(nomes)}"
 
-        # Monta resumo de POIs por faixa
-        resumo_pois = ""
-        for _, _, nome_faixa in FAIXAS:
-            cats = pois_por_faixa.get(nome_faixa, {})
-            total = sum(len(v) for v in cats.values())
-            resumo_pois += f"\n  {nome_faixa} ({total} POIs):"
-            for cat, pois in cats.items():
-                if cat == "transporte":
-                    continue
-                if pois:
-                    nomes = [p["nome"] for p in pois[:3]]
-                    resumo_pois += f"\n    {cat} ({len(pois)}): {', '.join(nomes)}"
+    # Monta resumo de transporte
+    status_transp = transporte.get("status", "dados_insuficientes")
+    paradas = transporte.get("paradas", [])
+    resumo_transporte = f"Status: {status_transp}, {len(paradas)} paradas encontradas"
 
-        # Monta resumo de transporte
-        status_transp = transporte.get("status", "dados_insuficientes")
-        paradas = transporte.get("paradas", [])
-        resumo_transporte = f"Status: {status_transp}, {len(paradas)} paradas encontradas"
+    # Campos calculados pelo Python
+    scores_categoria = scores.get("scores_categoria", {})
+    score_final = scores.get("score_final", 0.5)
+    classificacao = _classificar_infraestrutura(score_final)
+    perfil = MAPA_PERFIL_INFRAESTRUTURA.get(classificacao, "infraestrutura_moderada")
+    impacto = _calcular_impacto(score_final)
 
-        # Campos calculados pelo Python
-        scores_categoria = scores.get("scores_categoria", {})
-        score_final = scores.get("score_final", 0.5)
-        classificacao = _classificar_infraestrutura(score_final)
-        perfil = MAPA_PERFIL_INFRAESTRUTURA.get(classificacao, "infraestrutura_moderada")
-        impacto = _calcular_impacto(score_final)
+    scores_json = json.dumps(scores_categoria, ensure_ascii=False, indent=2)
 
-        scores_json = json.dumps(scores_categoria, ensure_ascii=False, indent=2)
-
-        prompt = f"""Voce e um avaliador imobiliario especializado em interpretacao de infraestrutura urbana.
-Os resultados abaixo ja foram calculados pelo sistema.
-Voce NAO deve recalcular ou modificar nenhum valor.
+    prompt = f"""Avaliador imobiliario. Interprete os resultados de infraestrutura abaixo.
+NAO recalcule valores. Apenas interprete.
 
 Endereco: {endereco}
-
-POIs encontrados:{resumo_pois}
-
+POIs:{resumo_pois}
 Transporte: {resumo_transporte}
+Scores: {scores_json}
+Score final: {score_final} | Classificacao: {classificacao}
 
-Scores por categoria:
-{scores_json}
+Retorne JSON:
+- pontos_fortes: categorias com score >= 0.70 (max 4)
+- pontos_de_atencao: categorias com score < 0.50 (max 4)
+- descricao_infraestrutura: 1-2 frases
+- conclusao: 1 frase
 
-Score final: {score_final}
-Classificacao: {classificacao}
-Perfil calculado: {perfil}
-Impacto calculado: {impacto}
+JSON:
+{{"pontos_fortes": [], "pontos_de_atencao": [], "descricao_infraestrutura": "", "conclusao": ""}}"""
 
-Analise os resultados e produza apenas:
-- pontos fortes (categorias com score >= 0.70, maximo 4)
-- pontos de atencao (categorias com score < 0.50, maximo 4)
-- descricao da infraestrutura (sintese de 1-2 frases sobre a configuracao do entorno)
-- justificativa (explicacao curta usando os scores)
-- conclusao (1 frase resumindo)
-
-Nao estime preco, valorizacao ou tempo de venda.
-Nao invente POIs que nao estejam nos dados.
-Nao altere os valores calculados.
-Nao use "nao existe" — prefira "baixa disponibilidade identificada".
-
-Responda SOMENTE com JSON valido:
-
-{{
-  "pontos_fortes": [],
-  "pontos_de_atencao": [],
-  "descricao_infraestrutura": "",
-  "justificativa": "",
-  "conclusao": ""
-}}"""
-
-        llm = ChatGroq(model="openai/gpt-oss-20b", api_key=api_key, temperature=0)
-        resposta = llm.invoke(prompt)
-        conteudo = resposta.content if hasattr(resposta, "content") else str(resposta)
-
-        m = re.search(r'\{[\s\S]+\}', conteudo)
-        if not m:
-            logger.warning("LLM nao retornou JSON valido")
-            return {}
-
-        return json.loads(m.group(0))
-
+    # Tentativa 1: NVIDIA NIM (sem limite diario)
+    try:
+        from openai import OpenAI
+        nvidia_key = os.getenv("NVIDIA_API_KEY", "")
+        if nvidia_key:
+            client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
+            response = client.chat.completions.create(
+                model="meta/llama-3.1-8b-instruct",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=600,
+                temperature=0,
+            )
+            conteudo = response.choices[0].message.content or ""
+            m = re.search(r'\{[\s\S]+\}', conteudo)
+            if m:
+                logger.info("LLM interpretou (NVIDIA NIM)")
+                return json.loads(m.group(0))
     except Exception as e:
-        logger.error(f"Erro ao chamar LLM: {e}")
-        return {}
+        logger.warning(f"NVIDIA NIM falhou: {e}")
+
+    # Tentativa 2: Gemini (fallback)
+    try:
+        from google import genai
+        from google.genai import types
+        google_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
+        if google_key:
+            client = genai.Client(api_key=google_key)
+            response = client.models.generate_content(
+                model="gemini-3.5-flash-lite",
+                contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+                config=types.GenerateContentConfig(temperature=0),
+            )
+            conteudo = response.text or ""
+            m = re.search(r'\{[\s\S]+\}', conteudo)
+            if m:
+                logger.info("LLM interpretou (Gemini fallback)")
+                return json.loads(m.group(0))
+    except Exception as e:
+        logger.warning(f"Gemini falhou: {e}")
+
+    logger.warning("Nenhuma LLM disponivel para interpretacao")
+    return {}
 
 
 # =============================================================================
