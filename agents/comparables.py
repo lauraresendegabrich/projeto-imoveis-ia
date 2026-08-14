@@ -37,17 +37,18 @@ FLUXO COMPLETO:
     Formula: similaridade = 1 - |alvo - cand| / max(alvo, cand)
     Score final = media ponderada. NAO e enviado pra LLM (evita vies).
 
-  ETAPA 3 — CLUSTERING VIA LLM (lotes de 20)
+  ETAPA 3 — CLUSTERING VIA LLM (lotes de 40)
   ────────────────────────────────────────────
     Cadeia de fallback:
-      1. Groq (GROQ_API_KEY) — llama-3.3-70b-versatile
-      2. Groq (GROQ_API_KEY_2) — llama-3.3-70b-versatile (2a conta)
-      3. Gemini (GOOGLE_API_KEY) — gemini-3.5-flash-lite
-      4. Fallback numerico — score >= 0.60 → A
+      1. NVIDIA NIM — meta/llama-3.3-70b-instruct (128k contexto)
+      2. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
+      3. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b (2a conta)
+      4. Gemini (GOOGLE_API_KEY) — gemini-3.5-flash-lite
+      5. Fallback numerico — score >= 0.60 → A
 
-    Lotes de 20 candidatos (~6.000 tokens, metade do limite Groq).
+    Lotes de 40 candidatos (NVIDIA NIM suporta 128k tokens).
     Pausa de 5s entre lotes.
-    LLM retorna: cluster (A/B), ranking (1-N), justificativa.
+    LLM retorna: cluster (A/B), score_similaridade (0-100), justificativa.
 
     Criterios eliminatorios: tipo incompativel, area >2x ou <½, uso diferente.
     Preco NAO e eliminatorio. Dados ausentes NAO eliminam.
@@ -74,12 +75,13 @@ QUEM USA A SAIDA:
 
 DEPENDENCIAS:
 ─────────────
-    - Groq (llama-3.3-70b-versatile) — clustering
+    - NVIDIA NIM (meta/llama-3.3-70b-instruct) — clustering (primario, 128k)
+    - Groq (openai/gpt-oss-120b) — clustering (fallback)
     - Groq (qwen3.6-27b) — analise visual
     - Gemini (gemini-3.5-flash-lite) — fallback clustering
     - Google Maps Static API — imagem de satelite
     - Nominatim / Google Geocoding — geocodificacao
-    - langchain-groq, google-generativeai, openai, requests
+    - openai, langchain-groq, google-generativeai, requests
 
 COMO RODAR:
 ───────────
@@ -254,17 +256,26 @@ A justificativa deve ser curta."""
 def _chamar_llm(prompt: str) -> str:
     """
     Chama a LLM com cadeia de fallback:
-      1. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
-      2. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b (2a conta)
-      3. Gemini — gemini-3.5-flash-lite (500 req/dia)
-      4. Se tudo falhar → retorna "" (fallback numerico)
+      1. NVIDIA NIM — meta/llama-3.3-70b-instruct (128k contexto, sem limite diario)
+      2. Groq (GROQ_API_KEY) — openai/gpt-oss-120b (8k tokens max)
+      3. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b (2a conta)
+      4. Gemini — gemini-3.5-flash-lite (500 req/dia)
+      5. Se tudo falhar → retorna "" (fallback numerico)
     """
-    # Tentativa 1: Groq conta 1
+    # Tentativa 1: NVIDIA NIM (128k contexto — cabe lotes grandes)
+    nvidia_key = os.getenv("NVIDIA_API_KEY", "")
+    if nvidia_key:
+        resposta = _chamar_nvidia(prompt, nvidia_key)
+        if resposta:
+            return resposta
+
+    # Tentativa 2: Groq conta 1
+    logger.info("  NVIDIA falhou — tentando Groq...")
     resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b")
     if resposta:
         return resposta
 
-    # Tentativa 2: Groq conta 2
+    # Tentativa 3: Groq conta 2
     groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
     if groq_key_2:
         logger.info("  Groq 1 falhou — tentando GROQ_API_KEY_2...")
@@ -282,6 +293,36 @@ def _chamar_llm(prompt: str) -> str:
 
     logger.warning("  Todas as LLMs falharam — usando fallback numerico")
     return ""
+
+
+def _chamar_nvidia(prompt: str, api_key: str) -> str:
+    """Chama NVIDIA NIM (meta/llama-3.3-70b-instruct, 128k contexto). Retorna "" se falhar."""
+    if not api_key:
+        return ""
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key,
+        )
+
+        response = client.chat.completions.create(
+            model="meta/llama-3.3-70b-instruct",
+            messages=[
+                {"role": "system", "content": "Responda SOMENTE com JSON valido, sem markdown, sem texto extra."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=4096,
+        )
+
+        texto = response.choices[0].message.content or ""
+        if texto:
+            logger.info(f"    [LLM] NVIDIA NIM meta/llama-3.3-70b-instruct respondeu OK")
+        return texto
+    except Exception as e:
+        logger.warning(f"    [LLM] NVIDIA NIM falhou: {e}")
+        return ""
 
 
 def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") -> str:
@@ -527,11 +568,10 @@ def identificar_comparaveis(
                     f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
 
     # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Envia todos os candidatos para a LLM em lotes de 15
-    # (openai/gpt-oss-120b: limite de ~8.000 tokens por request no free tier)
-    # JSON Schema strict garante formato valido
-    # Cadeia de fallback: Groq 1 → Groq 2 → Gemini → numerico
-    TAMANHO_LOTE = 10
+    # Envia candidatos para LLM em lotes de 40
+    # NVIDIA NIM (128k contexto) processa lotes grandes sem problema
+    # Cadeia de fallback: NVIDIA NIM → Groq 1 → Groq 2 → Gemini → numerico
+    TAMANHO_LOTE = 40
 
     if usar_llm:
         todos_classificados = []
