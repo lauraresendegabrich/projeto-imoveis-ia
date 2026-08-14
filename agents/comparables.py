@@ -531,7 +531,7 @@ def identificar_comparaveis(
     # (openai/gpt-oss-120b: limite de ~8.000 tokens por request no free tier)
     # JSON Schema strict garante formato valido
     # Cadeia de fallback: Groq 1 → Groq 2 → Gemini → numerico
-    TAMANHO_LOTE = 15
+    TAMANHO_LOTE = 10
 
     if usar_llm:
         todos_classificados = []
