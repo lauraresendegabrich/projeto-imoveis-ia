@@ -53,11 +53,11 @@ FLUXO COMPLETO:
     Criterios eliminatorios: tipo incompativel, area >2x ou <½, uso diferente.
     Preco NAO e eliminatorio. Dados ausentes NAO eliminam.
 
-  ETAPA 4 — ZONA HOMOGENEA (Google Maps + Groq qwen3.6-27b)
+  ETAPA 4 — ZONA HOMOGENEA (Google Maps + NVIDIA NIM gemma-4-31b-it)
   ──────────────────────────────────────────────────────────
     1. Geocodifica endereco do alvo (Nominatim; fallback: Google Geocoding)
     2. Google Maps Static API gera imagem hybrid 1280x1280 scale=2 com marcador
-    3. Groq (qwen3.6-27b) analisa a imagem e sugere raio (300-1500m)
+      3. NVIDIA NIM (gemma-4-31b-it) analisa a imagem e sugere raio (300-1500m)
     4. Usa lat/lon do Athena direto (sem geocodificar de novo)
     5. Calcula distancia Haversine de cada imovel ao alvo
     6. Classifica: na_zona (ate raio) ou fora_zona (acima)
@@ -76,8 +76,8 @@ QUEM USA A SAIDA:
 DEPENDENCIAS:
 ─────────────
     - NVIDIA NIM (meta/llama-3.3-70b-instruct) — clustering (primario, 128k)
+    - NVIDIA NIM (google/gemma-4-31b-it) — analise visual zona homogenea
     - Groq (openai/gpt-oss-120b) — clustering (fallback)
-    - Groq (qwen3.6-27b) — analise visual
     - Gemini (gemini-3.5-flash-lite) — fallback clustering
     - Google Maps Static API — imagem de satelite
     - Nominatim / Google Geocoding — geocodificacao
@@ -706,8 +706,12 @@ def _obter_imagem_satelite(endereco: str, lat: float = None, lon: float = None, 
 
 def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     """
-    Envia imagem de satelite pro Groq (qwen3.6-27b) para analise visual
-    e identificacao da zona homogenea.
+    Envia imagem de satelite para analise visual e identificacao da zona homogenea.
+
+    Cadeia de fallback:
+      1. NVIDIA NIM (google/gemma-4-31b-it) — VLM com 128k contexto
+      2. Gemini (gemini-3.5-flash-lite) — com response_mime_type JSON
+      3. Fallback: raio padrao 500m
 
     Foca nos tres fatores prioritarios para definir a zona:
       - Padrao construtivo aparente (casas, sobrados, predios, misto)
@@ -726,8 +730,8 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     import base64
 
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-    groq_key = os.getenv("GROQ_API_KEY", "")
-    if not nvidia_key and not groq_key:
+    google_key = os.getenv("GOOGLE_API_KEY", "")
+    if not nvidia_key and not google_key:
         logger.warning("Nenhuma API key de visao configurada — usando raio padrao")
         return {"raio_metros": 500}
 
@@ -746,73 +750,61 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
         img_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
         img_mime = "image/png"
 
-    # Usa Groq (qwen3.6-27b) para analise visual da imagem de satelite
-
-    prompt = f"""Você é um assistente de análise visual urbana para avaliação imobiliária.
-Analise uma imagem de satélite ou mapa híbrido centrada no imóvel:
-
+    prompt = f"""Analise a imagem de satélite centrada no imóvel (marcador vermelho).
 Endereço: {endereco_alvo}
-O imóvel alvo está identificado por um marcador vermelho.
 
-OBJETIVO
-Sugira um raio aproximado para representar a ZONA HOMOGÊNEA ao redor do imóvel, usando SOMENTE elementos visíveis na imagem.
-Não use conhecimento externo sobre bairro, cidade ou endereço.
-Não faça inferências sobre renda, segurança, preço, valorização, perfil socioeconômico, qualidade interna ou idade dos imóveis.
+Sugira um raio para a ZONA HOMOGÊNEA usando SOMENTE elementos visíveis.
+Não use conhecimento externo. Não faça inferências sobre preço ou perfil socioeconômico.
 
 ANALISE:
-1. Padrão construtivo aparente:
-casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido
+1. Padrão construtivo: casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido
+2. Homogeneidade visual: alta | media | baixa | indefinida
+3. Densidade urbana: baixa | media | alta | indefinida
+4. Transição visual: nenhuma_relevante | proxima | intermediaria | distante | indefinida
 
-2. Homogeneidade visual:
-alta | media | baixa | indefinida
+RAIO (escolha SOMENTE): 300 | 500 | 700 | 1000 | 1500 metros
+300=mudanças próximas | 500=homogêneo entorno | 700=predominante | 1000=amplo | 1500=muito homogêneo
 
-3. Densidade urbana:
-baixa | media | alta | indefinida
-
-4. Transições visuais:
-Observe mudanças como casas para prédios, galpões, terrenos vazios, grandes avenidas, áreas verdes, cursos d'água ou alteração relevante de densidade.
-Classifique:
-nenhuma_relevante | proxima | intermediaria | distante | indefinida
-
-RAIO
-Escolha SOMENTE:
-300 | 500 | 700 | 1000 | 1500 metros
-
-Orientação:
-300 = mudanças muito próximas
-500 = homogêneo apenas no entorno próximo
-700 = predominantemente homogêneo
-1000 = homogêneo em área ampla
-1500 = muito homogêneo e sem transições relevantes
-
-Priorize o MENOR raio que represente adequadamente uma área semelhante ao entorno do imóvel.
-Não aumente o raio apenas para encontrar mais comparáveis.
-Se a imagem tiver pouca resolução ou abrangência, escolha um raio conservador e reduza a confiança.
-
-RESPONDA SOMENTE JSON válido. Todos os campos são OBRIGATÓRIOS:
+RESPONDA SOMENTE JSON:
 {{
-  "padrao_construtivo": "casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido",
-  "homogeneidade_visual": "alta | media | baixa | indefinida",
-  "densidade_urbana": "baixa | media | alta | indefinida",
-  "transicao_visual": "nenhuma_relevante | proxima | intermediaria | distante | indefinida",
+  "padrao_construtivo": "...",
+  "homogeneidade_visual": "...",
+  "densidade_urbana": "...",
+  "transicao_visual": "...",
   "raio_sugerido_metros": 700,
-  "justificativa_raio": "OBRIGATORIO - explique em uma frase por que escolheu este raio",
-  "descricao_zona_homogenea": "OBRIGATORIO - descreva em uma frase as caracteristicas urbanas observadas",
+  "justificativa_raio": "...",
+  "descricao_zona_homogenea": "...",
   "confianca": "alta | media | baixa"
 }}"""
 
+    # Tentativa 1: NVIDIA NIM (google/gemma-4-31b-it)
+    if nvidia_key:
+        resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
+        if resultado:
+            return resultado
+        logger.info("  NVIDIA NIM visao falhou — tentando Gemini...")
+
+    # Tentativa 2: Gemini (gemini-3.5-flash-lite com response_mime_type JSON)
+    if google_key:
+        resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
+        if resultado:
+            return resultado
+        logger.info("  Gemini visao falhou — usando raio padrao")
+
+    return {"raio_metros": 500, "descricao_zona_homogenea": "Analise visual nao disponivel"}
+
+
+def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
+    """Chama NVIDIA NIM (google/gemma-4-31b-it) para analise visual. Retorna dict ou None."""
     try:
-        from groq import Groq
-
-        groq_key = os.getenv("GROQ_API_KEY", "")
-        if not groq_key:
-            logger.warning("GROQ_API_KEY nao configurada — usando raio padrao")
-            return {"raio_metros": 500}
-
-        client = Groq(api_key=groq_key)
+        from openai import OpenAI
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key,
+        )
 
         response = client.chat.completions.create(
-            model="qwen/qwen3.6-27b",
+            model="google/gemma-4-31b-it",
             messages=[
                 {
                     "role": "user",
@@ -825,120 +817,90 @@ RESPONDA SOMENTE JSON válido. Todos os campos são OBRIGATÓRIOS:
                     ]
                 }
             ],
-            temperature=0,
-            max_completion_tokens=4096,
+            temperature=0.1,
+            max_tokens=1024,
         )
+
         texto = response.choices[0].message.content or ""
-        logger.info(f"Groq Vision (qwen3.6-27b) respondeu ({len(texto)} chars)")
+        logger.info(f"NVIDIA NIM (gemma-4-31b-it) respondeu ({len(texto)} chars)")
 
-        # Remove bloco <think>...</think> se presente (qwen3.6-27b usa reasoning)
-        if '</think>' in texto:
-            texto_limpo = texto.split('</think>', 1)[1].strip()
-        elif '<think>' in texto:
-            texto_limpo = texto  # Tag aberta sem fechar — usa original
-        else:
-            texto_limpo = texto
-        
-        # Remove markdown code block se presente
-        texto_limpo = re.sub(r'```json\s*', '', texto_limpo)
-        texto_limpo = re.sub(r'```\s*', '', texto_limpo)
-        texto_limpo = texto_limpo.strip()
-        if not texto_limpo:
-            texto_limpo = texto
-
-        # Parseia JSON — tenta no texto limpo E no original
-        resultado_json = None
-        for fonte in [texto_limpo, texto]:
-            m = re.search(r'\{[\s\S]*?"raio_sugerido_metros"[\s\S]*?\}', fonte)
-            if m:
-                try:
-                    resultado_json = json.loads(m.group(0))
-                    break
-                except json.JSONDecodeError:
-                    pass
-            # Tenta regex mais amplo
-            m = re.search(r'\{[\s\S]+\}', fonte)
-            if m:
-                try:
-                    resultado_json = json.loads(m.group(0))
-                    break
-                except json.JSONDecodeError:
-                    pass
-
-        if resultado_json:
-            # Normaliza campo de raio
-            if "raio_sugerido_metros" in resultado_json:
-                resultado_json["raio_metros"] = resultado_json["raio_sugerido_metros"]
-            # Garante raio discreto valido (300/500/700/1000/1500)
-            raios_validos = [300, 500, 700, 1000, 1500]
-            raio = resultado_json.get("raio_metros", 700)
-            if isinstance(raio, (int, float)):
-                raio = int(raio)
-                if raio not in raios_validos:
-                    raio = min(raios_validos, key=lambda x: abs(x - raio))
-                    resultado_json["raio_metros"] = raio
-                    resultado_json["raio_sugerido_metros"] = raio
-            return resultado_json
-
-        # Fallback: extrai campos do texto usando regex
-        # Remove bloco <think> do texto limpo pra descricao
-        desc_texto = texto_limpo
-        if '<think>' in desc_texto:
-            # Pega so o que vem depois do </think> ou apos o <think>
-            if '</think>' in desc_texto:
-                desc_texto = desc_texto.split('</think>', 1)[1].strip()
-            else:
-                desc_texto = ""
-        resultado_fallback = {"descricao_zona_homogenea": desc_texto[:300] if desc_texto else "Analise visual nao disponivel", "raio_metros": 700}
-
-        # Tenta extrair raio
-        raio_match = re.search(r'raio.*?(\d{3,4})\s*(?:metros|m)', texto_limpo)
-        if not raio_match:
-            raio_match = re.search(r'(\d{3,4})\s*(?:metros|m)', texto_limpo)
-        if raio_match:
-            raio_extraido = int(raio_match.group(1))
-            raios_validos = [300, 500, 700, 1000, 1500]
-            resultado_fallback["raio_metros"] = min(raios_validos, key=lambda x: abs(x - raio_extraido))
-            resultado_fallback["raio_sugerido_metros"] = resultado_fallback["raio_metros"]
-
-        # Tenta extrair padrao construtivo
-        if "casas" in texto_limpo.lower() or "sobrados" in texto_limpo.lower():
-            resultado_fallback["padrao_construtivo"] = "casas"
-        elif "predios" in texto_limpo.lower() or "edificios" in texto_limpo.lower():
-            resultado_fallback["padrao_construtivo"] = "predios"
-        elif "misto" in texto_limpo.lower():
-            resultado_fallback["padrao_construtivo"] = "misto"
-
-        # Tenta extrair homogeneidade
-        if "homogeneidade" in texto.lower() and "alta" in texto.lower():
-            resultado_fallback["homogeneidade_visual"] = "alta"
-        elif "homogeneidade" in texto.lower() and "baixa" in texto.lower():
-            resultado_fallback["homogeneidade_visual"] = "baixa"
-        elif "homogeneidade" in texto.lower():
-            resultado_fallback["homogeneidade_visual"] = "media"
-
-        # Tenta extrair densidade
-        if "densidade" in texto.lower() and "alta" in texto.lower():
-            resultado_fallback["densidade_urbana"] = "alta"
-        elif "densidade" in texto.lower() and "baixa" in texto.lower():
-            resultado_fallback["densidade_urbana"] = "baixa"
-        elif "densidade" in texto.lower():
-            resultado_fallback["densidade_urbana"] = "media"
-
-        # Tenta extrair transicao
-        if "transicao" in texto.lower() or "transição" in texto.lower():
-            if "proxima" in texto.lower() or "próxima" in texto.lower():
-                resultado_fallback["transicao_visual"] = "proxima"
-            elif "distante" in texto.lower():
-                resultado_fallback["transicao_visual"] = "distante"
-            else:
-                resultado_fallback["transicao_visual"] = "intermediaria"
-
-        return resultado_fallback
+        return _parsear_json_zona(texto)
 
     except Exception as e:
-        logger.error(f"Groq Vision falhou: {e}")
-        return {}
+        logger.warning(f"    [LLM] NVIDIA NIM visao falhou: {e}")
+        return None
+
+
+def _chamar_gemini_visao(prompt: str, imagem_bytes: bytes, api_key: str) -> dict | None:
+    """Chama Gemini (gemini-3.5-flash-lite) com imagem e response_mime_type JSON. Retorna dict ou None."""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            "gemini-3.5-flash-lite",
+            generation_config={"response_mime_type": "application/json"},
+        )
+
+        # Gemini aceita imagem como Part
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(imagem_bytes))
+
+        resposta = model.generate_content([prompt, img])
+        texto = resposta.text or ""
+        logger.info(f"Gemini visao respondeu ({len(texto)} chars)")
+
+        return _parsear_json_zona(texto)
+
+    except Exception as e:
+        logger.warning(f"    [LLM] Gemini visao falhou: {e}")
+        return None
+
+
+def _parsear_json_zona(texto: str) -> dict | None:
+    """Parseia o JSON da zona homogenea da resposta da LLM. Retorna dict ou None."""
+    # Remove <think>...</think>
+    if '</think>' in texto:
+        texto = texto.split('</think>', 1)[1].strip()
+
+    # Remove markdown code blocks
+    texto = re.sub(r'```json\s*', '', texto)
+    texto = re.sub(r'```\s*', '', texto)
+    texto = texto.strip()
+
+    # Tenta encontrar JSON balanceado
+    inicio = texto.find('{')
+    if inicio >= 0:
+        nivel = 0
+        fim = -1
+        for i in range(inicio, len(texto)):
+            if texto[i] == '{':
+                nivel += 1
+            elif texto[i] == '}':
+                nivel -= 1
+                if nivel == 0:
+                    fim = i
+                    break
+        if fim > inicio:
+            bloco = texto[inicio:fim+1]
+            try:
+                resultado = json.loads(bloco)
+                # Valida que tem campos esperados
+                if "raio_sugerido_metros" in resultado or "padrao_construtivo" in resultado:
+                    # Normaliza raio
+                    if "raio_sugerido_metros" in resultado:
+                        resultado["raio_metros"] = resultado["raio_sugerido_metros"]
+                    raios_validos = [300, 500, 700, 1000, 1500]
+                    raio = resultado.get("raio_metros", 700)
+                    if isinstance(raio, (int, float)):
+                        raio = int(raio)
+                        if raio not in raios_validos:
+                            raio = min(raios_validos, key=lambda x: abs(x - raio))
+                        resultado["raio_metros"] = raio
+                        resultado["raio_sugerido_metros"] = raio
+                    return resultado
+            except json.JSONDecodeError:
+                pass
 
 
 def _geocodificar(endereco: str) -> tuple:
@@ -1024,7 +986,7 @@ def analisar_zona_homogenea(
     FLUXO:
       1. Geocodificacao do endereco alvo (Nominatim → lat/lng)
       2. Geracao da imagem da regiao (Google Maps Static API, hybrid, scale=2, marcador)
-      3. Analise visual da regiao (Groq, qwen3.6-27b)
+      3. Analise visual da regiao (NVIDIA NIM gemma-4-31b-it; fallback: Gemini)
       4. Definicao da zona de analise (raio sugerido pela LLM, minimo 400m)
       5. Geocoding de cada imovel (Nominatim) + calculo de distancia (Haversine)
       6. Classificacao: na_zona ou fora_zona
@@ -1053,7 +1015,7 @@ def analisar_zona_homogenea(
       - imagem_satelite: caminho do PNG salvo
     """
     logger.info("=" * 55)
-    logger.info("ZONA HOMOGENEA: Google Maps + Groq (qwen3.6-27b)")
+    logger.info("ZONA HOMOGENEA: Google Maps + NVIDIA NIM (gemma-4-31b-it)")
     logger.info("=" * 55)
 
     # ── 1. GEOCODIFICACAO DO ALVO ─────────────────────────────────
@@ -1084,7 +1046,7 @@ def analisar_zona_homogenea(
     # ── 3. ANALISE VISUAL VIA GROQ VISION ─────────────────────────
     zona = {}
     if imagem:
-        logger.info("Enviando imagem para Groq (qwen3.6-27b)...")
+        logger.info("Enviando imagem para NVIDIA NIM (gemma-4-31b-it)...")
         zona = _analisar_zona_homogenea(imagem, endereco_alvo)
         logger.info(f"Zona: padrao={zona.get('padrao_construtivo','?')} | "
                     f"homogeneidade={zona.get('homogeneidade_visual','?')} | "
