@@ -675,13 +675,14 @@ if "resultado" in st.session_state:
             if alvo_analise:
                 score_alvo = alvo_analise.get("scores", {}).get("score_qualitativo", "?")
                 classif_alvo = alvo_analise.get("classificacao_qualitativa", "?")
+                st.markdown("**🏠 Seu imóvel**")
                 col_est, col_pad, col_score = st.columns(3)
                 with col_est:
-                    st.metric("🏠 Estado", estado_alvo.capitalize())
+                    st.metric("Estado", estado_alvo.capitalize())
                 with col_pad:
-                    st.metric("🔨 Padrão", padrao_alvo.capitalize())
+                    st.metric("Padrão", padrao_alvo.capitalize())
                 with col_score:
-                    st.metric("📊 Score", f"{score_alvo}", classif_alvo)
+                    st.metric("Score", f"{score_alvo}", classif_alvo)
 
                 # Pontos positivos
                 positivos = alvo_analise.get("pontos_positivos", [])
@@ -705,7 +706,12 @@ if "resultado" in st.session_state:
             if total_analisados > 0:
                 st.markdown("---")
                 n_label = "imóvel" if total_analisados == 1 else "imóveis"
-                st.markdown(f"📊 **Vizinhança:** {total_analisados} {n_label} analisado{'s' if total_analisados > 1 else ''} | Score médio da região: **{score_medio:.2f}**")
+                st.markdown(f"**🏘️ Vizinhança** ({total_analisados} {n_label} analisado{'s' if total_analisados > 1 else ''})")
+                col_v1, col_v2 = st.columns(2)
+                with col_v1:
+                    st.metric("Score médio da região", f"{score_medio:.2f}")
+                with col_v2:
+                    st.metric("Imóveis analisados", total_analisados)
 
         # Ag.4
         score_final_infra = scores_infra.get("score_final", 0) or 0
