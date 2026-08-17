@@ -800,7 +800,12 @@ if "resultado" in st.session_state:
 
         # Ag.5
         m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
-        padrao_usado = calc_constr.get("padrao_usado", "todos os comparáveis")
+        # Padrao: busca do Ag5 (imovel_alvo) ou do Ag3
+        padrao_usado = preco.get("imovel_alvo", {}).get("padrao_construtivo", "") if preco else ""
+        if not padrao_usado or padrao_usado == "?":
+            padrao_usado = alvo_analise.get("padrao_acabamento", "") if alvo_analise else ""
+        if not padrao_usado or padrao_usado in ("?", "desconhecido"):
+            padrao_usado = "todos os comparáveis"
         area_calc = calc_constr.get("area_construida_m2", 0) or 0
         valor_med = avaliacao.get("valor_medio_imovel", 0)
         valor_liq = avaliacao.get("valor_liquidez", 0)
@@ -825,7 +830,7 @@ if "resultado" in st.session_state:
             with col_e:
                 st.markdown("**Construção**")
                 calc_constr_det = preco.get("calculo_construcao", {})
-                st.write(f"- Padrão: {calc_constr_det.get('padrao_usado', '?')}")
+                st.write(f"- Padrão: {padrao_usado}")
                 st.write(f"- M² referência: R$ {calc_constr_det.get('valor_m2_referencia', 0):,.2f}")
                 st.write(f"- Área: {calc_constr_det.get('area_construida_m2', 0)} m²")
                 st.write(f"- Valor médio: R$ {calc_constr_det.get('valor_construcao_medio', 0):,.2f}")
