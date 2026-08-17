@@ -675,15 +675,16 @@ def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
             }
             continue
 
-        # Calcula para categorias normais
+        # Calcula para categorias normais (cap de 5 POIs por faixa pra evitar inflacao)
+        CAP_POR_FAIXA = 5
         qtd_por_faixa = {}
         total_ponderado = 0.0
         tipos_encontrados = set()
         for _, _, nome_faixa in FAIXAS:
             peso = pesos_faixa.get(nome_faixa, 0)
             pois_faixa = pois_por_faixa.get(nome_faixa, {}).get(categoria, [])
-            qtd = len(pois_faixa)
-            qtd_por_faixa[nome_faixa] = qtd
+            qtd = min(len(pois_faixa), CAP_POR_FAIXA)  # Cap pra nao inflar score
+            qtd_por_faixa[nome_faixa] = len(pois_faixa)  # Log mostra real
             total_ponderado += qtd * peso
             for poi in pois_faixa:
                 tipos_encontrados.add(poi.get("tipo", "?"))
