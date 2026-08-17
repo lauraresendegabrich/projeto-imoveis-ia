@@ -675,7 +675,13 @@ if "resultado" in st.session_state:
             if alvo_analise:
                 score_alvo = alvo_analise.get("scores", {}).get("score_qualitativo", "?")
                 classif_alvo = alvo_analise.get("classificacao_qualitativa", "?")
-                st.markdown(f"**Seu imóvel:** estado **{estado_alvo}** | padrão **{padrao_alvo}** | score **{score_alvo}** ({classif_alvo})")
+                col_est, col_pad, col_score = st.columns(3)
+                with col_est:
+                    st.metric("🏠 Estado", estado_alvo.capitalize())
+                with col_pad:
+                    st.metric("🔨 Padrão", padrao_alvo.capitalize())
+                with col_score:
+                    st.metric("📊 Score", f"{score_alvo}", classif_alvo)
 
                 # Pontos positivos
                 positivos = alvo_analise.get("pontos_positivos", [])
