@@ -680,28 +680,26 @@ if "resultado" in st.session_state:
                 # Pontos positivos
                 positivos = alvo_analise.get("pontos_positivos", [])
                 if positivos:
-                    st.markdown("✅ **Pontos positivos:**")
-                    for p in positivos:
-                        st.markdown(f"- {p}")
+                    bullets_pos = "\n".join([f"- {p}" for p in positivos])
+                    st.markdown(f"✅ **Pontos positivos:**\n{bullets_pos}")
 
                 # Pontos negativos
                 negativos = alvo_analise.get("pontos_negativos", [])
                 if negativos:
-                    st.markdown("⚠️ **Pontos de atenção:**")
-                    for n in negativos:
-                        st.markdown(f"- {n}")
+                    bullets_neg = "\n".join([f"- {n}" for n in negativos])
+                    st.markdown(f"⚠️ **Pontos de atenção:**\n{bullets_neg}")
 
                 # Observações
                 observacoes = alvo_analise.get("observacoes", [])
                 if observacoes:
-                    for obs in observacoes:
-                        st.caption(f"ℹ️ {obs}")
+                    obs_text = " | ".join(observacoes)
+                    st.markdown(f"ℹ️ _{obs_text}_")
 
             # Resumo da vizinhança
             if total_analisados > 0:
                 st.markdown("---")
                 n_label = "imóvel" if total_analisados == 1 else "imóveis"
-                st.caption(f"📊 Vizinhança: {total_analisados} {n_label} analisado{'s' if total_analisados > 1 else ''} | Score médio da região: {score_medio:.2f}")
+                st.markdown(f"📊 **Vizinhança:** {total_analisados} {n_label} analisado{'s' if total_analisados > 1 else ''} | Score médio da região: **{score_medio:.2f}**")
 
         # Ag.4
         score_final_infra = scores_infra.get("score_final", 0) or 0
