@@ -4,7 +4,7 @@ Agente 4 — Avaliador de Infraestrutura
 
 RESPONSABILIDADE:
     Analisa o entorno do imovel alvo buscando pontos de interesse (POIs)
-    via osmnx (OpenStreetMap) em 3 faixas de distancia. Calcula score
+    via Google Places API (Nearby Search) em 3 faixas de distancia. Calcula score
     de infraestrutura 100% deterministico por categoria. LLM apenas
     interpreta os scores (nao modifica valores).
 
@@ -23,9 +23,10 @@ FLUXO COMPLETO:
     Reutiliza lat/lon do Agente 2 (zona_homogenea_ag2.json).
     Se nao disponivel: Nominatim → fallback Google Geocoding.
 
-  ETAPA 2 — BUSCA DE POIs (osmnx / OpenStreetMap)
+  ETAPA 2 — BUSCA DE POIs (Google Places API)
   ─────────────────────────────────────────────────
-    Busca todos os POIs ate 1500m numa unica query ao osmnx.
+    Busca todos os POIs ate 1500m via Google Places API (Nearby Search New).
+    Uma request por categoria (~7 requests total). Resposta em ~1s cada.
     Classifica cada POI pela distancia real (Haversine) em 3 faixas:
 
     0-400m   — microentorno imediato (~5 min a pe)
@@ -102,8 +103,9 @@ QUEM USA A SAIDA:
 
 DEPENDENCIAS:
 ─────────────
-    - osmnx (busca POIs no OpenStreetMap)
-    - Groq (llama-3.1-8b-instant) — apenas interpretacao textual
+    - Google Places API (busca POIs — Nearby Search New)
+    - NVIDIA NIM (meta/llama-3.1-8b-instruct) — apenas interpretacao textual
+    - Gemini (gemini-3.5-flash-lite) — fallback interpretacao
     - Nominatim / Google Geocoding (fallback geocodificacao)
 
 COMO RODAR:
@@ -346,26 +348,10 @@ def _faixa_de(distancia: int) -> str:
 
 def _buscar_transporte(lat: float, lon: float) -> dict:
     """
-    Busca dados de transporte publico com tags expandidas via osmnx/Overpass.
-
-    Busca as seguintes tags:
-      - highway=bus_stop
-      - public_transport=platform
-      - public_transport=stop_position
-      - amenity=bus_station
-      - bus=yes
-      - route=bus
-      - route_master=bus
-
-    Classifica o resultado em:
-      - paradas:  lista de paradas encontradas (nodes)
-      - estacoes: terminais/estacoes de onibus
-      - rotas:    rotas de onibus proximas (relations)
-      - status:   "servido" | "possui_indicios_de_atendimento" | "dados_insuficientes"
+    Busca dados de transporte publico via Google Places API (Nearby Search).
+    Busca bus_station e transit_station no raio maximo.
     """
     try:
-        import osmnx as ox
-
         resultado = {
             "paradas":  [],
             "estacoes": [],
@@ -373,122 +359,73 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
             "status":   "dados_insuficientes",
         }
 
-        # Configura servidor Overpass com fallback
-        servidores = [
-            "https://overpass.kumi.systems/api/interpreter",
-            "https://overpass-api.de/api/interpreter",
-        ]
-        for servidor in servidores:
-            try:
-                ox.settings.overpass_url = servidor
-                # Testa com query minima
-                ox.features_from_point((lat, lon), tags={"highway": "bus_stop"}, dist=100)
-                break  # Servidor funciona
-            except Exception:
+        api_key = os.getenv("GOOGLE_MAPS_KEY", "")
+        if not api_key:
+            logger.warning("  GOOGLE_MAPS_KEY nao configurada — transporte indisponivel")
+            return resultado
+
+        import requests
+
+        # Busca paradas de onibus (bus_station + transit_station)
+        tipos_transporte = ["bus_station", "transit_station"]
+        for tipo_busca in tipos_transporte:
+            url = "https://places.googleapis.com/v1/places:searchNearby"
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": api_key,
+                "X-Goog-FieldMask": "places.displayName,places.location,places.primaryType",
+            }
+            body = {
+                "includedTypes": [tipo_busca],
+                "maxResultCount": 10,
+                "locationRestriction": {
+                    "circle": {
+                        "center": {"latitude": lat, "longitude": lon},
+                        "radius": float(RAIO_MAX),
+                    }
+                },
+            }
+
+            resp = requests.post(url, json=body, headers=headers, timeout=10)
+            if resp.status_code != 200:
                 continue
 
-        # 1. Busca paradas e plataformas (nodes/ways)
-        tags_paradas = {
-            "highway": "bus_stop",
-            "public_transport": ["platform", "stop_position"],
-            "amenity": "bus_station",
-        }
-        try:
-            gdf_paradas = ox.features_from_point((lat, lon), tags=tags_paradas, dist=RAIO_MAX)
-            if not gdf_paradas.empty:
-                for _, row in gdf_paradas.iterrows():
-                    nome = row.get("name") or row.get("name:pt") or "parada"
-                    if not isinstance(nome, str):
-                        nome = "parada"
-                    tipo = (row.get("highway") or row.get("public_transport") or
-                            row.get("amenity") or "bus_stop")
-                    if not isinstance(tipo, str):
-                        tipo = "bus_stop"
+            data = resp.json()
+            places = data.get("places", [])
 
-                    geom = row.get("geometry")
-                    if geom is not None:
-                        try:
-                            c = geom.centroid
-                            lat_p, lon_p = c.y, c.x
-                        except Exception:
-                            lat_p, lon_p = lat, lon
-                    else:
-                        lat_p, lon_p = lat, lon
+            for place in places:
+                loc = place.get("location", {})
+                lat_p = loc.get("latitude", lat)
+                lon_p = loc.get("longitude", lon)
+                dist = _haversine(lat, lon, lat_p, lon_p)
+                faixa = _faixa_de(dist)
+                if faixa is None:
+                    continue
 
-                    dist = _haversine(lat, lon, lat_p, lon_p)
-                    faixa = _faixa_de(dist)
-                    if faixa is None:
-                        continue
+                nome = place.get("displayName", {}).get("text", "parada")
+                entrada = {
+                    "nome": nome,
+                    "tipo": tipo_busca,
+                    "ref": None,
+                    "distancia_metros": dist,
+                    "faixa": faixa,
+                }
+                if tipo_busca == "bus_station":
+                    resultado["estacoes"].append(entrada)
+                else:
+                    resultado["paradas"].append(entrada)
 
-                    entrada = {
-                        "nome": nome,
-                        "tipo": tipo,
-                        "ref": row.get("ref") or row.get("local_ref") or None,
-                        "distancia_metros": dist,
-                        "faixa": faixa,
-                    }
-                    if tipo == "bus_station":
-                        resultado["estacoes"].append(entrada)
-                    else:
-                        resultado["paradas"].append(entrada)
+        resultado["paradas"].sort(key=lambda x: x["distancia_metros"])
+        resultado["estacoes"].sort(key=lambda x: x["distancia_metros"])
 
-                resultado["paradas"].sort(key=lambda x: x["distancia_metros"])
-                resultado["estacoes"].sort(key=lambda x: x["distancia_metros"])
-
-                # Deduplicacao espacial: remove paradas muito proximas (~mesmo ponto fisico)
-                def _dedup_transporte(paradas: list, dist_min: int = DEDUP_TRANSPORTE_METROS) -> list:
-                    """
-                    Remove paradas que representam o mesmo ponto fisico.
-                    Usa nome/ref/stop_area quando disponivel, fallback para proximidade espacial.
-                    """
-                    if not paradas:
-                        return paradas
-                    resultado_dedup = [paradas[0]]
-                    for p in paradas[1:]:
-                        duplicado = False
-                        for aceita in resultado_dedup:
-                            diff = abs(p["distancia_metros"] - aceita["distancia_metros"])
-                            if diff > dist_min:
-                                continue
-                            # Dentro do raio de dedup - verifica evidencia de mesma parada
-                            mesmo_nome = (
-                                p.get("nome") and aceita.get("nome")
-                                and p["nome"] == aceita["nome"]
-                                and p["nome"] != "parada"
-                            )
-                            mesmo_ref = (
-                                p.get("ref") and aceita.get("ref")
-                                and p["ref"] == aceita["ref"]
-                            )
-                            # Se tem nome/ref igual E esta proximo, e a mesma parada
-                            if mesmo_nome or mesmo_ref:
-                                duplicado = True
-                                break
-                            # Fallback: sem nome/ref, usa apenas proximidade se MUITO perto (<20m)
-                            if diff < 20 and not p.get("nome") and not aceita.get("nome"):
-                                duplicado = True
-                                break
-                        if not duplicado:
-                            resultado_dedup.append(p)
-                    return resultado_dedup
-
-                resultado["paradas"] = _dedup_transporte(resultado["paradas"])
-                resultado["estacoes"] = _dedup_transporte(resultado["estacoes"])
-        except Exception as e:
-            logger.warning(f"  Busca de paradas falhou: {e}")
-
-        # Determina status (baseado apenas em paradas/estacoes)
-        tem_paradas  = len(resultado["paradas"]) > 0
+        tem_paradas = len(resultado["paradas"]) > 0
         tem_estacoes = len(resultado["estacoes"]) > 0
 
         if tem_paradas or tem_estacoes:
             resultado["status"] = "servido"
-        else:
-            resultado["status"] = "dados_insuficientes"
 
         logger.info(f"  Transporte: {len(resultado['paradas'])} paradas | "
-                    f"{len(resultado['estacoes'])} estacoes | "
-                    f"{len(resultado['rotas'])} rotas | status={resultado['status']}")
+                    f"{len(resultado['estacoes'])} estacoes | status={resultado['status']}")
 
         return resultado
 
@@ -500,103 +437,96 @@ def _buscar_transporte(lat: float, lon: float) -> dict:
 
 def _buscar_pois_classificados(lat: float, lon: float) -> dict:
     """
-    Busca todos os POIs relevantes (exceto transporte) ate RAIO_MAX via osmnx.
-    Classifica cada POI usando combinacao (chave, valor) para evitar dupla contagem.
+    Busca todos os POIs relevantes (exceto transporte) via Google Places API (Nearby Search).
+    Classifica cada POI na categoria correspondente.
     Um POI pertence a apenas UMA categoria.
     Retorna dict: { nome_faixa: { categoria: [pois] } }
     """
     try:
-        import osmnx as ox
+        import requests
 
-        # Monta tags para consulta ao osmnx
-        tags = {
-            "amenity": True,
-            "shop": True,
-            "leisure": True,
-            "highway": "bus_stop",
-        }
+        api_key = os.getenv("GOOGLE_MAPS_KEY", "")
+        if not api_key:
+            logger.warning("GOOGLE_MAPS_KEY nao configurada — usando scores neutros")
+            return {nome: {cat: [] for cat in POIS_POR_CATEGORIA} for _, _, nome in FAIXAS}
 
-        logger.info(f"  Buscando todos os POIs ate {RAIO_MAX}m via osmnx...")
-        
-        # Tenta servidor principal, fallback pra alternativo
-        servidores = [
-            "https://overpass.kumi.systems/api/interpreter",
-            "https://overpass-api.de/api/interpreter",
-        ]
-        gdf = None
-        for servidor in servidores:
-            try:
-                ox.settings.overpass_url = servidor
-                gdf = ox.features_from_point((lat, lon), tags=tags, dist=RAIO_MAX)
-                break
-            except Exception as e:
-                logger.warning(f"  Overpass ({servidor.split('//')[1].split('/')[0]}) falhou: {e}")
-                continue
-        
-        if gdf is None:
-            raise Exception("Todos os servidores Overpass falharam")
+        logger.info(f"  Buscando POIs ate {RAIO_MAX}m via Google Places API...")
 
         resultado = {
             nome: {cat: [] for cat in POIS_POR_CATEGORIA}
             for _, _, nome in FAIXAS
         }
 
-        if gdf.empty:
-            logger.info("  Nenhum POI encontrado")
-            return resultado
-
-        logger.info(f"  {len(gdf)} elementos brutos encontrados")
+        # Mapeamento de tipos Google Places → categoria do sistema
+        TIPOS_GOOGLE = {
+            "comercio": ["supermarket", "grocery_store", "bakery", "convenience_store"],
+            "educacao": ["school", "primary_school", "secondary_school"],
+            "saude_basica": ["pharmacy", "doctor", "dentist"],
+            "lazer": ["park", "gym", "playground"],
+            "hospital": ["hospital"],
+            "equipamentos_regionais": ["university", "shopping_mall"],
+            "servicos_e_alimentacao": ["restaurant", "cafe", "bank", "atm"],
+        }
 
         vistos = set()
-        for _, row in gdf.iterrows():
-            # Identifica a combinacao (chave, valor) do elemento
-            # Prioridade garante que cada POI pertence a UMA UNICA categoria
-            categoria = None
-            tipo_encontrado = None
+        total_encontrados = 0
 
-            for chave in ("amenity", "shop", "leisure", "highway", "public_transport"):
-                valor = row.get(chave)
-                if valor and isinstance(valor, str):
-                    cat = TAG_PARA_CATEGORIA.get((chave, valor))
-                    if cat and cat != "transporte":  # transporte tratado separado
-                        categoria = cat
-                        tipo_encontrado = valor
-                        break
+        for categoria, tipos in TIPOS_GOOGLE.items():
+            url = "https://places.googleapis.com/v1/places:searchNearby"
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": api_key,
+                "X-Goog-FieldMask": "places.displayName,places.location,places.primaryType",
+            }
+            body = {
+                "includedTypes": tipos,
+                "maxResultCount": 20,
+                "locationRestriction": {
+                    "circle": {
+                        "center": {"latitude": lat, "longitude": lon},
+                        "radius": float(RAIO_MAX),
+                    }
+                },
+            }
 
-            if not categoria:
+            try:
+                resp = requests.post(url, json=body, headers=headers, timeout=10)
+                if resp.status_code != 200:
+                    logger.warning(f"  Google Places ({categoria}): HTTP {resp.status_code}")
+                    continue
+
+                data = resp.json()
+                places = data.get("places", [])
+
+                for place in places:
+                    loc = place.get("location", {})
+                    lat_p = loc.get("latitude", lat)
+                    lon_p = loc.get("longitude", lon)
+                    dist = _haversine(lat, lon, lat_p, lon_p)
+                    faixa = _faixa_de(dist)
+                    if faixa is None:
+                        continue
+
+                    nome = place.get("displayName", {}).get("text", "?")
+                    tipo_encontrado = place.get("primaryType", categoria)
+
+                    # Deduplicacao
+                    chave_dedup = f"{tipo_encontrado}_{round(lat_p, 5)}_{round(lon_p, 5)}"
+                    if chave_dedup in vistos:
+                        continue
+                    vistos.add(chave_dedup)
+
+                    resultado[faixa][categoria].append({
+                        "nome":             nome,
+                        "tipo":             tipo_encontrado,
+                        "categoria":        categoria,
+                        "distancia_metros": dist,
+                    })
+                    total_encontrados += 1
+
+            except Exception as e:
+                logger.warning(f"  Google Places ({categoria}) falhou: {e}")
                 continue
-
-            nome = row.get("name") or row.get("name:pt") or tipo_encontrado
-            if not isinstance(nome, str):
-                nome = tipo_encontrado
-
-            geom = row.get("geometry")
-            if geom is not None:
-                try:
-                    c = geom.centroid
-                    lat_poi, lon_poi = c.y, c.x
-                except Exception:
-                    lat_poi, lon_poi = lat, lon
-            else:
-                lat_poi, lon_poi = lat, lon
-
-            dist = _haversine(lat, lon, lat_poi, lon_poi)
-            faixa = _faixa_de(dist)
-            if faixa is None:
-                continue
-
-            # Evita dupla contagem do mesmo POI
-            chave_dedup = f"{tipo_encontrado}_{round(lat_poi, 5)}_{round(lon_poi, 5)}"
-            if chave_dedup in vistos:
-                continue
-            vistos.add(chave_dedup)
-
-            resultado[faixa][categoria].append({
-                "nome":             nome,
-                "tipo":             tipo_encontrado,
-                "categoria":        categoria,
-                "distancia_metros": dist,
-            })
 
         # Ordena cada categoria por distancia
         for faixa_data in resultado.values():
@@ -608,10 +538,12 @@ def _buscar_pois_classificados(lat: float, lon: float) -> dict:
             total = sum(len(v) for v in resultado[nome_faixa].values())
             logger.info(f"  {nome_faixa}: {total} POIs")
 
+        logger.info(f"  Total: {total_encontrados} POIs encontrados via Google Places")
+
         return resultado
 
     except Exception as e:
-        logger.warning(f"osmnx falhou: {e}")
+        logger.warning(f"Google Places falhou: {e}")
         return {nome: {cat: [] for cat in POIS_POR_CATEGORIA} for _, _, nome in FAIXAS}
 
 
