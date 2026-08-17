@@ -569,9 +569,10 @@ if "resultado" in st.session_state:
             if cluster_b > 0:
                 st.write(f"- {cluster_b} foram descartados (perfil muito diferente: área, quartos ou padrão incompatível)")
             if len(fora_zona) > 0:
-                st.write(f"- Zona homogênea: **{len(confirmados)}** de {len(confirmados) + len(fora_zona)} analisados estão na mesma vizinhança (raio de {raio}m), {len(fora_zona)} descartados por distância")
+                total_zona_analise = len(confirmados) + len(fora_zona)
+                st.write(f"- Zona homogênea: dos {total_zona_analise} imóveis (casas + terrenos), **{len(confirmados)}** estão na mesma vizinhança (raio de {raio}m) e {len(fora_zona)} foram descartados por distância")
             else:
-                st.write(f"- Zona homogênea: todos os **{len(confirmados)}** comparáveis estão na mesma vizinhança (raio de {raio}m)")
+                st.write(f"- Zona homogênea: todos os **{len(confirmados)}** imóveis (casas + terrenos) estão na mesma vizinhança (raio de {raio}m)")
 
             # Detalhes da zona homogênea
             st.markdown("---")
