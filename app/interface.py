@@ -568,10 +568,17 @@ if "resultado" in st.session_state:
             st.write(f"- **{cluster_a}** foram classificados como comparáveis (perfil similar ao seu)")
             if cluster_b > 0:
                 st.write(f"- {cluster_b} foram descartados (perfil muito diferente: área, quartos ou padrão incompatível)")
-            if len(fora_zona) > 0:
-                st.write(f"- Zona homogênea: **{len(confirmados)}** comparáveis estão perto do seu imóvel (até {raio}m) e serão usados no cálculo — {len(fora_zona)} descartados por estarem longe demais")
-            else:
-                st.write(f"- Zona homogênea: todos os **{len(confirmados)}** comparáveis estão perto do seu imóvel (até {raio}m) e serão usados no cálculo")
+            if len(fora_zona) > 0 or len(confirmados) > 0:
+                # Separa terrenos dos construidos dentro da zona
+                terrenos_zona = [c for c in confirmados if (c.get("propertyType", "") or "").lower() in ("terrenos", "terreno", "lote", "residential_allotment_land", "allotment_land")]
+                comparaveis_zona = [c for c in confirmados if c not in terrenos_zona]
+                terrenos_fora = [c for c in fora_zona if (c.get("propertyType", "") or "").lower() in ("terrenos", "terreno", "lote", "residential_allotment_land", "allotment_land")]
+                comparaveis_fora = [c for c in fora_zona if c not in terrenos_fora]
+
+                st.markdown("---")
+                st.markdown(f"**📍 Zona homogênea (raio de {raio}m ao redor do seu imóvel):**")
+                st.write(f"- Imóveis comparáveis na zona: **{len(comparaveis_zona)}**" + (f" ({len(comparaveis_fora)} fora — descartados por distância)" if comparaveis_fora else ""))
+                st.write(f"- Terrenos na zona: **{len(terrenos_zona)}**" + (f" ({len(terrenos_fora)} fora)" if terrenos_fora else "") + " (usados para calcular o valor do m² do terreno)")
 
             # Detalhes da zona homogênea
             st.markdown("---")
