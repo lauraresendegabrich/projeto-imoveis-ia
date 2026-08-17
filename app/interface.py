@@ -677,8 +677,9 @@ if "resultado" in st.session_state:
                 classif_alvo = alvo_analise.get("classificacao_qualitativa", "?")
                 st.markdown(f"**Seu imóvel:** estado **{estado_alvo}** | padrão **{padrao_alvo}** | score **{score_alvo}** ({classif_alvo})")
 
-                # Justificativa
-                justificativa = alvo_analise.get("justificativa", "")
+                # Justificativa (prefere analise_qualitativa textual, fallback pro campo justificativa)
+                analise_texto = alvo_analise.get("analise_qualitativa", "")
+                justificativa = analise_texto if analise_texto else alvo_analise.get("justificativa", "")
                 if justificativa:
                     st.info(f"💡 {justificativa}")
 

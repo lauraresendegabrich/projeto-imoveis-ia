@@ -853,17 +853,34 @@ def _analisar_imovel(imovel: dict) -> dict:
     partes_just.append(f"score qualitativo {score} -> classificacao {classificacao}")
     justificativa = ". ".join(partes_just) + "." if partes_just else "Sem evidencias suficientes para justificar ajuste no valor."
 
-    # Analise textual resumida
+    # Analise textual resumida (linguagem natural pro usuario)
     partes = []
     if estado != "desconhecido":
-        partes.append(f"Estado: {estado}")
+        desc_estado = {
+            "novo": "Imóvel novo ou nunca habitado",
+            "reformado": "Imóvel recentemente reformado",
+            "bom": "Imóvel em bom estado de conservação",
+            "regular": "Imóvel com estado de conservação regular",
+            "precisa_reforma": "Imóvel que necessita de reformas",
+        }
+        partes.append(desc_estado.get(estado, f"Estado: {estado}"))
     if padrao != "desconhecido":
-        partes.append(f"Padrao: {padrao}")
-    if pontos_pos:
-        partes.append(f"Positivos: {', '.join(pontos_pos[:5])}")
-    if pontos_neg:
-        partes.append(f"Negativos: {', '.join(pontos_neg[:3])}")
-    analise_qualitativa = ". ".join(partes) + "." if partes else "Sem evidencias relevantes."
+        desc_padrao = {
+            "alto_padrao": "com acabamento de alto padrão",
+            "medio": "com acabamento padrão médio",
+            "simples": "com acabamento simples",
+        }
+        partes.append(desc_padrao.get(padrao, f"padrão {padrao}"))
+    if pontos_pos and not pontos_neg:
+        partes.append(f"Destaques: {', '.join(pontos_pos[:3]).lower()}")
+    elif pontos_neg and not pontos_pos:
+        partes.append(f"Atenção: {', '.join(pontos_neg[:2]).lower()}")
+    elif pontos_pos and pontos_neg:
+        partes.append(f"Destaques: {', '.join(pontos_pos[:2]).lower()}")
+        partes.append(f"porém {pontos_neg[0].lower()}")
+    if confianca == "baixa":
+        partes.append("Análise limitada por poucas fotos ou descrição vaga")
+    analise_qualitativa = ". ".join(partes) + "." if partes else "Sem evidências suficientes para uma análise detalhada."
 
     return {
         "id_imovel":             id_imovel,
