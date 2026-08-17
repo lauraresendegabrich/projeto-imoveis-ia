@@ -788,7 +788,7 @@ if "resultado" in st.session_state:
                 if pois:
                     st.markdown("---")
                     st.caption("O que tem perto")
-                    for faixa_nome, faixa_label in [("microentorno_imediato", "0 a 400m"), ("entorno_caminhavel", "401 a 800m"), ("infraestrutura_ampliada", "801 a 1500m")]:
+                    for faixa_nome, faixa_label in [("0_400", "0 a 400m"), ("401_800", "401 a 800m"), ("801_1500", "801 a 1500m")]:
                         faixa = pois.get(faixa_nome, {})
                         total_faixa = sum(len(v) for v in faixa.values() if isinstance(v, list))
                         if total_faixa > 0:

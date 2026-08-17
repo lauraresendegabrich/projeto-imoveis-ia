@@ -268,15 +268,16 @@ LIMITES_SERVICOS_ALIMENTACAO = {
 }
 
 # Normalizador por categoria (qtd ponderada esperada para score = 1.0)
+# Calibrado para Google Places API (retorna ate 20 POIs por categoria)
 NORMALIZADORES = {
-    "comercio":           5,
-    "educacao":           3,
-    "saude_basica":       4,
-    "transporte":         6,
-    "lazer":              3,
-    "hospital":           2,
-    "equipamentos_regionais": 2,
-    "servicos_e_alimentacao": 4,
+    "comercio":           12,
+    "educacao":           8,
+    "saude_basica":       10,
+    "transporte":         12,
+    "lazer":              8,
+    "hospital":           4,
+    "equipamentos_regionais": 4,
+    "servicos_e_alimentacao": 10,
 }
 
 
