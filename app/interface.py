@@ -568,7 +568,10 @@ if "resultado" in st.session_state:
             st.write(f"- **{cluster_a}** foram classificados como comparáveis (perfil similar ao seu)")
             if cluster_b > 0:
                 st.write(f"- {cluster_b} foram descartados (perfil muito diferente: área, quartos ou padrão incompatível)")
-            st.write(f"- Zona homogênea: **{len(confirmados)}** de {len(confirmados) + len(fora_zona)} analisados estão na mesma vizinhança (raio de {raio}m), {len(fora_zona)} descartados por distância")
+            if len(fora_zona) > 0:
+                st.write(f"- Zona homogênea: **{len(confirmados)}** comparáveis estão perto do seu imóvel (até {raio}m) e serão usados no cálculo — {len(fora_zona)} descartados por estarem longe demais")
+            else:
+                st.write(f"- Zona homogênea: todos os **{len(confirmados)}** comparáveis estão perto do seu imóvel (até {raio}m) e serão usados no cálculo")
 
             # Detalhes da zona homogênea
             st.markdown("---")
