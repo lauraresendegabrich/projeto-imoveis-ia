@@ -763,7 +763,10 @@ if "resultado" in st.session_state:
             # Gráfico radar
             infra_full = resultado.get("infraestrutura", {})
             if infra_full:
-                scores_cat = {k: v for k, v in infra_full.get("scores", {}).items() if isinstance(v, (int, float)) and k != "score_final"}
+                scores_cat = infra_full.get("scores", {}).get("scores_categoria", {})
+                if not scores_cat:
+                    # Fallback: tenta pegar do nivel raiz dos scores
+                    scores_cat = {k: v for k, v in infra_full.get("scores", {}).items() if isinstance(v, (int, float)) and k != "score_final"}
                 if scores_cat:
                     import plotly.graph_objects as go
                     categorias = list(scores_cat.keys())
