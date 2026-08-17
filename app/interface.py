@@ -671,22 +671,42 @@ if "resultado" in st.session_state:
         estado_alvo = alvo_analise.get("estado_conservacao", "?")
         padrao_alvo = alvo_analise.get("padrao_acabamento", "?")
         with st.expander("📝 Agente Analisador de Qualidade"):
-            st.write(f"Analisamos fotos e descrição de **{total_analisados}** imóveis da vizinhança.")
-            st.write(f"- Score médio de qualidade da região: **{score_medio:.2f}**")
-            st.write(f"- Seu imóvel: estado **{estado_alvo}**, padrão **{padrao_alvo}**")
-
-            # Análise do imóvel alvo
+            # Análise do imóvel alvo (destaque principal)
             if alvo_analise:
-                st.markdown("---")
-                st.caption("Análise do seu imóvel")
-                st.write(f"- Score qualitativo: **{alvo_analise.get('scores', {}).get('score_qualitativo', '?')}**")
-                st.write(f"- Classificação: **{alvo_analise.get('classificacao_qualitativa', '?')}**")
+                score_alvo = alvo_analise.get("scores", {}).get("score_qualitativo", "?")
+                classif_alvo = alvo_analise.get("classificacao_qualitativa", "?")
+                st.markdown(f"**Seu imóvel:** estado **{estado_alvo}** | padrão **{padrao_alvo}** | score **{score_alvo}** ({classif_alvo})")
+
+                # Justificativa
+                justificativa = alvo_analise.get("justificativa", "")
+                if justificativa:
+                    st.info(f"💡 {justificativa}")
+
+                # Pontos positivos
                 positivos = alvo_analise.get("pontos_positivos", [])
                 if positivos:
-                    st.write(f"- Pontos positivos: {', '.join(positivos)}")
+                    st.markdown("✅ **Pontos positivos:**")
+                    for p in positivos:
+                        st.markdown(f"- {p}")
+
+                # Pontos negativos
                 negativos = alvo_analise.get("pontos_negativos", [])
                 if negativos:
-                    st.write(f"- Pontos negativos: {', '.join(negativos)}")
+                    st.markdown("⚠️ **Pontos de atenção:**")
+                    for n in negativos:
+                        st.markdown(f"- {n}")
+
+                # Observações
+                observacoes = alvo_analise.get("observacoes", [])
+                if observacoes:
+                    for obs in observacoes:
+                        st.caption(f"ℹ️ {obs}")
+
+            # Resumo da vizinhança
+            if total_analisados > 0:
+                st.markdown("---")
+                n_label = "imóvel" if total_analisados == 1 else "imóveis"
+                st.caption(f"📊 Vizinhança: {total_analisados} {n_label} analisado{'s' if total_analisados > 1 else ''} | Score médio da região: {score_medio:.2f}")
 
         # Ag.4
         score_final_infra = scores_infra.get("score_final", 0) or 0
