@@ -543,13 +543,11 @@ if "resultado" in st.session_state:
         terrenos_sep = resultado.get("resumo", {}).get("terrenos_excluidos", 0)
         with st.expander("🔍 Agente Coletor de Dados"):
             st.write(f"Encontramos **{total_encontrados}** imóveis à venda no bairro {bairro}, {cidade}/{estado}.")
-            col_c1, col_c2, col_c3 = st.columns(3)
+            col_c1, col_c2 = st.columns(2)
             with col_c1:
                 st.metric("Na rua", na_rua_n, f"de {total_encontrados}")
             with col_c2:
                 st.metric("Terrenos", terrenos_sep, "separados")
-            with col_c3:
-                st.metric("Fontes", len(portais) if portais else 1)
             if portais:
                 portais_str = " | ".join([f"{k} ({v})" for k, v in portais.items()])
                 st.caption(f"📡 Portais: {portais_str}")
