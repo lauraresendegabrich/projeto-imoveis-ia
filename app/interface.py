@@ -556,11 +556,11 @@ if "resultado" in st.session_state:
             st.write(f"Encontramos **{total_encontrados}** imóveis à venda no bairro {bairro}, {cidade}/{estado}.")
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
-                st.metric("Total", total_encontrados)
+                st.metric("Total", total_encontrados, f"{len(portais)} fontes")
             with col_c2:
-                st.metric("Na rua", na_rua_n)
+                st.metric("Na rua", na_rua_n, f"de {total_encontrados}")
             with col_c3:
-                st.metric("Terrenos", terrenos_sep)
+                st.metric("Terrenos", terrenos_sep, "separados")
 
         # Ag.2
         cluster_a = resultado.get("resumo", {}).get("cluster_a", len(confirmados))
