@@ -975,8 +975,8 @@ def analisar_comparaveis(
                 f"fotos={analise_alvo['fotos_analisadas']}")
     time.sleep(2.0)  # 2s entre chamadas
 
-    # Limita a 20 comparaveis (os melhores por ranking_llm)
-    MAX_COMPARAVEIS_AG3 = 20
+    # Limita a 10 comparaveis (os melhores por ranking_llm)
+    MAX_COMPARAVEIS_AG3 = 10
     if len(comparaveis) > MAX_COMPARAVEIS_AG3:
         # Ordena por ranking_llm (menor = melhor) e pega os top 20
         comparaveis.sort(key=lambda x: x.get("ranking_llm") or 999)
