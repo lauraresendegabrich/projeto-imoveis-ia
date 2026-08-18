@@ -117,7 +117,7 @@ with st.sidebar:
 
         st.markdown("**📸 Fotos do imóvel** (opcional, máx. 8)")
         st.caption("Adicione fotos para uma avaliação mais precisa.")
-        link_anuncio = st.text_input("Link do anúncio (extrai fotos automaticamente)", value="", help="Cole o link do VivaReal/ZAP e as fotos serão extraídas")
+        link_anuncio = st.text_input("Link do anúncio (extrai fotos automaticamente)", value="", help="Cole o link de qualquer portal imobiliário e as fotos serão extraídas")
         fotos_texto = st.text_area("Ou cole links das fotos (um por linha)", value="", height=60)
 
         submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
@@ -200,19 +200,48 @@ elif submitted:
 
     # Processa fotos conforme opção escolhida
     fotos_final = []
-    if link_anuncio and ("vivareal" in link_anuncio or "zap" in link_anuncio):
-        # Extrai fotos do link do anúncio
+    if link_anuncio:
         import requests as req_fotos
         import re as re_fotos
         try:
-            r = req_fotos.get(link_anuncio, timeout=10)
+            r = req_fotos.get(link_anuncio, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code == 200:
-                hashes = re_fotos.findall(r'resizedimgs\.vivareal\.com/img/vr-listing/([a-f0-9]{32})/', r.text)
-                hashes_unicos = list(dict.fromkeys(hashes))
-                fotos_final = [
-                    f"https://resizedimgs.vivareal.com/img/vr-listing/{h}/imovel.webp?action=fit-in&dimension=870x653"
-                    for h in hashes_unicos[:8]
-                ]
+                # Tentativa 1: padrão VivaReal/ZAP (hashes)
+                if "vivareal" in link_anuncio or "zap" in link_anuncio:
+                    hashes = re_fotos.findall(r'resizedimgs\.vivareal\.com/img/vr-listing/([a-f0-9]{32})/', r.text)
+                    hashes_unicos = list(dict.fromkeys(hashes))
+                    fotos_final = [
+                        f"https://resizedimgs.vivareal.com/img/vr-listing/{h}/imovel.webp?action=fit-in&dimension=870x653"
+                        for h in hashes_unicos[:8]
+                    ]
+
+                # Tentativa 2: extração genérica de imagens (qualquer portal)
+                if not fotos_final:
+                    # Busca URLs de imagem em src/data-src de tags img e background-image
+                    urls_img = re_fotos.findall(r'(?:src|data-src|content)=["\']([^"\']+\.(?:jpg|jpeg|png|webp)[^"\']*)["\']', r.text, re_fotos.IGNORECASE)
+                    # Filtra: só imagens grandes (provavelmente fotos do imóvel)
+                    fotos_candidatas = []
+                    for url in urls_img:
+                        # Ignora ícones, logos, thumbnails pequenos
+                        if any(x in url.lower() for x in ["logo", "icon", "favicon", "avatar", "thumb_small", "1x1", "placeholder"]):
+                            continue
+                        # Completa URL relativa
+                        if url.startswith("//"):
+                            url = "https:" + url
+                        elif url.startswith("/"):
+                            from urllib.parse import urlparse
+                            parsed = urlparse(link_anuncio)
+                            url = f"{parsed.scheme}://{parsed.netloc}{url}"
+                        if url.startswith("http"):
+                            fotos_candidatas.append(url)
+                    # Remove duplicatas mantendo ordem
+                    vistos = set()
+                    fotos_unicas = []
+                    for u in fotos_candidatas:
+                        if u not in vistos:
+                            vistos.add(u)
+                            fotos_unicas.append(u)
+                    fotos_final = fotos_unicas[:8]
         except Exception:
             pass
     elif fotos_texto.strip():
