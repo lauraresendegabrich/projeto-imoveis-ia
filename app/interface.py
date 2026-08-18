@@ -704,7 +704,7 @@ if "resultado" in st.session_state:
                         dados_tabela.append({
                             "Preço": f"R$ {preco_val:,.0f}" if preco_val else "-",
                             "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
-                            "Quartos": comp.get("bedrooms") or comp.get("quartos", "?"),
+                            "Rua": comp.get("street") or comp.get("rua") or "-",
                             "Bairro": comp.get("neighborhood") or comp.get("bairro", "?"),
                             "Estado": estado_cons,
                             "Padrão": padrao_tab,
