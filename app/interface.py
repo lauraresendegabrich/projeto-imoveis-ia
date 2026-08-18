@@ -905,26 +905,14 @@ if "resultado" in st.session_state:
             st.write(f"- Valor de liquidez: **{fmt_brl(valor_liq)}** (valor sugerido para venda rápida — desconto de 10%)")
             st.write(f"- Tempo estimado de venda: **{tempo}**")
 
-            # Detalhes do cálculo
+            # Detalhes do cálculo (simplificado)
             st.markdown("---")
-            st.caption("Como chegamos nesse valor:")
             calc_terreno = preco.get("calculo_terreno", {})
             calc_constr_det = preco.get("calculo_construcao", {})
             terreno_aplicado = calc_terreno.get("aplicado", False)
 
             if terreno_aplicado:
-                m2_terreno = calc_terreno.get('valor_m2_referencia', 0)
-                area_terreno = calc_terreno.get('area_terreno_m2', 0)
-                val_terreno = calc_terreno.get('valor_terreno_medio', 0)
-                st.markdown(f"**Terreno:** {fmt_brl(m2_terreno, 2)}/m² × {area_terreno:.0f}m² = **{fmt_brl(val_terreno)}**")
-
-            m2_constr = calc_constr_det.get('valor_m2_referencia', 0)
-            area_constr = calc_constr_det.get('area_construida_m2', 0)
-            val_constr = calc_constr_det.get('valor_construcao_medio', 0)
-            st.markdown(f"**Construção:** {fmt_brl(m2_constr, 2)}/m² × {area_constr:.0f}m² = **{fmt_brl(val_constr)}**")
-
-            if terreno_aplicado:
-                st.markdown(f"**Total:** {fmt_brl(val_terreno)} + {fmt_brl(val_constr)} = **{fmt_brl(valor_med)}**")
+                st.caption(f"Terreno separado no cálculo (lote de {calc_terreno.get('area_terreno_m2', 0):.0f}m²)")
 
             st.caption(f"Método: {preco.get('metodo_estatistico', '?')}")
 
