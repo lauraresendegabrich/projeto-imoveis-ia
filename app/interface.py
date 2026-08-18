@@ -870,30 +870,34 @@ if "resultado" in st.session_state:
         valor_med = avaliacao.get("valor_medio_imovel", 0)
         valor_liq = avaliacao.get("valor_liquidez", 0)
         with st.expander("💰 Agente Estimador de Preço"):
-            st.write(f"Com base nos imóveis da vizinhança, o valor médio do m² é **{fmt_brl(m2_ref, 2)}**.")
+            st.write(f"Com base nos imóveis da vizinhança, o valor médio do m² da construção é **{fmt_brl(m2_ref, 2)}**.")
             st.write(f"Para o seu imóvel de {area_calc:.0f}m²:")
             st.write(f"- Valor médio estimado: **{fmt_brl(valor_med)}**")
-            st.write(f"- Valor de liquidez (-10%): **{fmt_brl(valor_liq)}**")
+            st.write(f"- Valor de liquidez: **{fmt_brl(valor_liq)}** (valor sugerido para venda rápida — desconto de 10%)")
             st.write(f"- Tempo estimado de venda: **{tempo}**")
 
             # Detalhes do cálculo
             st.markdown("---")
-            st.caption("Detalhes do cálculo:")
-            col_d, col_e = st.columns(2)
-            with col_d:
-                st.markdown("**Terreno**")
-                calc_terreno = preco.get("calculo_terreno", {})
-                st.write(f"- Aplicado: {'Sim' if calc_terreno.get('aplicado') else 'Não'}")
-                st.write(f"- M² referência: {fmt_brl(calc_terreno.get('valor_m2_referencia', 0), 2)}")
-                st.write(f"- Área: {calc_terreno.get('area_terreno_m2', 0)} m²")
-                st.write(f"- Valor médio: {fmt_brl(calc_terreno.get('valor_terreno_medio', 0))}")
-            with col_e:
-                st.markdown("**Construção**")
-                calc_constr_det = preco.get("calculo_construcao", {})
-                st.write(f"- M² referência: {fmt_brl(calc_constr_det.get('valor_m2_referencia', 0), 2)}")
-                st.write(f"- Área: {calc_constr_det.get('area_construida_m2', 0)} m²")
-                st.write(f"- Valor médio: {fmt_brl(calc_constr_det.get('valor_construcao_medio', 0))}")
-            st.write(f"**Método:** {preco.get('metodo_estatistico', '?')}")
+            st.caption("Como chegamos nesse valor:")
+            calc_terreno = preco.get("calculo_terreno", {})
+            calc_constr_det = preco.get("calculo_construcao", {})
+            terreno_aplicado = calc_terreno.get("aplicado", False)
+
+            if terreno_aplicado:
+                m2_terreno = calc_terreno.get('valor_m2_referencia', 0)
+                area_terreno = calc_terreno.get('area_terreno_m2', 0)
+                val_terreno = calc_terreno.get('valor_terreno_medio', 0)
+                st.markdown(f"**Terreno:** {fmt_brl(m2_terreno, 2)}/m² × {area_terreno:.0f}m² = **{fmt_brl(val_terreno)}**")
+
+            m2_constr = calc_constr_det.get('valor_m2_referencia', 0)
+            area_constr = calc_constr_det.get('area_construida_m2', 0)
+            val_constr = calc_constr_det.get('valor_construcao_medio', 0)
+            st.markdown(f"**Construção:** {fmt_brl(m2_constr, 2)}/m² × {area_constr:.0f}m² = **{fmt_brl(val_constr)}**")
+
+            if terreno_aplicado:
+                st.markdown(f"**Total:** {fmt_brl(val_terreno)} + {fmt_brl(val_constr)} = **{fmt_brl(valor_med)}**")
+
+            st.caption(f"Método: {preco.get('metodo_estatistico', '?')}")
 
             # Comparação com preço anunciado
             if imovel_alvo_export.get("price") and imovel_alvo_export["price"] > 0:
