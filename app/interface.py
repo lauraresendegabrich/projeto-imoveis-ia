@@ -342,7 +342,10 @@ elif submitted:
             total_analisados_zona = len(confirmados) + len(fora)
             raio_usado = zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros") or zona_resultado.get("zona_homogenea", {}).get("raio_metros") or 700
             with log_area:
-                st.success(f"✅ Zona homogênea definida (raio {raio_usado}m): **{len(confirmados)}** imóveis na zona, {len(fora)} fora")
+                # Separa comparaveis e terrenos na zona pra log claro
+                terrenos_na_zona = [c for c in confirmados if (c.get("propertyType", "") or "").lower() in ("terrenos", "terreno", "lote", "residential_allotment_land", "allotment_land")]
+                comparaveis_na_zona = [c for c in confirmados if c not in terrenos_na_zona]
+                st.success(f"✅ Zona homogênea definida (raio {raio_usado}m): **{len(comparaveis_na_zona)} comparáveis** e **{len(terrenos_na_zona)} terrenos** na zona")
                 if len(fora) > len(confirmados):
                     st.caption("ℹ️ Muitos imóveis foram descartados porque estão longe. O sistema só usa imóveis próximos para garantir que o valor reflete a sua vizinhança.")
         except Exception as e:
