@@ -17,6 +17,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+
+def fmt_brl(valor, decimais=0):
+    """Formata valor monetário no padrão brasileiro: R$ 1.234.567,89"""
+    try:
+        valor = float(valor)
+    except (ValueError, TypeError):
+        return "R$ 0"
+    if decimais > 0:
+        texto = f"{valor:,.{decimais}f}"
+    else:
+        texto = f"{valor:,.0f}"
+    # Converte formato americano (1,234,567.89) pra brasileiro (1.234.567,89)
+    texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {texto}"
+
 # Streamlit Cloud: carrega secrets como variáveis de ambiente
 try:
     for key, value in st.secrets.items():
@@ -518,10 +533,10 @@ if "resultado" in st.session_state:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             valor_medio = avaliacao.get("valor_medio_imovel", 0)
-            st.metric("💰 Valor Médio Estimado", f"R$ {valor_medio:,.0f}")
+            st.metric("💰 Valor Médio Estimado", f"{fmt_brl(valor_medio)}")
         with col_b:
             valor_liq = avaliacao.get("valor_liquidez", 0)
-            st.metric("⚡ Valor de Liquidez (-10%)", f"R$ {valor_liq:,.2f}")
+            st.metric("⚡ Valor de Liquidez (-10%)", f"{fmt_brl(valor_liq)}")
         with col_c:
             tempo = liquidez_info.get("tempo_estimado", "?")
             st.metric("⏱️ Tempo Estimado de Venda", tempo)
@@ -702,7 +717,7 @@ if "resultado" in st.session_state:
                         except (ValueError, TypeError):
                             preco_val = 0
                         dados_tabela.append({
-                            "Preço": f"R$ {preco_val:,.0f}" if preco_val else "-",
+                            "Preço": f"{fmt_brl(preco_val)}" if preco_val else "-",
                             "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
                             "Rua": comp.get("street") or comp.get("rua") or "-",
                             "Bairro": comp.get("neighborhood") or comp.get("bairro", "?"),
@@ -869,15 +884,15 @@ if "resultado" in st.session_state:
                 st.markdown("**Terreno**")
                 calc_terreno = preco.get("calculo_terreno", {})
                 st.write(f"- Aplicado: {'Sim' if calc_terreno.get('aplicado') else 'Não'}")
-                st.write(f"- M² referência: R$ {calc_terreno.get('valor_m2_referencia', 0):,.2f}")
+                st.write(f"- M² referência: {fmt_brl(calc_terreno.get('valor_m2_referencia', 0), 2)}")
                 st.write(f"- Área: {calc_terreno.get('area_terreno_m2', 0)} m²")
-                st.write(f"- Valor médio: R$ {calc_terreno.get('valor_terreno_medio', 0):,.2f}")
+                st.write(f"- Valor médio: {fmt_brl(calc_terreno.get('valor_terreno_medio', 0))}")
             with col_e:
                 st.markdown("**Construção**")
                 calc_constr_det = preco.get("calculo_construcao", {})
-                st.write(f"- M² referência: R$ {calc_constr_det.get('valor_m2_referencia', 0):,.2f}")
+                st.write(f"- M² referência: {fmt_brl(calc_constr_det.get('valor_m2_referencia', 0), 2)}")
                 st.write(f"- Área: {calc_constr_det.get('area_construida_m2', 0)} m²")
-                st.write(f"- Valor médio: R$ {calc_constr_det.get('valor_construcao_medio', 0):,.2f}")
+                st.write(f"- Valor médio: {fmt_brl(calc_constr_det.get('valor_construcao_medio', 0))}")
             st.write(f"**Método:** {preco.get('metodo_estatistico', '?')}")
 
             # Comparação com preço anunciado
@@ -905,8 +920,8 @@ Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas}
 
 RESULTADO DA AVALIAÇÃO
 {'-'*50}
-Valor Médio Estimado: R$ {avaliacao.get('valor_medio_imovel', 0):,.2f}
-Valor de Liquidez (-10%): R$ {avaliacao.get('valor_liquidez', 0):,.2f}
+Valor Médio Estimado: {fmt_brl(avaliacao.get('valor_medio_imovel', 0))}
+Valor de Liquidez (-10%): {fmt_brl(avaliacao.get('valor_liquidez', 0))}
 Tempo Estimado de Venda: {liquidez_info.get('tempo_estimado', '?')}
 
 MÉTODO
