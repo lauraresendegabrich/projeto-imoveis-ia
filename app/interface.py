@@ -870,10 +870,10 @@ if "resultado" in st.session_state:
         valor_med = avaliacao.get("valor_medio_imovel", 0)
         valor_liq = avaliacao.get("valor_liquidez", 0)
         with st.expander("💰 Agente Estimador de Preço"):
-            st.write(f"Com base nos imóveis da vizinhança, o valor médio do m² é **R$ {m2_ref:,.2f}**.")
+            st.write(f"Com base nos imóveis da vizinhança, o valor médio do m² é **{fmt_brl(m2_ref, 2)}**.")
             st.write(f"Para o seu imóvel de {area_calc:.0f}m²:")
-            st.write(f"- Valor médio estimado: **R$ {valor_med:,.0f}**")
-            st.write(f"- Valor de liquidez (-10%): **R$ {valor_liq:,.0f}**")
+            st.write(f"- Valor médio estimado: **{fmt_brl(valor_med)}**")
+            st.write(f"- Valor de liquidez (-10%): **{fmt_brl(valor_liq)}**")
             st.write(f"- Tempo estimado de venda: **{tempo}**")
 
             # Detalhes do cálculo
@@ -902,11 +902,11 @@ if "resultado" in st.session_state:
                 if valor_med > 0:
                     diferenca_pct = ((preco_anunc - valor_med) / valor_med) * 100
                     if diferenca_pct > 5:
-                        st.warning(f"O preço anunciado (R$ {preco_anunc:,.0f}) está {diferenca_pct:.1f}% acima do valor médio da região (R$ {valor_med:,.0f})")
+                        st.warning(f"O preço anunciado ({fmt_brl(preco_anunc)}) está {diferenca_pct:.1f}% acima do valor médio da região ({fmt_brl(valor_med)})")
                     elif diferenca_pct < -5:
-                        st.success(f"O preço anunciado (R$ {preco_anunc:,.0f}) está {abs(diferenca_pct):.1f}% abaixo do valor médio da região (R$ {valor_med:,.0f}) — boa oportunidade")
+                        st.success(f"O preço anunciado ({fmt_brl(preco_anunc)}) está {abs(diferenca_pct):.1f}% abaixo do valor médio da região ({fmt_brl(valor_med)}) — boa oportunidade")
                     else:
-                        st.info(f"O preço anunciado (R$ {preco_anunc:,.0f}) está alinhado com o valor médio da região (R$ {valor_med:,.0f}) — diferença de {abs(diferenca_pct):.1f}%")
+                        st.info(f"O preço anunciado ({fmt_brl(preco_anunc)}) está alinhado com o valor médio da região ({fmt_brl(valor_med)}) — diferença de {abs(diferenca_pct):.1f}%")
 
         st.divider()
 
