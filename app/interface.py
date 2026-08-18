@@ -598,7 +598,8 @@ if "resultado" in st.session_state:
 
             # Detalhes da zona homogênea
             st.markdown("---")
-            st.caption("Zona homogênea — vizinhança com padrão construtivo parecido")
+            st.markdown("**Zona homogênea**")
+            st.write("A zona homogênea é a área ao redor do seu imóvel onde as construções têm características parecidas (mesmo tipo, tamanho e padrão). Só imóveis dentro dessa zona são usados no cálculo do valor, porque representam melhor o mercado local.")
             if zh:
                 st.write(f"- Raio utilizado: **{raio} metros**")
                 st.write(f"- Padrão construtivo: {zh.get('padrao_construtivo', 'não disponível')}")
