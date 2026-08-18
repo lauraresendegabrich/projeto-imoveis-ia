@@ -617,107 +617,6 @@ if "resultado" in st.session_state:
             if os.path.exists(img_path):
                 st.image(img_path, caption="Imagem de satélite com marcador no imóvel alvo", use_container_width=True)
 
-            # Tabela de comparáveis
-            st.markdown("---")
-            st.caption("Imóveis comparáveis ao seu que estão na zona homogênea")
-            # Usa comparáveis do Ag.3 (têm análise qualitativa) se disponível
-            ag3_comps = resultado.get("analise_qualitativa", {})
-            comparaveis_tabela = ag3_comps.get("comparaveis", []) if ag3_comps else []
-            # Fallback: zona homogênea (sem análise qualitativa)
-            if not comparaveis_tabela:
-                zona_data = resultado.get("zona_homogenea", {})
-                comparaveis_tabela = zona_data.get("comparaveis_confirmados", []) if zona_data else resultado.get("comparaveis", [])
-            if comparaveis_tabela:
-                import pandas as pd
-                dados_tabela = []
-                for comp in comparaveis_tabela:
-                    url_comp = comp.get("url", "")
-                    link = f"[ver]({url_comp})" if url_comp else ""
-                    analise = comp.get("analise_qualitativa", {})
-                    estado_cons = analise.get("estado_conservacao", "-")
-                    padrao_tab = analise.get("padrao_acabamento", "-")
-                    score_q = analise.get("scores", {}).get("score_qualitativo", "-")
-                    # Preço: tenta price (float) ou preco (string do Athena)
-                    preco_val = comp.get("price") or comp.get("preco") or 0
-                    try:
-                        preco_val = float(preco_val)
-                    except (ValueError, TypeError):
-                        preco_val = 0
-                    dados_tabela.append({
-                        "Preço": f"R$ {preco_val:,.0f}" if preco_val else "-",
-                        "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
-                        "Quartos": comp.get("bedrooms") or comp.get("quartos", "?"),
-                        "Bairro": comp.get("neighborhood") or comp.get("bairro", "?"),
-                        "Estado": estado_cons,
-                        "Padrão": padrao_tab,
-                        "Score": score_q,
-                        "Anúncio": link,
-                    })
-                df = pd.DataFrame(dados_tabela)
-                st.markdown(df.to_markdown(index=False), unsafe_allow_html=True)
-
-                # Gráfico scatter: Preço × Área (com valor estimado do alvo)
-                precos_scatter = []
-                areas_scatter = []
-                nomes_scatter = []
-                for c in comparaveis_tabela:
-                    p = c.get("price") or c.get("preco") or 0
-                    a = c.get("area") or c.get("area_construida") or 0
-                    try:
-                        p = float(p)
-                        a = float(a)
-                        if p > 0 and a > 0:
-                            precos_scatter.append(p)
-                            areas_scatter.append(a)
-                            rua_c = c.get("street") or c.get("rua") or c.get("neighborhood") or "?"
-                            nomes_scatter.append(rua_c[:25])
-                    except (ValueError, TypeError):
-                        pass
-                if precos_scatter:
-                    import plotly.graph_objects as go
-                    fig = go.Figure()
-                    # Comparáveis
-                    fig.add_trace(go.Scatter(
-                        x=areas_scatter, y=precos_scatter,
-                        mode="markers",
-                        marker=dict(size=10, color="#636EFA"),
-                        text=nomes_scatter,
-                        hovertemplate="<b>%{text}</b><br>Área: %{x}m²<br>Preço: R$ %{y:,.0f}<extra></extra>",
-                        name="Comparáveis",
-                    ))
-                    # Valor estimado do alvo
-                    area_alvo = imovel_alvo.get("area", 0) or 0
-                    valor_est = (resultado.get("preco_estimado", {}).get("avaliacao_planilha") or {}).get("valor_medio_imovel", 0)
-                    if area_alvo and valor_est:
-                        fig.add_trace(go.Scatter(
-                            x=[float(area_alvo)], y=[float(valor_est)],
-                            mode="markers",
-                            marker=dict(size=14, color="#EF553B", symbol="diamond"),
-                            hovertemplate="<b>Seu imóvel</b><br>Área: %{x}m²<br>Valor estimado: R$ %{y:,.0f}<extra></extra>",
-                            name="Valor estimado",
-                        ))
-                    # Linha de tendência se 3+ pontos
-                    if len(precos_scatter) >= 3:
-                        import numpy as np
-                        z = np.polyfit(areas_scatter, precos_scatter, 1)
-                        x_line = [min(areas_scatter) * 0.9, max(areas_scatter) * 1.1]
-                        y_line = [z[0] * x + z[1] for x in x_line]
-                        fig.add_trace(go.Scatter(
-                            x=x_line, y=y_line,
-                            mode="lines",
-                            line=dict(dash="dash", color="gray", width=1),
-                            name="Tendência",
-                            hoverinfo="skip",
-                        ))
-                    fig.update_layout(
-                        xaxis_title="Área (m²)",
-                        yaxis_title="Preço (R$)",
-                        height=300,
-                        margin=dict(l=20, r=20, t=30, b=20),
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-
         # Ag.3
         score_medio = resumo3.get("score_qualitativo_medio", 0) or 0
         total_analisados = resumo3.get("total_analisados", 0) or 0
@@ -766,6 +665,99 @@ if "resultado" in st.session_state:
                     st.metric("Score médio da região", f"{score_medio:.2f}")
                 with col_v2:
                     st.metric("Imóveis analisados", total_analisados)
+
+                # Tabela de comparáveis na zona
+                ag3_comps = resultado.get("analise_qualitativa", {})
+                comparaveis_tabela = ag3_comps.get("comparaveis", []) if ag3_comps else []
+                if not comparaveis_tabela:
+                    zona_data = resultado.get("zona_homogenea", {})
+                    comparaveis_tabela = zona_data.get("comparaveis_confirmados", []) if zona_data else resultado.get("comparaveis", [])
+                if comparaveis_tabela:
+                    import pandas as pd
+                    dados_tabela = []
+                    for comp in comparaveis_tabela:
+                        url_comp = comp.get("url", "")
+                        link = f"[ver]({url_comp})" if url_comp else ""
+                        analise = comp.get("analise_qualitativa", {})
+                        estado_cons = analise.get("estado_conservacao", "-")
+                        padrao_tab = analise.get("padrao_acabamento", "-")
+                        score_q = analise.get("scores", {}).get("score_qualitativo", "-")
+                        preco_val = comp.get("price") or comp.get("preco") or 0
+                        try:
+                            preco_val = float(preco_val)
+                        except (ValueError, TypeError):
+                            preco_val = 0
+                        dados_tabela.append({
+                            "Preço": f"R$ {preco_val:,.0f}" if preco_val else "-",
+                            "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
+                            "Quartos": comp.get("bedrooms") or comp.get("quartos", "?"),
+                            "Bairro": comp.get("neighborhood") or comp.get("bairro", "?"),
+                            "Estado": estado_cons,
+                            "Padrão": padrao_tab,
+                            "Score": score_q,
+                            "Anúncio": link,
+                        })
+                    df = pd.DataFrame(dados_tabela)
+                    st.markdown(df.to_markdown(index=False), unsafe_allow_html=True)
+
+                    # Gráfico scatter: Preço × Área
+                    precos_scatter = []
+                    areas_scatter = []
+                    nomes_scatter = []
+                    for c in comparaveis_tabela:
+                        p = c.get("price") or c.get("preco") or 0
+                        a = c.get("area") or c.get("area_construida") or 0
+                        try:
+                            p = float(p)
+                            a = float(a)
+                            if p > 0 and a > 0:
+                                precos_scatter.append(p)
+                                areas_scatter.append(a)
+                                rua_c = c.get("street") or c.get("rua") or c.get("neighborhood") or "?"
+                                nomes_scatter.append(rua_c[:25])
+                        except (ValueError, TypeError):
+                            pass
+                    if precos_scatter:
+                        import plotly.graph_objects as go
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=areas_scatter, y=precos_scatter,
+                            mode="markers",
+                            marker=dict(size=10, color="#636EFA"),
+                            text=nomes_scatter,
+                            hovertemplate="<b>%{text}</b><br>Área: %{x}m²<br>Preço: R$ %{y:,.0f}<extra></extra>",
+                            name="Comparáveis",
+                        ))
+                        area_alvo = imovel_alvo.get("area", 0) or 0
+                        valor_est = (resultado.get("preco_estimado", {}).get("avaliacao_planilha") or {}).get("valor_medio_imovel", 0)
+                        if area_alvo and valor_est:
+                            fig.add_trace(go.Scatter(
+                                x=[float(area_alvo)], y=[float(valor_est)],
+                                mode="markers",
+                                marker=dict(size=14, color="#EF553B", symbol="diamond"),
+                                hovertemplate="<b>Seu imóvel</b><br>Área: %{x}m²<br>Valor estimado: R$ %{y:,.0f}<extra></extra>",
+                                name="Valor estimado",
+                            ))
+                        if len(precos_scatter) >= 3:
+                            import numpy as np
+                            z = np.polyfit(areas_scatter, precos_scatter, 1)
+                            x_line = [min(areas_scatter) * 0.9, max(areas_scatter) * 1.1]
+                            y_line = [z[0] * x + z[1] for x in x_line]
+                            fig.add_trace(go.Scatter(
+                                x=x_line, y=y_line,
+                                mode="lines",
+                                line=dict(dash="dash", color="gray", width=1),
+                                name="Tendência",
+                                hoverinfo="skip",
+                            ))
+                        fig.update_layout(
+                            xaxis_title="Área (m²)",
+                            yaxis_title="Preço (R$)",
+                            height=300,
+                            margin=dict(l=20, r=20, t=30, b=20),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
 
         # Ag.4
         score_final_infra = scores_infra.get("score_final", 0) or 0
