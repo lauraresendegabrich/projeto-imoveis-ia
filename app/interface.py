@@ -810,7 +810,7 @@ if "resultado" in st.session_state:
         valor_med = avaliacao.get("valor_medio_imovel", 0)
         valor_liq = avaliacao.get("valor_liquidez", 0)
         with st.expander("💰 Agente Estimador de Preço"):
-            st.write(f"Com base nos imóveis da vizinhança de padrão **{padrao_usado}**, o valor médio do m² é **R$ {m2_ref:,.2f}**.")
+            st.write(f"Com base nos imóveis da vizinhança, o valor médio do m² é **R$ {m2_ref:,.2f}**.")
             st.write(f"Para o seu imóvel de {area_calc:.0f}m²:")
             st.write(f"- Valor médio estimado: **R$ {valor_med:,.0f}**")
             st.write(f"- Valor de liquidez (-10%): **R$ {valor_liq:,.0f}**")
@@ -830,7 +830,6 @@ if "resultado" in st.session_state:
             with col_e:
                 st.markdown("**Construção**")
                 calc_constr_det = preco.get("calculo_construcao", {})
-                st.write(f"- Padrão: {padrao_usado}")
                 st.write(f"- M² referência: R$ {calc_constr_det.get('valor_m2_referencia', 0):,.2f}")
                 st.write(f"- Área: {calc_constr_det.get('area_construida_m2', 0)} m²")
                 st.write(f"- Valor médio: R$ {calc_constr_det.get('valor_construcao_medio', 0):,.2f}")
