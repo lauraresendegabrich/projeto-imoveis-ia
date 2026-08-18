@@ -570,7 +570,7 @@ if "resultado" in st.session_state:
             # Monta texto compacto em um único bloco markdown
             linhas = [f"Dos {total_encontrados} imóveis encontrados:"]
             if terrenos_sep > 0:
-                linhas.append(f"- {terrenos_sep} são terrenos (separados para cálculo do m² do terreno — não entram na comparação)")
+                linhas.append(f"- {terrenos_sep} são terrenos (não entram na comparação direta)")
                 linhas.append(f"- {total_encontrados - terrenos_sep} foram analisados pela IA para identificar os mais parecidos com o seu")
             else:
                 linhas.append(f"- Todos foram analisados pela IA para identificar os mais parecidos com o seu")
@@ -589,9 +589,11 @@ if "resultado" in st.session_state:
                 zona_linhas.append(f"- Dos {cluster_a} comparáveis, **{len(comparaveis_zona_list)}** estão na zona homogênea (raio de {raio}m)")
             if terrenos_sep > 0:
                 if len(terrenos_zona_list) == terrenos_sep:
-                    zona_linhas.append(f"- Todos os **{terrenos_sep}** terrenos estão na zona homogênea")
+                    zona_linhas.append(f"- Todos os **{terrenos_sep}** terrenos estão na zona homogênea (serão usados no cálculo do m² do terreno)")
+                elif len(terrenos_zona_list) > 0:
+                    zona_linhas.append(f"- Dos {terrenos_sep} terrenos, **{len(terrenos_zona_list)}** estão na zona homogênea (serão usados no cálculo do m² do terreno)")
                 else:
-                    zona_linhas.append(f"- Dos {terrenos_sep} terrenos, **{len(terrenos_zona_list)}** estão na zona homogênea")
+                    zona_linhas.append(f"- Nenhum terreno na zona — cálculo do m² do terreno não será aplicado")
             st.markdown("\n".join(zona_linhas))
 
             # Detalhes da zona homogênea
