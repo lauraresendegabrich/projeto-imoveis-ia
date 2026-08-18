@@ -23,14 +23,14 @@ def fmt_brl(valor, decimais=0):
     try:
         valor = float(valor)
     except (ValueError, TypeError):
-        return "R$ 0"
+        return "R\\$ 0"
     if decimais > 0:
         texto = f"{valor:,.{decimais}f}"
     else:
         texto = f"{valor:,.0f}"
     # Converte formato americano (1,234,567.89) pra brasileiro (1.234.567,89)
     texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"R$ {texto}"
+    return f"R\\$ {texto}"
 
 # Streamlit Cloud: carrega secrets como variáveis de ambiente
 try:
