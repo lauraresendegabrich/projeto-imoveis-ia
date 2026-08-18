@@ -567,20 +567,32 @@ if "resultado" in st.session_state:
         cluster_b = resultado.get("resumo", {}).get("cluster_b", 0)
         terrenos_sep = resultado.get("resumo", {}).get("terrenos_excluidos", 0)
         with st.expander("📊 Agente Identificador de Comparáveis"):
-            st.write(f"Dos {total_encontrados} imóveis encontrados:")
+            # Monta texto compacto em um único bloco markdown
+            linhas = [f"Dos {total_encontrados} imóveis encontrados:"]
             if terrenos_sep > 0:
-                st.write(f"- {terrenos_sep} são terrenos (separados para cálculo do m² do terreno — não entram na comparação)")
-                st.write(f"- {total_encontrados - terrenos_sep} foram analisados pela inteligência artificial para identificar os mais parecidos com o seu")
+                linhas.append(f"- {terrenos_sep} são terrenos (separados para cálculo do m² do terreno — não entram na comparação)")
+                linhas.append(f"- {total_encontrados - terrenos_sep} foram analisados pela IA para identificar os mais parecidos com o seu")
             else:
-                st.write(f"- Todos foram analisados pela inteligência artificial para identificar os mais parecidos com o seu")
-            st.write(f"- **{cluster_a}** foram classificados como comparáveis (perfil similar ao seu)")
+                linhas.append(f"- Todos foram analisados pela IA para identificar os mais parecidos com o seu")
+            linhas.append(f"- **{cluster_a}** classificados como comparáveis (perfil similar ao seu)")
             if cluster_b > 0:
-                st.write(f"- {cluster_b} foram descartados (perfil muito diferente: área, quartos ou padrão incompatível)")
-            # Zona: mostra comparaveis e terrenos na zona separadamente
+                linhas.append(f"- {cluster_b} descartados (perfil muito diferente: área, quartos ou padrão incompatível)")
+            st.markdown("\n".join(linhas))
+
+            # Zona: mostra comparaveis e terrenos na zona
             terrenos_zona_list = [c for c in confirmados if (c.get("propertyType", "") or "").lower() in ("terrenos", "terreno", "lote", "residential_allotment_land", "allotment_land")]
             comparaveis_zona_list = [c for c in confirmados if c not in terrenos_zona_list]
-            st.write(f"- Dos {cluster_a} imóveis comparáveis, **{len(comparaveis_zona_list)}** estão na zona homogênea (raio de {raio}m)")
-            st.write(f"- Dos {terrenos_sep} terrenos coletados, **{len(terrenos_zona_list)}** estão na zona homogênea")
+            zona_linhas = []
+            if len(comparaveis_zona_list) == cluster_a:
+                zona_linhas.append(f"- Todos os **{cluster_a}** comparáveis estão na zona homogênea (raio de {raio}m)")
+            else:
+                zona_linhas.append(f"- Dos {cluster_a} comparáveis, **{len(comparaveis_zona_list)}** estão na zona homogênea (raio de {raio}m)")
+            if terrenos_sep > 0:
+                if len(terrenos_zona_list) == terrenos_sep:
+                    zona_linhas.append(f"- Todos os **{terrenos_sep}** terrenos estão na zona homogênea")
+                else:
+                    zona_linhas.append(f"- Dos {terrenos_sep} terrenos, **{len(terrenos_zona_list)}** estão na zona homogênea")
+            st.markdown("\n".join(zona_linhas))
 
             # Detalhes da zona homogênea
             st.markdown("---")
