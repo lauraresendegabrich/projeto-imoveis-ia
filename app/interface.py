@@ -570,7 +570,7 @@ if "resultado" in st.session_state:
             # Monta texto compacto em um único bloco markdown
             linhas = [f"Dos {total_encontrados} imóveis encontrados:"]
             if terrenos_sep > 0:
-                linhas.append(f"- {terrenos_sep} são terrenos (separados para cálculo do m² do terreno — não entram na comparação)")
+                linhas.append(f"- {terrenos_sep} são terrenos (não entram na comparação direta)")
                 linhas.append(f"- {total_encontrados - terrenos_sep} foram analisados pela IA para identificar os mais parecidos com o seu")
             else:
                 linhas.append(f"- Todos foram analisados pela IA para identificar os mais parecidos com o seu")
@@ -618,7 +618,7 @@ if "resultado" in st.session_state:
 
             # Tabela de comparáveis
             st.markdown("---")
-            st.caption("Imóveis usados no cálculo")
+            st.caption("Imóveis comparáveis ao seu que estão na zona homogênea")
             # Usa comparáveis do Ag.3 (têm análise qualitativa) se disponível
             ag3_comps = resultado.get("analise_qualitativa", {})
             comparaveis_tabela = ag3_comps.get("comparaveis", []) if ag3_comps else []
