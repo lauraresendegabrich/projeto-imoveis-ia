@@ -460,10 +460,18 @@ elif submitted:
     # Enriquece resumo com dados da coleta
     resumo["total_coletados"] = len(imoveis_coletados)
     resumo["tempo_coleta_s"] = round(tempo_ag1, 1)
-    # Conta portais
+    # Conta portais (normaliza nomes)
     portais_count = {}
     for im in imoveis_coletados:
         portal = im.get("portal") or im.get("source") or "Athena/S3"
+        # Normaliza variações
+        portal_lower = portal.lower()
+        if "vivareal" in portal_lower or "viva real" in portal_lower:
+            portal = "VivaReal"
+        elif "lugar" in portal_lower:
+            portal = "LugarCerto"
+        elif "athena" in portal_lower or "s3" in portal_lower:
+            portal = "Banco próprio"
         portais_count[portal] = portais_count.get(portal, 0) + 1
     resumo["portais"] = portais_count
     # Conta na rua vs bairro
@@ -546,16 +554,13 @@ if "resultado" in st.session_state:
         terrenos_sep = resultado.get("resumo", {}).get("terrenos_excluidos", 0)
         with st.expander("🔍 Agente Coletor de Dados"):
             st.write(f"Encontramos **{total_encontrados}** imóveis à venda no bairro {bairro}, {cidade}/{estado}.")
-            col_c1, col_c2 = st.columns(2)
+            col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
-                st.metric("Na rua", na_rua_n, f"de {total_encontrados}")
+                st.metric("Total", total_encontrados)
             with col_c2:
-                st.metric("Terrenos", terrenos_sep, "separados")
-            if portais:
-                portais_str = " | ".join([f"{k} ({v})" for k, v in portais.items()])
-                st.caption(f"📡 Portais: {portais_str}")
-            if tempo_coleta:
-                st.caption(f"⏱️ Tempo de coleta: {tempo_coleta:.0f}s")
+                st.metric("Na rua", na_rua_n)
+            with col_c3:
+                st.metric("Terrenos", terrenos_sep)
 
         # Ag.2
         cluster_a = resultado.get("resumo", {}).get("cluster_a", len(confirmados))
