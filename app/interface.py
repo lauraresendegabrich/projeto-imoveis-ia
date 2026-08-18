@@ -570,7 +570,7 @@ if "resultado" in st.session_state:
             # Monta texto compacto em um único bloco markdown
             linhas = [f"Dos {total_encontrados} imóveis encontrados:"]
             if terrenos_sep > 0:
-                linhas.append(f"- {terrenos_sep} são terrenos (analisados separadamente — servem para estimar quanto vale o terreno da região)")
+                linhas.append(f"- {terrenos_sep} são terrenos (separados para cálculo do m² do terreno — não entram na comparação)")
                 linhas.append(f"- {total_encontrados - terrenos_sep} foram analisados pela IA para identificar os mais parecidos com o seu")
             else:
                 linhas.append(f"- Todos foram analisados pela IA para identificar os mais parecidos com o seu")
