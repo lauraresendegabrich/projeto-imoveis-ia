@@ -666,6 +666,20 @@ if "resultado" in st.session_state:
                 with col_v2:
                     st.metric("Imóveis analisados", total_analisados)
 
+                # Comparação alvo vs vizinhança
+                score_alvo_val = alvo_analise.get("scores", {}).get("score_qualitativo", 0) if alvo_analise else 0
+                try:
+                    score_alvo_num = float(score_alvo_val)
+                except (ValueError, TypeError):
+                    score_alvo_num = 0
+                if score_alvo_num > 0 and score_medio > 0:
+                    if score_alvo_num > score_medio + 0.1:
+                        st.success(f"Seu imóvel (score {score_alvo_num:.2f}) está **acima da média** da vizinhança ({score_medio:.2f}) — melhor conservado e acabado que os vizinhos.")
+                    elif score_alvo_num < score_medio - 0.1:
+                        st.warning(f"Seu imóvel (score {score_alvo_num:.2f}) está **abaixo da média** da vizinhança ({score_medio:.2f}) — os imóveis vizinhos têm melhor conservação.")
+                    else:
+                        st.info(f"Seu imóvel (score {score_alvo_num:.2f}) está **na média** da vizinhança ({score_medio:.2f}).")
+
                 # Tabela de comparáveis na zona
                 ag3_comps = resultado.get("analise_qualitativa", {})
                 comparaveis_tabela = ag3_comps.get("comparaveis", []) if ag3_comps else []
