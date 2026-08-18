@@ -342,7 +342,7 @@ elif submitted:
             total_analisados_zona = len(confirmados) + len(fora)
             raio_usado = zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros") or zona_resultado.get("zona_homogenea", {}).get("raio_metros") or 700
             with log_area:
-                st.success(f"✅ Zona homogênea definida: **{len(confirmados)}** de {total_analisados_zona} imóveis estão na vizinhança (raio {raio_usado}m), {len(fora)} descartados por distância")
+                st.success(f"✅ Zona homogênea definida (raio {raio_usado}m): **{len(confirmados)}** imóveis na zona, {len(fora)} fora")
                 if len(fora) > len(confirmados):
                     st.caption("ℹ️ Muitos imóveis foram descartados porque estão longe. O sistema só usa imóveis próximos para garantir que o valor reflete a sua vizinhança.")
         except Exception as e:
