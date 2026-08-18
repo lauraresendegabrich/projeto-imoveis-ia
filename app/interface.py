@@ -817,15 +817,31 @@ if "resultado" in st.session_state:
                 if pois:
                     st.markdown("---")
                     st.caption("O que tem perto")
-                    for faixa_nome, faixa_label in [("0_400", "0 a 400m"), ("401_800", "401 a 800m"), ("801_1500", "801 a 1500m")]:
-                        faixa = pois.get(faixa_nome, {})
-                        total_faixa = sum(len(v) for v in faixa.values() if isinstance(v, list))
-                        if total_faixa > 0:
-                            st.markdown(f"**{faixa_label} ({total_faixa} pontos):**")
-                            for cat, items in faixa.items():
-                                if items and isinstance(items, list):
-                                    nomes = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in items[:5]]
-                                    st.write(f"  {cat}: {', '.join(nomes)}")
+                    # Mostra só a faixa mais próxima com 2 destaques por categoria
+                    faixa_perto = pois.get("0_400", {})
+                    total_perto = sum(len(v) for v in faixa_perto.values() if isinstance(v, list))
+                    faixa_media = pois.get("401_800", {})
+                    total_media = sum(len(v) for v in faixa_media.values() if isinstance(v, list))
+                    faixa_longe = pois.get("801_1500", {})
+                    total_longe = sum(len(v) for v in faixa_longe.values() if isinstance(v, list))
+
+                    if total_perto > 0:
+                        linhas_pois = []
+                        for cat, items in faixa_perto.items():
+                            if items and isinstance(items, list):
+                                nomes = [p.get('nome', '?') for p in items[:2]]
+                                extra = f" (+{len(items)-2})" if len(items) > 2 else ""
+                                linhas_pois.append(f"- **{cat}**: {', '.join(nomes)}{extra}")
+                        st.markdown(f"**Até 400m** ({total_perto} pontos):\n" + "\n".join(linhas_pois))
+
+                    # Resumo das outras faixas
+                    resumo_faixas = []
+                    if total_media > 0:
+                        resumo_faixas.append(f"401-800m: {total_media} pontos")
+                    if total_longe > 0:
+                        resumo_faixas.append(f"801-1500m: {total_longe} pontos")
+                    if resumo_faixas:
+                        st.caption(" | ".join(resumo_faixas))
 
         # Ag.5
         m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
