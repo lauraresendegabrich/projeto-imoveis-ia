@@ -60,6 +60,7 @@ COMO USAR:
     })
 """
 
+import time
 import logging
 from dotenv import load_dotenv
 
@@ -100,6 +101,8 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
         f"{imovel_alvo.get('cidade')}/{imovel_alvo.get('estado')}"
     )
 
+    t_pipeline_start = time.time()
+
     # ------------------------------------------------------------------
     # AGENTE 1 — Coleta de imóveis comparáveis
     # Apify (ocrad) → VivaReal + LugarCerto
@@ -108,12 +111,14 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     from agents.collector import coletar_imoveis
 
     logger.info("Agente 1: coletando imóveis...")
+    t_ag1_start = time.time()
     imoveis_coletados = coletar_imoveis(
         localizacao=imovel_alvo["localizacao"],
         tipo_imovel=imovel_alvo["tipo"],
         bairro=imovel_alvo.get("bairro", ""),
         rua=imovel_alvo.get("rua", ""),
     )
+    t_ag1 = time.time() - t_ag1_start
     logger.info(f"Agente 1 concluído: {len(imoveis_coletados)} imóveis coletados")
 
     if not imoveis_coletados:
@@ -142,13 +147,17 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     terrenos = []
     resumo = {}
     zona_resultado = None
+    t_ag2_clustering = 0.0
+    t_ag2_zona = 0.0
 
     try:
+        t_ag2_start = time.time()
         resultado_ag2 = identificar_comparaveis(
             imovel_alvo=imovel_alvo,
             imoveis_coletados=imoveis_coletados,
             usar_llm=True,
         )
+        t_ag2_clustering = time.time() - t_ag2_start
 
         comparaveis = resultado_ag2.get("comparaveis", [])
         terrenos    = resultado_ag2.get("terrenos", [])
@@ -187,6 +196,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     if os.getenv("GOOGLE_MAPS_KEY"):
         try:
             logger.info("Agente 2 — Zona homogênea: validando geograficamente...")
+            t_zona_start = time.time()
             endereco = (
                 f"{imovel_alvo.get('rua', '')}, "
                 f"{imovel_alvo.get('numero', '')}, "
@@ -202,6 +212,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
                 cidade=imovel_alvo.get("cidade", ""),
                 estado=imovel_alvo.get("estado", ""),
             )
+            t_ag2_zona = time.time() - t_zona_start
             confirmados = zona_resultado.get("comparaveis_confirmados", [])
             fora        = zona_resultado.get("fora_zona", [])
             logger.info(f"Zona homogênea: {len(confirmados)} na zona | {len(fora)} fora")
@@ -223,17 +234,22 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     resultado_ag3 = {}
     resultado_ag4 = {}
     falhas = []
+    t_ag3 = 0.0
+    t_ag4 = 0.0
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         # Agente 3 — Análise qualitativa (texto + fotos)
+        t_ag3_start = time.time()
         future_ag3 = executor.submit(analisar_comparaveis)
 
         # Agente 4 — Infraestrutura (POIs do entorno)
+        t_ag4_start = time.time()
         future_ag4 = executor.submit(avaliar_infraestrutura)
 
         # Coleta resultado do Agente 3 com tratamento de erro
         try:
             resultado_ag3 = future_ag3.result()
+            t_ag3 = time.time() - t_ag3_start
             if not resultado_ag3:
                 falhas.append("Agente 3 retornou vazio — analise qualitativa indisponivel")
                 logger.warning("Agente 3 retornou resultado vazio")
@@ -242,10 +258,12 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
         except Exception as e:
             falhas.append(f"Agente 3 falhou: {str(e)}")
             logger.error(f"Agente 3 falhou com erro: {e}")
+            t_ag3 = time.time() - t_ag3_start
 
         # Coleta resultado do Agente 4 com tratamento de erro
         try:
             resultado_ag4 = future_ag4.result()
+            t_ag4 = time.time() - t_ag4_start
             if not resultado_ag4:
                 falhas.append("Agente 4 retornou vazio — analise de infraestrutura indisponivel")
                 logger.warning("Agente 4 retornou resultado vazio")
@@ -254,6 +272,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
         except Exception as e:
             falhas.append(f"Agente 4 falhou: {str(e)}")
             logger.error(f"Agente 4 falhou com erro: {e}")
+            t_ag4 = time.time() - t_ag4_start
 
     # ------------------------------------------------------------------
     # AGENTE 5 — Estimativa de preço e liquidez
@@ -262,15 +281,36 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     from agents.price_liquidity import estimar_preco
 
     resultado_ag5 = {}
+    t_ag5 = 0.0
     try:
         logger.info("Agente 5: estimando preço e liquidez...")
+        t_ag5_start = time.time()
         resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
+        t_ag5 = time.time() - t_ag5_start
         logger.info(
             f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao_planilha', {}).get('valor_medio_imovel', '?'):,.2f}"
         )
     except Exception as e:
         falhas.append(f"Agente 5 falhou: {str(e)}")
         logger.error(f"Agente 5 falhou com erro: {e}")
+        t_ag5 = time.time() - t_ag5_start
+
+    # ------------------------------------------------------------------
+    # RESUMO DA EXECUCAO
+    # ------------------------------------------------------------------
+    t_total = time.time() - t_pipeline_start
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info(" RESUMO DA EXECUCAO ")
+    logger.info("=" * 50)
+    logger.info(f"Agente 1: {t_ag1:.1f}s")
+    logger.info(f"Agente 2 clustering: {t_ag2_clustering:.1f}s")
+    logger.info(f"Agente 2 zona: {t_ag2_zona:.1f}s")
+    logger.info(f"Agente 3: {t_ag3:.1f}s")
+    logger.info(f"Agente 4: {t_ag4:.1f}s")
+    logger.info(f"Agente 5: {t_ag5:.1f}s")
+    logger.info(f"Tempo total: {t_total:.1f}s")
+    logger.info("=" * 50)
 
     # ------------------------------------------------------------------
     # RESULTADO FINAL

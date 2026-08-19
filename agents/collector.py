@@ -873,7 +873,7 @@ def _coletar_ocrad(
       5. Extrai publishedAt via requests.get + regex (VivaReal/ZAP)
     """
     if not APIFY_TOKEN:
-        logger.warning("APIFY_TOKEN nao configurado - pulando coleta ocrad")
+        logger.warning("[Ag1][Apify] APIFY_TOKEN nao configurado - pulando coleta")
         return []
 
     token_ocrad = APIFY_TOKEN
@@ -885,12 +885,12 @@ def _coletar_ocrad(
     # Monta URLs de listagem para todos os portais
     urls = _montar_urls_listagem(tipo_imovel, bairro, cidade, estado)
     if not urls:
-        logger.warning("ocrad: nenhuma URL de listagem montada")
+        logger.warning("[Ag1][Apify] Nenhuma URL de listagem montada")
         return []
 
-    logger.info(f"ocrad: {len(urls)} URLs de listagem para raspar")
+    logger.info(f"[Ag1][Apify] {len(urls)} URLs de listagem para raspar")
     for url, limite in urls:
-        logger.info(f"  [{limite} itens] {url}")
+        logger.info(f"[Ag1][Apify]   [{limite} itens] {url}")
 
     # Envia para o actor
     # NOTA: Apify Proxy (useApifyProxy) testado e NAO funciona no free tier.
@@ -914,9 +914,9 @@ def _coletar_ocrad(
         r = requests.post(endpoint, json=payload, timeout=30)
         r.raise_for_status()
         run_id = r.json().get("data", {}).get("id")
-        logger.info(f"ocrad run iniciado: {run_id}")
+        logger.info(f"[Ag1][Apify] run iniciado: {run_id}")
     except Exception as e:
-        logger.error(f"ocrad: erro ao iniciar run: {e}")
+        logger.error(f"[Ag1][Apify] Erro ao iniciar run: {e}")
         return []
 
     # Polling ate concluir
@@ -925,11 +925,11 @@ def _coletar_ocrad(
     while time.time() - inicio < 600:
         try:
             status = requests.get(url_status, timeout=15).json().get("data", {}).get("status", "")
-            logger.info(f"ocrad status: {status}")
+            logger.info(f"[Ag1][Apify] status: {status}")
             if status == "SUCCEEDED":
                 break
             if status in ("FAILED", "ABORTED", "TIMED-OUT"):
-                logger.error(f"ocrad run falhou: {status}")
+                logger.error(f"[Ag1][Apify] run falhou: {status}")
                 return []
         except Exception:
             pass
@@ -940,10 +940,10 @@ def _coletar_ocrad(
         url_items = f"{APIFY_BASE_URL}/actor-runs/{run_id}/dataset/items?token={token_ocrad}&format=json"
         brutos = requests.get(url_items, timeout=30).json()
     except Exception as e:
-        logger.error(f"ocrad: erro ao baixar resultados: {e}")
+        logger.error(f"[Ag1][Apify] Erro ao baixar resultados: {e}")
         return []
 
-    logger.info(f"ocrad: {len(brutos)} brutos coletados")
+    logger.info(f"[Ag1][Apify] {len(brutos)} brutos coletados")
     salvar_dados(brutos, "imoveis_brutos_ocrad_ag1.json")
 
     # Normaliza e filtra
@@ -953,7 +953,7 @@ def _coletar_ocrad(
     # Extrai dados adicionais de cada imovel (publishedAt, description, bathrooms, etc.)
     # requests.get + regex: funciona pra VivaReal (dados no HTML estatico)
     # OLX/ImovelWeb/LugarCerto/MercadoLivre: ficam sem dados extras (bloqueio ou sem dados)
-    logger.info(f"Extraindo publishedAt de {len(filtrados)} imoveis...")
+    logger.info(f"[Ag1][Apify] Extraindo publishedAt de {len(filtrados)} imoveis...")
     pub_ok = 0
     for im in filtrados:
         url_im = im.get("url", "")
@@ -980,9 +980,9 @@ def _coletar_ocrad(
             im["images"] = dados_pagina["images"]
             im["imageCount"] = dados_pagina["imageCount"]
         time.sleep(1)
-    logger.info(f"publishedAt extraido: {pub_ok}/{len(filtrados)}")
+    logger.info(f"[Ag1][Apify] publishedAt extraido: {pub_ok}/{len(filtrados)}")
 
-    logger.info(f"ocrad: {len(filtrados)} imoveis apos filtros")
+    logger.info(f"[Ag1][Apify] {len(filtrados)} imoveis apos filtros")
     return filtrados
 
 
@@ -1104,7 +1104,7 @@ def coletar_imoveis(
             return dados
 
     t_total = time.time()
-    logger.info(f"Iniciando coleta | {localizacao} | tipo={tipo_imovel} | bairro={bairro} | rua={rua}")
+    logger.info(f"[Ag1] Iniciando coleta | {localizacao} | tipo={tipo_imovel} | bairro={bairro} | rua={rua}")
 
     partes = [p.strip() for p in localizacao.split(",")]
     cidade_nome = partes[0]
@@ -1118,9 +1118,9 @@ def coletar_imoveis(
             from services.athena_client import AthenaClient
 
             logger.info("=" * 55)
-            logger.info("FONTE PRINCIPAL: Amazon Athena (S3/Parquet)")
+            logger.info("[Ag1][Athena] FONTE PRINCIPAL: Amazon Athena (S3/Parquet)")
             logger.info("=" * 55)
-            logger.info(f"Athena: buscando dados em {cidade_nome}/{bairro or 'cidade toda'}...")
+            logger.info(f"[Ag1][Athena] Buscando dados em {cidade_nome}/{bairro or 'cidade toda'}...")
             client = AthenaClient()
 
             # ── ESTRATEGIA DE BUSCA ───────────────────────────────────
@@ -1168,12 +1168,12 @@ def coletar_imoveis(
 
                 total_tipo = imoveis_tipo_rua + imoveis_tipo_bairro
                 if total_tipo:
-                    logger.info(f"  {tipo_sql}: {len(imoveis_tipo_rua)} rua + {len(imoveis_tipo_bairro)} bairro = {len(total_tipo)} (limite {limite_tipo})")
+                    logger.info(f"[Ag1][Athena]   {tipo_sql}: {len(imoveis_tipo_rua)} rua + {len(imoveis_tipo_bairro)} bairro = {len(total_tipo)} (limite {limite_tipo})")
                 athena_imoveis.extend(total_tipo)
 
             # PASSO 3: Se nada encontrado, expande pra cidade
             if not athena_imoveis and bairro:
-                logger.info(f"Athena: bairro '{bairro}' sem resultados, expandindo pra cidade toda...")
+                logger.info(f"[Ag1][Athena] Bairro '{bairro}' sem resultados, expandindo pra cidade toda...")
                 tipo_principal = list(limites.keys())[0]  # casa ou apartamento
                 athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo=tipo_principal)
 
@@ -1189,7 +1189,7 @@ def coletar_imoveis(
                 athena_unicos.append(im)
             athena_imoveis = athena_unicos
 
-            logger.info(f"Athena: {len(athena_imoveis)} imoveis total")
+            logger.info(f"[Ag1][Athena] {len(athena_imoveis)} imoveis total")
 
             # Normaliza campos do Athena para o schema padrao
             for idx_athena, im in enumerate(athena_imoveis):
@@ -1198,8 +1198,8 @@ def coletar_imoveis(
                 # --- LOGS TEMPORARIOS DE DIAGNOSTICO (fotos) ---
                 if idx_athena < 3:
                     colunas_foto = [k for k in im.keys() if any(x in k.lower() for x in ["foto", "image", "photo", "picture", "img"])]
-                    logger.info(f"  [athena-fotos] id={im.get('listing_id') or im.get('url','?')[:50]} | colunas_disponiveis={colunas_foto}")
-                    logger.info(f"  [athena-fotos] fotos_raw={str(im.get('fotos_urls',''))[:150]}")
+                    logger.info(f"[Ag1][Athena] fotos_diag id={im.get('listing_id') or im.get('url','?')[:50]} | colunas={colunas_foto}")
+                    logger.info(f"[Ag1][Athena] fotos_raw={str(im.get('fotos_urls',''))[:150]}")
 
                 fotos_raw = im.get("fotos_urls") or ""
                 if fotos_raw:
@@ -1221,7 +1221,7 @@ def coletar_imoveis(
 
                 # Log apos normalizacao (primeiros 3)
                 if idx_athena < 3:
-                    logger.info(f"  [athena-fotos] fotos_normalizadas={len(im['images'])}")
+                    logger.info(f"[Ag1][Athena] fotos_normalizadas={len(im['images'])}")
 
                 if im.get("preco") and not im.get("price"):
                     try:
@@ -1279,21 +1279,21 @@ def coletar_imoveis(
                     im["propertyType"] = tipo_raw
 
         except Exception as e:
-            logger.warning(f"Athena indisponivel: {e}")
+            logger.warning(f"[Ag1][Athena] Indisponivel: {e}")
 
     # ── FALLBACK: Apify (ocrad) — só roda se Athena retornou pouco ───
     ocrad = []
     t_ocrad = 0.0
     if len(athena_imoveis) < 10:
         logger.info("=" * 55)
-        logger.info("FALLBACK: Apify (ocrad) — Athena retornou poucos resultados")
+        logger.info("[Ag1][Apify] FALLBACK: Apify (ocrad) — Athena retornou poucos resultados")
         logger.info("=" * 55)
         t0 = time.time()
         ocrad = _coletar_ocrad(localizacao, tipo_imovel, bairro)
         t_ocrad = time.time() - t0
-        logger.info(f"Apify ocrad: {len(ocrad)} imoveis | tempo: {t_ocrad:.1f}s")
+        logger.info(f"[Ag1][Apify] {len(ocrad)} imoveis | tempo: {t_ocrad:.1f}s")
     else:
-        logger.info(f"Athena suficiente ({len(athena_imoveis)} imoveis) — Apify nao necessario")
+        logger.info(f"[Ag1][Athena] Suficiente ({len(athena_imoveis)} imoveis) — Apify nao necessario")
 
     # Combina: Athena (principal) + Apify (fallback)
     todos = athena_imoveis + ocrad
@@ -1339,15 +1339,17 @@ def coletar_imoveis(
     com_rua  = sum(1 for i in combinados if i.get("street"))
     com_data = sum(1 for i in combinados if i.get("publishedAt"))
     com_bath = sum(1 for i in combinados if i.get("bathrooms"))
+    com_fotos = sum(1 for i in combinados if i.get("images"))
     logger.info("=" * 55)
-    logger.info(f"RESULTADO FINAL: {len(combinados)} comparaveis")
-    logger.info(f"  Portais    : {dict(portais)}")
-    logger.info(f"  Com rua    : {com_rua}/{len(combinados)}")
-    logger.info(f"  Com data   : {com_data}/{len(combinados)}")
-    logger.info(f"  Com banheir: {com_bath}/{len(combinados)}")
+    logger.info(f"[Ag1] RESULTADO FINAL: {len(combinados)} comparaveis")
+    logger.info(f"[Ag1]   Portais    : {dict(portais)}")
+    logger.info(f"[Ag1]   Com rua    : {com_rua}/{len(combinados)}")
+    logger.info(f"[Ag1]   Com data   : {com_data}/{len(combinados)}")
+    logger.info(f"[Ag1]   Com banheir: {com_bath}/{len(combinados)}")
+    logger.info(f"[Ag1]   Com fotos  : {com_fotos}/{len(combinados)}")
     if t_ocrad > 0:
-        logger.info(f"  Tempo ocrad: {t_ocrad:.1f}s")
-    logger.info(f"  TEMPO TOTAL: {t_total_final:.1f}s ({t_total_final/60:.1f} min)")
+        logger.info(f"[Ag1]   Tempo ocrad: {t_ocrad:.1f}s")
+    logger.info(f"[Ag1]   TEMPO TOTAL: {t_total_final:.1f}s ({t_total_final/60:.1f} min)")
     logger.info("=" * 55)
 
     # ── NORMALIZA BAIRRO ──────────────────────────────────────────────

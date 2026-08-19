@@ -913,12 +913,12 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
                 imovel_alvo[chave] = valor
 
     logger.info(
-        f"  Imovel alvo: {imovel_alvo.get('propertyType', '?')} "
+        f"[Ag5] Imovel alvo: {imovel_alvo.get('propertyType', '?')} "
         f"- {imovel_alvo.get('area', '?')}m2 "
         f"- {imovel_alvo.get('neighborhood', '?')}"
     )
-    logger.info(f"  Terrenos na zona: {len(terrenos_zona)}")
-    logger.info(f"  Comparaveis na zona: {len(comparaveis_zona)}")
+    logger.info(f"[Ag5] Terrenos na zona: {len(terrenos_zona)}")
+    logger.info(f"[Ag5] Comparaveis na zona: {len(comparaveis_zona)}")
 
     resultado = executar_agente5(
         imovel_alvo=imovel_alvo,
@@ -930,17 +930,17 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
     )
 
     salvar_json(resultado, CAMINHO_SAIDA)
-    logger.info(f"Agente 5: resultado salvo em {CAMINHO_SAIDA}")
+    logger.info(f"[Ag5] Resultado salvo em {CAMINHO_SAIDA}")
     audit = resultado.get("auditoria", {})
-    logger.info(f"  m2 terreno: min R$ {audit.get('valor_m2_terreno_minimo', 0):,.2f} | medio R$ {audit.get('valor_m2_terreno_medio', 0):,.2f} ({len(audit.get('valores_m2_terreno', []))} amostras)")
-    logger.info(f"  m2 construcao: min R$ {audit.get('valor_m2_construcao_minimo', 0):,.2f} | medio R$ {audit.get('valor_m2_construcao_medio', 0):,.2f} ({len(audit.get('valores_m2_construcao_combinados', []))} amostras)")
+    logger.info(f"[Ag5] m2 terreno: min R$ {audit.get('valor_m2_terreno_minimo', 0):,.2f} | medio R$ {audit.get('valor_m2_terreno_medio', 0):,.2f} ({len(audit.get('valores_m2_terreno', []))} amostras)")
+    logger.info(f"[Ag5] m2 construcao: min R$ {audit.get('valor_m2_construcao_minimo', 0):,.2f} | medio R$ {audit.get('valor_m2_construcao_medio', 0):,.2f} ({len(audit.get('valores_m2_construcao_combinados', []))} amostras)")
     ct = resultado.get("calculo_terreno", {})
     cc = resultado.get("calculo_construcao", {})
-    logger.info(f"  Terreno: {'aplicado' if ct.get('aplicado') else 'nao aplicado'} | area={ct.get('area_terreno_m2', 0)}m2 | valor medio R$ {ct.get('valor_terreno_medio', 0):,.2f}")
-    logger.info(f"  Construcao: area={cc.get('area_construida_m2', 0)}m2 | valor medio R$ {cc.get('valor_construcao_medio', 0):,.2f}")
+    logger.info(f"[Ag5] Terreno: {'aplicado' if ct.get('aplicado') else 'nao aplicado'} | area={ct.get('area_terreno_m2', 0)}m2 | valor medio R$ {ct.get('valor_terreno_medio', 0):,.2f}")
+    logger.info(f"[Ag5] Construcao: area={cc.get('area_construida_m2', 0)}m2 | valor medio R$ {cc.get('valor_construcao_medio', 0):,.2f}")
     ap = resultado["avaliacao_planilha"]
-    logger.info(f"  Valor medio: R$ {ap['valor_medio_imovel']:,.2f}")
-    logger.info(f"  Valor liquidez: R$ {ap['valor_liquidez']:,.2f} (desconto {ap['desconto_liquidez_percentual']}%)")
+    logger.info(f"[Ag5] Valor medio: R$ {ap['valor_medio_imovel']:,.2f}")
+    logger.info(f"[Ag5] Valor liquidez: R$ {ap['valor_liquidez']:,.2f} (desconto {ap['desconto_liquidez_percentual']}%)")
 
     return resultado
 

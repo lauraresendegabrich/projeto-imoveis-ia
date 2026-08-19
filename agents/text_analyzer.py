@@ -978,11 +978,13 @@ def analisar_comparaveis(
     logger.info("Analisando imovel alvo...")
     analise_alvo = _analisar_imovel(imovel_alvo, is_alvo=True)
     imovel_alvo["analise_qualitativa"] = analise_alvo
-    logger.info(f"  Alvo: estado={analise_alvo['estado_conservacao']} | "
+    logger.info(f"[Ag3][Alvo] fotos_recebidas={len(imovel_alvo.get('images') or [])} | "
+                f"fotos_enviadas={analise_alvo['fotos_analisadas']} | "
+                f"LLM={analise_alvo.get('llm_usada', 'fallback')} | "
+                f"estado={analise_alvo['estado_conservacao']} | "
                 f"padrao={analise_alvo['padrao_acabamento']} | "
                 f"score={analise_alvo['scores']['score_qualitativo']} | "
-                f"class={analise_alvo['classificacao_qualitativa']} | "
-                f"fotos={analise_alvo['fotos_analisadas']}")
+                f"class={analise_alvo['classificacao_qualitativa']}")
     time.sleep(2.0)  # 2s entre chamadas
 
     # Limita a 10 comparaveis (os mais similares por score/ranking)
@@ -1000,13 +1002,15 @@ def analisar_comparaveis(
     for idx, im in enumerate(comparaveis, 1):
         loc = im.get("street") or im.get("neighborhood", "?")
         n_fotos = len((im.get("images") or []))
-        logger.info(f"  [{idx}/{len(comparaveis)}] {loc} | {n_fotos} fotos")
+        im_id = im.get("id") or im.get("listing_id") or loc[:20]
+        logger.info(f"[Ag3][Comparavel {idx}/{len(comparaveis)}] id={im_id} | fotos={n_fotos}")
         t0 = time.time()
         analise = _analisar_imovel(im)
         t1 = time.time()
         im["analise_qualitativa"] = analise
         llm_usada = analise.get("llm_usada", "fallback")
-        logger.info(f"    -> {t1-t0:.1f}s | estado={analise['estado_conservacao']} | score={analise['scores']['score_qualitativo']} | llm={llm_usada}")
+        logger.info(f"[Ag3][Comparavel {idx}/{len(comparaveis)}] LLM={llm_usada} | tempo={t1-t0:.1f}s | "
+                    f"estado={analise['estado_conservacao']} | score={analise['scores']['score_qualitativo']}")
         if analise["status"] == "ok":
             com_ok += 1
         else:

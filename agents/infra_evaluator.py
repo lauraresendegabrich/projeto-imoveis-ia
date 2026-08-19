@@ -900,7 +900,7 @@ JSON:
         logger.warning(f"NVIDIA NIM falhou: {e}")
 
     # Fallback deterministico: gera interpretacao em Python sem LLM
-    logger.info("Todas LLMs falharam — usando interpretacao deterministica")
+    logger.info("[Ag4] Todas LLMs falharam — usando interpretacao deterministica")
     pontos_fortes = [cat for cat, sc in scores_categoria.items() if sc >= 0.70]
     pontos_atencao = [cat for cat, sc in scores_categoria.items() if sc < 0.50]
     return {
@@ -991,6 +991,12 @@ def avaliar_infraestrutura(
     # ── SCORE MULTIFAIXA ──────────────────────────────────────────
     resultado_score = _calcular_score(pois_por_faixa, transporte)
     scores = resultado_score
+    total_pois = sum(
+        len(pois)
+        for faixa_data in pois_por_faixa.values()
+        for pois in faixa_data.values()
+    )
+    logger.info(f"[Ag4] POIs total={total_pois} | score_final={scores['score_final']:.3f} | metodo=deterministico")
     logger.info(f"Scores por categoria:")
     for cat, score in scores.get("scores_categoria", {}).items():
         sufixo = f" [{scores.get('transporte_status','?')}]" if cat == "transporte" and scores.get("transporte_dados_insuficientes") else ""
@@ -1000,12 +1006,12 @@ def avaliar_infraestrutura(
         logger.info(f"  AVISO: transporte status={scores.get('transporte_status')}")
 
     # ── ANALISE VIA LLM ───────────────────────────────────────────
-    logger.info("Analisando via LLM...")
+    logger.info("[Ag4] Analisando via LLM (interpretacao textual)...")
     analise = _analisar_infra_llm(pois_por_faixa, scores, endereco, transporte)
     if analise:
-        logger.info(f"LLM interpretou: {len(analise.get('pontos_fortes',[]))} pontos fortes, {len(analise.get('pontos_de_atencao',[]))} atencao")
+        logger.info(f"[Ag4] LLM interpretou: {len(analise.get('pontos_fortes',[]))} pontos fortes, {len(analise.get('pontos_de_atencao',[]))} atencao")
     else:
-        logger.warning("LLM nao retornou interpretacao — usando defaults")
+        logger.warning("[Ag4] LLM nao retornou interpretacao — usando fallback deterministico")
 
     # ── SALVA ─────────────────────────────────────────────────────
     classificacao = _classificar_infraestrutura(scores.get("score_final", 0.5))

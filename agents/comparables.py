@@ -267,40 +267,40 @@ def _chamar_llm(prompt: str) -> str:
     t0 = t_mod.time()
     resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b")
     if resposta:
-        logger.info(f"    [tempo] Groq: {t_mod.time()-t0:.1f}s")
+        logger.info(f"[Ag2][Clustering] LLM respondeu: Groq openai/gpt-oss-120b em {t_mod.time()-t0:.1f}s")
         return resposta
 
     # Tentativa 1b: Groq conta 2
     groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
     if groq_key_2:
-        logger.info("  Groq 1 falhou — tentando GROQ_API_KEY_2...")
+        logger.info("[Ag2][Clustering] Groq 1 falhou — tentando GROQ_API_KEY_2...")
         t0 = t_mod.time()
         resposta = _chamar_groq(prompt, groq_key_2, model="openai/gpt-oss-120b")
         if resposta:
-            logger.info(f"    [tempo] Groq KEY2: {t_mod.time()-t0:.1f}s")
+            logger.info(f"[Ag2][Clustering] LLM respondeu: Groq KEY2 em {t_mod.time()-t0:.1f}s")
             return resposta
 
     # Tentativa 2: Gemini (primeiro fallback)
     google_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
     if google_key:
-        logger.info("  Groq falhou — tentando Gemini...")
+        logger.info("[Ag2][Clustering] Groq falhou — tentando Gemini...")
         t0 = t_mod.time()
         resposta = _chamar_gemini(prompt, google_key)
         if resposta:
-            logger.info(f"    [tempo] Gemini: {t_mod.time()-t0:.1f}s")
+            logger.info(f"[Ag2][Clustering] LLM respondeu: Gemini em {t_mod.time()-t0:.1f}s")
             return resposta
 
     # Tentativa 3: NVIDIA NIM (ultimo fallback — timeout 30s, sem retries longos)
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
     if nvidia_key:
-        logger.info("  Gemini falhou — tentando NVIDIA NIM (timeout 30s)...")
+        logger.info("[Ag2][Clustering] Gemini falhou — tentando NVIDIA NIM (timeout 30s)...")
         t0 = t_mod.time()
         resposta = _chamar_nvidia(prompt, nvidia_key)
         if resposta:
-            logger.info(f"    [tempo] NVIDIA NIM: {t_mod.time()-t0:.1f}s")
+            logger.info(f"[Ag2][Clustering] LLM respondeu: NVIDIA NIM em {t_mod.time()-t0:.1f}s")
             return resposta
 
-    logger.warning("  Todas as LLMs falharam — usando fallback numerico")
+    logger.warning("[Ag2][Clustering] Todas as LLMs falharam — usando fallback numerico")
     return ""
 
 
@@ -609,16 +609,16 @@ def identificar_comparaveis(
 
         t_inicio_clustering = t_ag2.time()
         for num_lote, lote in enumerate(lotes, 1):
-            logger.info(f"  Lote {num_lote}/{len(lotes)}: {len(lote)} candidatos...")
+            logger.info(f"[Ag2][Clustering] Lote {num_lote}/{len(lotes)}: {len(lote)} candidatos...")
             t_lote = t_ag2.time()
             prompt = _montar_prompt_clustering(imovel_alvo, lote)
             resposta = _chamar_llm(prompt)
 
             if resposta:
-                logger.info(f"  Lote {num_lote}: LLM respondeu ({len(resposta)} chars) em {t_ag2.time()-t_lote:.1f}s")
+                logger.info(f"[Ag2][Clustering] Lote {num_lote}: resposta OK ({len(resposta)} chars) em {t_ag2.time()-t_lote:.1f}s")
                 lote = _parsear_resposta_llm(resposta, lote)
             else:
-                logger.warning(f"  Lote {num_lote}: LLM sem resposta — fallback numerico")
+                logger.warning(f"[Ag2][Clustering] Lote {num_lote}: LLM sem resposta — fallback numerico")
                 lote = _fallback_numerico(lote)
 
             todos_classificados.extend(lote)
@@ -627,7 +627,7 @@ def identificar_comparaveis(
             if num_lote < len(lotes):
                 t_ag2.sleep(3)
 
-        logger.info(f"  [tempo] Clustering total: {t_ag2.time()-t_inicio_clustering:.1f}s")
+        logger.info(f"[Ag2][Clustering] Tempo total: {t_ag2.time()-t_inicio_clustering:.1f}s")
 
         # Combina: candidatos analisados pela LLM + resto (fallback numerico)
         candidatos_llm = todos_classificados + candidatos_resto
@@ -816,10 +816,9 @@ RESPONDA SOMENTE JSON:
         t0 = t_zona.time()
         resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
         if resultado:
-            logger.info(f"    [tempo] Gemini zona: {t_zona.time()-t0:.1f}s")
-            logger.info(f"    [zona] provedor_utilizado=gemini")
+            logger.info(f"[Ag2][Zona] provedor=Gemini | tempo={t_zona.time()-t0:.1f}s")
             return resultado
-        logger.info("  Gemini visao falhou — tentando Groq Vision...")
+        logger.info("[Ag2][Zona] Gemini visao falhou — tentando Groq Vision...")
 
     # Tentativa 2: Groq Vision (qwen3.6-27b)
     groq_key = os.getenv("GROQ_API_KEY", "")
@@ -827,18 +826,16 @@ RESPONDA SOMENTE JSON:
         t0 = t_zona.time()
         resultado = _chamar_groq_visao(prompt, img_b64, img_mime, groq_key)
         if resultado:
-            logger.info(f"    [tempo] Groq Vision zona: {t_zona.time()-t0:.1f}s")
-            logger.info(f"    [zona] provedor_utilizado=groq")
+            logger.info(f"[Ag2][Zona] provedor=Groq | tempo={t_zona.time()-t0:.1f}s")
             return resultado
-        logger.info("  Groq Vision falhou — tentando NVIDIA NIM (timeout 30s)...")
+        logger.info("[Ag2][Zona] Groq Vision falhou — tentando NVIDIA NIM (timeout 30s)...")
 
     # Tentativa 3: NVIDIA NIM (ultimo fallback — timeout 30s)
     if nvidia_key:
         t0 = t_zona.time()
         resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
         if resultado:
-            logger.info(f"    [tempo] NVIDIA NIM zona: {t_zona.time()-t0:.1f}s")
-            logger.info(f"    [zona] provedor_utilizado=nvidia")
+            logger.info(f"[Ag2][Zona] provedor=NVIDIA | tempo={t_zona.time()-t0:.1f}s")
             return resultado
 
     return {"raio_metros": 500, "descricao_zona_homogenea": "Analise visual nao disponivel"}
@@ -1111,7 +1108,7 @@ def analisar_zona_homogenea(
     logger.info("=" * 55)
 
     # ── 1. GEOCODIFICACAO DO ALVO ─────────────────────────────────
-    logger.info(f"Geocodificando: {endereco_alvo}")
+    logger.info("[Ag2][Zona] Geocodificando: %s", endereco_alvo)
     lat_alvo, lon_alvo = _geocodificar(endereco_alvo)
     if not lat_alvo:
         logger.warning("Nao geocodificou o alvo — usando todos os imoveis como confirmados")
@@ -1121,7 +1118,7 @@ def analisar_zona_homogenea(
             "fora_zona": [],
             "imagem_satelite": None,
         }
-    logger.info(f"Alvo: {lat_alvo:.6f}, {lon_alvo:.6f}")
+    logger.info(f"[Ag2][Zona] Alvo: {lat_alvo:.6f}, {lon_alvo:.6f}")
 
     # ── 2. IMAGEM DE SATELITE ─────────────────────────────────────
     logger.info("Gerando imagem de satelite (hybrid, scale=2, marcador)...")
@@ -1221,9 +1218,7 @@ def analisar_zona_homogenea(
     # ── 5. RESUMO ─────────────────────────────────────────────────
     raio_usado = max(raio_zona, 400)
     logger.info("=" * 55)
-    logger.info(f"RESULTADO ZONA HOMOGENEA (raio: {raio_usado}m):")
-    logger.info(f"  Na zona: {len(confirmados)}")
-    logger.info(f"  Fora da zona: {len(fora)}")
+    logger.info(f"[Ag2][Zona] raio={raio_zona}m | na_zona={len(confirmados)} | fora_zona={len(fora)}")
     logger.info("=" * 55)
 
     resultado = {
