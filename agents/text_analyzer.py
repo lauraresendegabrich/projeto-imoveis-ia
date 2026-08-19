@@ -764,14 +764,22 @@ def _classificar(score: float) -> str:
 # ANALISE DE UM IMOVEL
 # =============================================================================
 
-def _analisar_imovel(imovel: dict) -> dict:
-    id_imovel = str(imovel.get("id", ""))
+def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
+    id_imovel = str(imovel.get("id", "") or imovel.get("listing_id", "") or "")
+    # Se não tem id, usa parte da URL como identificador
+    if not id_imovel and not is_alvo:
+        url = imovel.get("url", "")
+        if url:
+            id_imovel = url.split("/")[-2] if url.endswith("/") else url.split("/")[-1]
+            id_imovel = id_imovel[:20]
+    label = "alvo" if is_alvo else (id_imovel or "sem_id")
+
     titulo    = imovel.get("title", "") or ""
     descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
     images    = imovel.get("images", []) or []
     texto     = f"{titulo} {descricao}".strip()
 
-    logger.info(f"    [diag] id={id_imovel or 'alvo'} | fotos_brutas={len(images)} | fotos_enviadas_ag3={min(len(images), 8)} | titulo={len(titulo)} chars | desc={len(descricao)} chars")
+    logger.info(f"    [diag] id={label} | fotos_brutas={len(images)} | fotos_enviadas_ag3={min(len(images), 8)} | titulo={len(titulo)} chars | desc={len(descricao)} chars")
 
     # Descricao insuficiente e sem fotos
     if not texto or len(texto) < 10:
@@ -968,7 +976,7 @@ def analisar_comparaveis(
             imovel_alvo = {}
 
     logger.info("Analisando imovel alvo...")
-    analise_alvo = _analisar_imovel(imovel_alvo)
+    analise_alvo = _analisar_imovel(imovel_alvo, is_alvo=True)
     imovel_alvo["analise_qualitativa"] = analise_alvo
     logger.info(f"  Alvo: estado={analise_alvo['estado_conservacao']} | "
                 f"padrao={analise_alvo['padrao_acabamento']} | "

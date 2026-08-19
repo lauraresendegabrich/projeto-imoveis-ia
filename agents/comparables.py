@@ -396,15 +396,19 @@ def _chamar_gemini(prompt: str, api_key: str) -> str:
     if not api_key:
         return ""
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            "gemini-3.5-flash-lite",
-            generation_config={"response_mime_type": "application/json"},
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-3.5-flash-lite",
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                response_mime_type="application/json",
+            ),
         )
-        resposta = model.generate_content(prompt)
         logger.info("    [LLM] Gemini 3.5 Flash Lite respondeu OK")
-        return resposta.text or ""
+        return response.text or ""
     except Exception as e:
         logger.warning(f"    [LLM] Gemini falhou: {e}")
         return ""
@@ -813,6 +817,7 @@ RESPONDA SOMENTE JSON:
         resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
         if resultado:
             logger.info(f"    [tempo] Gemini zona: {t_zona.time()-t0:.1f}s")
+            logger.info(f"    [zona] provedor_utilizado=gemini")
             return resultado
         logger.info("  Gemini visao falhou — tentando Groq Vision...")
 
@@ -823,6 +828,7 @@ RESPONDA SOMENTE JSON:
         resultado = _chamar_groq_visao(prompt, img_b64, img_mime, groq_key)
         if resultado:
             logger.info(f"    [tempo] Groq Vision zona: {t_zona.time()-t0:.1f}s")
+            logger.info(f"    [zona] provedor_utilizado=groq")
             return resultado
         logger.info("  Groq Vision falhou — tentando NVIDIA NIM (timeout 30s)...")
 
@@ -832,6 +838,7 @@ RESPONDA SOMENTE JSON:
         resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
         if resultado:
             logger.info(f"    [tempo] NVIDIA NIM zona: {t_zona.time()-t0:.1f}s")
+            logger.info(f"    [zona] provedor_utilizado=nvidia")
             return resultado
 
     return {"raio_metros": 500, "descricao_zona_homogenea": "Analise visual nao disponivel"}
@@ -914,20 +921,25 @@ def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -
 def _chamar_gemini_visao(prompt: str, imagem_bytes: bytes, api_key: str) -> dict | None:
     """Chama Gemini (gemini-3.5-flash-lite) com imagem e response_mime_type JSON. Retorna dict ou None."""
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            "gemini-3.5-flash-lite",
-            generation_config={"response_mime_type": "application/json"},
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+
+        # Envia imagem como bytes inline
+        parts = [
+            types.Part.from_text(text=prompt),
+            types.Part.from_bytes(data=imagem_bytes, mime_type="image/png"),
+        ]
+
+        response = client.models.generate_content(
+            model="gemini-3.5-flash-lite",
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                response_mime_type="application/json",
+            ),
         )
-
-        # Gemini aceita imagem como Part
-        import io
-        from PIL import Image
-        img = Image.open(io.BytesIO(imagem_bytes))
-
-        resposta = model.generate_content([prompt, img])
-        texto = resposta.text or ""
+        texto = response.text or ""
         logger.info(f"Gemini visao respondeu ({len(texto)} chars)")
 
         return _parsear_json_zona(texto)
@@ -1095,7 +1107,7 @@ def analisar_zona_homogenea(
       - imagem_satelite: caminho do PNG salvo
     """
     logger.info("=" * 55)
-    logger.info("ZONA HOMOGENEA: Google Maps + NVIDIA NIM (gemma-4-31b-it)")
+    logger.info("ZONA HOMOGENEA: Google Maps + LLM Vision")
     logger.info("=" * 55)
 
     # ── 1. GEOCODIFICACAO DO ALVO ─────────────────────────────────
