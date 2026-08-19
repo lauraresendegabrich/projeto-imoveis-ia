@@ -229,6 +229,59 @@ elif submitted:
     from agents.price_liquidity import estimar_preco
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    # ==============================================================
+    # GEOCODIFICAÇÃO ÚNICA DO ALVO (persistida pra todos os agentes)
+    # ==============================================================
+    if not imovel_alvo.get("lat") or not imovel_alvo.get("lon"):
+        import requests as _geo_req
+        endereco_geo = f"{rua}, {numero}, {bairro}, {cidade}, {estado}, Brasil".strip(", ")
+        _logger.info(f"[Geo][Alvo] endereco={endereco_geo}")
+        _lat, _lon, _fonte_geo = None, None, None
+
+        # Tentativa 1: Nominatim
+        try:
+            r_geo = _geo_req.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": endereco_geo, "format": "json", "limit": 1},
+                headers={"User-Agent": "ProjetoImoveisIA/1.0"},
+                timeout=10,
+            )
+            if r_geo.status_code == 200 and r_geo.json():
+                data_geo = r_geo.json()[0]
+                _lat, _lon = float(data_geo["lat"]), float(data_geo["lon"])
+                _fonte_geo = "Nominatim"
+        except Exception:
+            pass
+
+        # Tentativa 2: Google Geocoding
+        if not _lat:
+            maps_key_geo = os.getenv("GOOGLE_MAPS_KEY", "")
+            if maps_key_geo:
+                try:
+                    r_geo = _geo_req.get(
+                        "https://maps.googleapis.com/maps/api/geocode/json",
+                        params={"address": endereco_geo, "key": maps_key_geo},
+                        timeout=10,
+                    )
+                    if r_geo.status_code == 200:
+                        results_geo = r_geo.json().get("results", [])
+                        if results_geo:
+                            loc_geo = results_geo[0]["geometry"]["location"]
+                            _lat, _lon = float(loc_geo["lat"]), float(loc_geo["lng"])
+                            _fonte_geo = "Google Geocoding"
+                except Exception:
+                    pass
+
+        if _lat and _lon:
+            imovel_alvo["lat"] = _lat
+            imovel_alvo["lon"] = _lon
+            imovel_alvo["_geo_fonte"] = _fonte_geo
+            _logger.info(f"[Geo][Alvo] lat={_lat:.6f} | lon={_lon:.6f} | fonte={_fonte_geo} | geocodificacao_nova=true")
+        else:
+            _logger.warning("[Geo][Alvo] Nao foi possivel geocodificar o alvo")
+    else:
+        _logger.info(f"[Geo][Alvo] lat={imovel_alvo['lat']} | lon={imovel_alvo['lon']} | geocodificacao_nova=false (ja existente)")
+
     st.divider()
     st.subheader("⏳ Avaliação em andamento")
     st.caption("Para cancelar, pressione F5.")
@@ -344,6 +397,8 @@ elif submitted:
                 imoveis=[c for c in comparaveis if c.get("cluster") == "A"] + terrenos,
                 cidade=cidade,
                 estado=estado,
+                lat_alvo_precomp=imovel_alvo.get("lat"),
+                lon_alvo_precomp=imovel_alvo.get("lon"),
             )
             confirmados = zona_resultado.get("comparaveis_confirmados", [])
             fora = zona_resultado.get("fora_zona", [])

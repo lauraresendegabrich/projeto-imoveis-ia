@@ -967,7 +967,7 @@ def avaliar_infraestrutura(
             coords = zona_data.get("coordenadas_alvo", {})
             if coords.get("lat") and coords.get("lon"):
                 lat, lon = coords["lat"], coords["lon"]
-                logger.info(f"Coordenadas reutilizadas do Agente 2: {lat:.6f}, {lon:.6f}")
+                logger.info(f"[Ag4][Geo] reutilizando coordenadas do alvo | lat={lat:.6f} | lon={lon:.6f}")
         except Exception:
             pass
 

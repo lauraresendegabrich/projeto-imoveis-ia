@@ -1068,6 +1068,8 @@ def analisar_zona_homogenea(
     imoveis: list[dict],
     cidade: str = "",
     estado: str = "",
+    lat_alvo_precomp: float = None,
+    lon_alvo_precomp: float = None,
 ) -> dict:
     """
     Analisa a zona homogenea do imovel alvo e valida os comparaveis.
@@ -1108,8 +1110,12 @@ def analisar_zona_homogenea(
     logger.info("=" * 55)
 
     # ── 1. GEOCODIFICACAO DO ALVO ─────────────────────────────────
-    logger.info("[Ag2][Zona] Geocodificando: %s", endereco_alvo)
-    lat_alvo, lon_alvo = _geocodificar(endereco_alvo)
+    if lat_alvo_precomp and lon_alvo_precomp:
+        lat_alvo, lon_alvo = lat_alvo_precomp, lon_alvo_precomp
+        logger.info(f"[Ag2][Geo] reutilizando coordenadas do alvo | lat={lat_alvo:.6f} | lon={lon_alvo:.6f}")
+    else:
+        logger.info("[Ag2][Zona] Geocodificando: %s", endereco_alvo)
+        lat_alvo, lon_alvo = _geocodificar(endereco_alvo)
     if not lat_alvo:
         logger.warning("Nao geocodificou o alvo — usando todos os imoveis como confirmados")
         return {
