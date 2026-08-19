@@ -1056,8 +1056,14 @@ def coletar_imoveis(
             logger.info(f"Athena: {len(athena_imoveis)} imoveis total")
 
             # Normaliza campos do Athena para o schema padrao
-            for im in athena_imoveis:
+            for idx_athena, im in enumerate(athena_imoveis):
                 im["source"] = "Athena/S3"
+
+                # --- LOGS TEMPORARIOS DE DIAGNOSTICO (fotos) ---
+                if idx_athena < 3:
+                    colunas_foto = [k for k in im.keys() if any(x in k.lower() for x in ["foto", "image", "photo", "picture", "img"])]
+                    logger.info(f"  [athena-fotos] id={im.get('listing_id') or im.get('url','?')[:50]} | colunas_disponiveis={colunas_foto}")
+                    logger.info(f"  [athena-fotos] fotos_raw={str(im.get('fotos_urls',''))[:150]}")
 
                 fotos_raw = im.get("fotos_urls") or ""
                 if fotos_raw:
@@ -1076,6 +1082,10 @@ def coletar_imoveis(
                 else:
                     im["images"] = []
                     im["imageCount"] = 0
+
+                # Log apos normalizacao (primeiros 3)
+                if idx_athena < 3:
+                    logger.info(f"  [athena-fotos] fotos_normalizadas={len(im['images'])}")
 
                 if im.get("preco") and not im.get("price"):
                     try:
