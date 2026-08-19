@@ -1138,7 +1138,7 @@ def analisar_zona_homogenea(
     # ── 3. ANALISE VISUAL VIA GROQ VISION ─────────────────────────
     zona = {}
     if imagem:
-        logger.info("Enviando imagem para NVIDIA NIM (gemma-4-31b-it)...")
+        logger.info("Enviando imagem para cadeia LLM Vision...")
         zona = _analisar_zona_homogenea(imagem, endereco_alvo)
         logger.info(f"Zona: padrao={zona.get('padrao_construtivo','?')} | "
                     f"homogeneidade={zona.get('homogeneidade_visual','?')} | "

@@ -214,18 +214,154 @@ def _campos_ok(imovel: dict) -> bool:
 
 def _remover_duplicatas_url(imoveis: list[dict]) -> list[dict]:
     """
-    Remove duplicatas pela URL.
-    Mais confiavel que hash quando combinamos duas fontes diferentes,
-    pois o mesmo imovel pode ter area/preco ligeiramente diferente entre portais.
+    Remove duplicatas com merge inteligente.
+    1. Dedup por ID (listing_id): merge de campos, preserva o mais completo.
+    2. Dedup por URL: mesmo imovel em fontes diferentes.
+    3. Dedup secundaria: combinacao de rua+bairro+tipo+preco+area+quartos.
     """
-    vistas: set[str] = set()
-    unicos = []
-    for i in imoveis:
-        url = i.get("url", "")
-        if url and url not in vistas:
-            vistas.add(url)
-            unicos.append(i)
-    return unicos
+    import unicodedata
+
+    def _norm_str(s):
+        if not s:
+            return ""
+        return unicodedata.normalize("NFD", str(s)).encode("ascii", "ignore").decode().lower().strip()
+
+    def _merge(a: dict, b: dict) -> dict:
+        """Merge dois registros do mesmo imovel, preservando dados mais completos."""
+        resultado = dict(a)  # copia base
+
+        # Fotos: manter lista nao vazia, unir sem duplicar
+        fotos_a = a.get("images") or []
+        fotos_b = b.get("images") or []
+        if fotos_b and not fotos_a:
+            resultado["images"] = fotos_b
+        elif fotos_a and fotos_b:
+            urls_vistas = set(fotos_a)
+            merged = list(fotos_a)
+            for f in fotos_b:
+                if f not in urls_vistas:
+                    merged.append(f)
+                    urls_vistas.add(f)
+            resultado["images"] = merged[:30]
+        resultado["imageCount"] = len(resultado.get("images") or [])
+
+        # Texto: manter o mais completo
+        for campo in ["description", "title", "descricao", "titulo"]:
+            val_a = a.get(campo) or ""
+            val_b = b.get(campo) or ""
+            if len(val_b) > len(val_a):
+                resultado[campo] = val_b
+
+        # Campos numericos/textuais: preencher ausentes
+        campos_preencher = [
+            "price", "preco", "area", "area_construida", "bedrooms", "quartos",
+            "bathrooms", "banheiros", "parkingSpaces", "vagas", "suites",
+            "street", "rua", "neighborhood", "bairro", "city", "cidade",
+            "state", "estado", "lat", "lon", "latitude", "longitude",
+            "publishedAt", "data_publicacao", "condominiumFee", "preco_condominio",
+            "iptu", "pricePerSqm", "preco_por_m2", "url",
+        ]
+        for campo in campos_preencher:
+            if not resultado.get(campo) and b.get(campo):
+                resultado[campo] = b[campo]
+
+        # Fontes: guardar origem combinada
+        fontes_a = a.get("fontes_origem") or [a.get("source", "?")]
+        fontes_b = b.get("fontes_origem") or [b.get("source", "?")]
+        if isinstance(fontes_a, str):
+            fontes_a = [fontes_a]
+        if isinstance(fontes_b, str):
+            fontes_b = [fontes_b]
+        resultado["fontes_origem"] = list(set(fontes_a + fontes_b))
+
+        return resultado
+
+    # === PASSO 1: Dedup por ID (listing_id) ===
+    por_id = {}
+    sem_id = []
+    merges_id = 0
+
+    for im in imoveis:
+        lid = im.get("listing_id") or im.get("id") or ""
+        lid = str(lid).strip()
+        if lid and lid != "None":
+            if lid in por_id:
+                # Merge
+                logger.info(f"  [dedup] mesmo ID detectado: {lid}")
+                logger.info(f"  [dedup] registro A: {por_id[lid].get('source','?')} | fotos={len(por_id[lid].get('images') or [])}")
+                logger.info(f"  [dedup] registro B: {im.get('source','?')} | fotos={len(im.get('images') or [])}")
+                por_id[lid] = _merge(por_id[lid], im)
+                logger.info(f"  [dedup] merge concluido | fotos={len(por_id[lid].get('images') or [])} | fontes={','.join(por_id[lid].get('fontes_origem', []))}")
+                merges_id += 1
+            else:
+                por_id[lid] = im
+        else:
+            sem_id.append(im)
+
+    resultado_id = list(por_id.values()) + sem_id
+    if merges_id:
+        logger.info(f"  [dedup] {merges_id} merges por ID realizados")
+
+    # === PASSO 2: Dedup por URL ===
+    por_url = {}
+    final = []
+    for im in resultado_id:
+        url = im.get("url", "")
+        if url:
+            if url not in por_url:
+                por_url[url] = im
+                final.append(im)
+            else:
+                # Merge silencioso
+                idx = final.index(por_url[url])
+                final[idx] = _merge(final[idx], im)
+        else:
+            final.append(im)
+
+    # === PASSO 3: Dedup secundaria (combinacao de campos) ===
+    chaves_vistas = {}
+    resultado_final = []
+    for im in final:
+        rua_n = _norm_str(im.get("street") or im.get("rua"))
+        bairro_n = _norm_str(im.get("neighborhood") or im.get("bairro"))
+        tipo_n = _norm_str(im.get("propertyType") or im.get("tipo"))
+        preco = im.get("price") or im.get("preco") or 0
+        try:
+            preco = int(float(preco))
+        except (ValueError, TypeError):
+            preco = 0
+        area = im.get("area") or im.get("area_construida") or 0
+        try:
+            area = int(float(area))
+        except (ValueError, TypeError):
+            area = 0
+        quartos = im.get("bedrooms") or im.get("quartos") or 0
+        try:
+            quartos = int(float(quartos))
+        except (ValueError, TypeError):
+            quartos = 0
+
+        chave = f"{rua_n}|{bairro_n}|{tipo_n}|{preco}|{area}|{quartos}"
+        if chave not in chaves_vistas:
+            chaves_vistas[chave] = im
+            resultado_final.append(im)
+        else:
+            # Merge silencioso
+            idx = resultado_final.index(chaves_vistas[chave])
+            resultado_final[idx] = _merge(resultado_final[idx], im)
+
+    # Verificacao final
+    ids_finais = [str(im.get("listing_id") or im.get("id") or "") for im in resultado_final if im.get("listing_id") or im.get("id")]
+    ids_duplicados = len(ids_finais) - len(set(ids_finais))
+    logger.info(f"  [dedup-check] IDs duplicados restantes: {ids_duplicados}")
+    if ids_duplicados > 0:
+        from collections import Counter
+        contagem = Counter(ids_finais)
+        for lid, cnt in contagem.most_common(3):
+            if cnt > 1:
+                logger.warning(f"  [dedup-check] ID {lid} aparece {cnt} vezes")
+
+    return resultado_final
 
 
 def salvar_dados(imoveis: list[dict], nome_arquivo: str) -> str:
