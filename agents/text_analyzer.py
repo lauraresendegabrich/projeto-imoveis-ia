@@ -771,7 +771,7 @@ def _analisar_imovel(imovel: dict) -> dict:
     images    = imovel.get("images", []) or []
     texto     = f"{titulo} {descricao}".strip()
 
-    logger.info(f"    [diag] id={id_imovel or 'alvo'} | fotos_brutas={len(images)} | titulo={len(titulo)} chars | desc={len(descricao)} chars")
+    logger.info(f"    [diag] id={id_imovel or 'alvo'} | fotos_brutas={len(images)} | fotos_enviadas_ag3={min(len(images), 8)} | titulo={len(titulo)} chars | desc={len(descricao)} chars")
 
     # Descricao insuficiente e sem fotos
     if not texto or len(texto) < 10:

@@ -116,9 +116,8 @@ with st.sidebar:
         descricao = st.text_area("Descrição do imóvel", value="", height=80)
 
         st.markdown("**📸 Fotos do imóvel** (opcional, máx. 8)")
-        st.caption("Adicione fotos para uma avaliação mais precisa.")
-        link_anuncio = st.text_input("Link do anúncio (extrai fotos automaticamente)", value="", help="Cole o link de qualquer portal imobiliário e as fotos serão extraídas")
-        fotos_texto = st.text_area("Ou cole links das fotos (um por linha)", value="", height=60)
+        st.caption("Cole os links diretos das fotos, um por linha")
+        fotos_texto = st.text_area("Links das fotos", value="", height=80, help="Cole até 8 URLs de imagens (uma por linha). Ex: https://...imovel.jpg")
 
         submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
 
@@ -198,67 +197,22 @@ elif submitted:
         "images": [],
     }
 
-    # Processa fotos conforme opção escolhida
-    fotos_final = []
-    if link_anuncio:
-        import requests as req_fotos
-        import re as re_fotos
-        try:
-            headers_foto = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
-            r = req_fotos.get(link_anuncio, timeout=15, headers=headers_foto)
-            _log_fotos = __import__("logging").getLogger(__name__)
-            _log_fotos.info(f"  [fotos] Request ao anuncio: status={r.status_code}, HTML={len(r.text)} chars")
-            if r.status_code == 200:
-                # Tentativa 1: padrão VivaReal/ZAP (hashes)
-                if "vivareal" in link_anuncio or "zap" in link_anuncio:
-                    hashes = re_fotos.findall(r'resizedimgs\.vivareal\.com/img/vr-listing/([a-f0-9]{32})/', r.text)
-                    hashes_unicos = list(dict.fromkeys(hashes))
-                    fotos_final = [
-                        f"https://resizedimgs.vivareal.com/img/vr-listing/{h}/imovel.webp?action=fit-in&dimension=870x653"
-                        for h in hashes_unicos[:8]
-                    ]
+    # Processa fotos: links diretos informados pelo usuario
+    import logging as _log_fotos
+    _logger = _log_fotos.getLogger(__name__)
 
-                # Tentativa 2: extração genérica de imagens (qualquer portal)
-                if not fotos_final:
-                    # Busca URLs de imagem em src/data-src de tags img e background-image
-                    urls_img = re_fotos.findall(r'(?:src|data-src|content)=["\']([^"\']+\.(?:jpg|jpeg|png|webp)[^"\']*)["\']', r.text, re_fotos.IGNORECASE)
-                    # Filtra: só imagens grandes (provavelmente fotos do imóvel)
-                    fotos_candidatas = []
-                    for url in urls_img:
-                        # Ignora ícones, logos, thumbnails pequenos
-                        if any(x in url.lower() for x in ["logo", "icon", "favicon", "avatar", "thumb_small", "1x1", "placeholder"]):
-                            continue
-                        # Completa URL relativa
-                        if url.startswith("//"):
-                            url = "https:" + url
-                        elif url.startswith("/"):
-                            from urllib.parse import urlparse
-                            parsed = urlparse(link_anuncio)
-                            url = f"{parsed.scheme}://{parsed.netloc}{url}"
-                        if url.startswith("http"):
-                            fotos_candidatas.append(url)
-                    # Remove duplicatas mantendo ordem
-                    vistos = set()
-                    fotos_unicas = []
-                    for u in fotos_candidatas:
-                        if u not in vistos:
-                            vistos.add(u)
-                            fotos_unicas.append(u)
-                    fotos_final = fotos_unicas[:8]
-        except Exception:
-            pass
-    elif fotos_texto.strip():
-        fotos_final = [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()][:8]
+    fotos_informadas = [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()] if fotos_texto.strip() else []
+    _logger.info(f"  [fotos] URLs informadas pelo usuario: {len(fotos_informadas)}")
 
-    imovel_alvo["images"] = fotos_final
-    import logging as _log
-    _log.info(f"  [fotos] Alvo: {len(fotos_final)} fotos extraidas do anuncio")
-    if not fotos_final and link_anuncio:
-        _log.warning(f"  [fotos] ATENCAO: link informado mas 0 fotos extraidas — portal pode ter bloqueado (403)")
+    # Valida URLs (deve começar com http)
+    fotos_validas = [url for url in fotos_informadas if url.startswith("http")][:8]
+    _logger.info(f"  [fotos] URLs validas: {len(fotos_validas)}")
+
+    imovel_alvo["images"] = fotos_validas
+    _logger.info(f"  [fotos] Fotos selecionadas: {len(fotos_validas)}")
+
+    if not fotos_validas:
+        _logger.info("  [fotos] Imovel alvo sem imagens — analise visual nao sera realizada")
 
     if preco_anunciado > 0:
         imovel_alvo["price"] = preco_anunciado
