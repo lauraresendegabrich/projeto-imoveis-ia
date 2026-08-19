@@ -982,6 +982,22 @@ def _coletar_ocrad(
         time.sleep(1)
     logger.info(f"[Ag1][Apify] publishedAt extraido: {pub_ok}/{len(filtrados)}")
 
+    # Log de fotos por imovel
+    com_fotos_apify = 0
+    sem_fotos_apify = 0
+    total_fotos_apify = 0
+    for im in filtrados:
+        n_fotos = len(im.get("images") or [])
+        im_id = im.get("id") or im.get("url", "?")[:40]
+        portal = im.get("source", "?")
+        logger.info(f"[Ag1][Apify][Fotos] id={im_id} | portal={portal} | fotos_retornadas={n_fotos} | fotos_validas={n_fotos}")
+        if n_fotos > 0:
+            com_fotos_apify += 1
+            total_fotos_apify += n_fotos
+        else:
+            sem_fotos_apify += 1
+    logger.info(f"[Ag1][Apify][Resumo Fotos] imoveis={len(filtrados)} | com_fotos={com_fotos_apify} | sem_fotos={sem_fotos_apify} | total_fotos={total_fotos_apify}")
+
     logger.info(f"[Ag1][Apify] {len(filtrados)} imoveis apos filtros")
     return filtrados
 

@@ -465,6 +465,19 @@ elif submitted:
     progress.progress(100)
     status_box.success(f"🎉 **Avaliação concluída em {tempo_total:.0f} segundos!**")
 
+    # ── RESUMO DA EXECUCAO (log para auditoria) ───────────────────
+    import logging as _log_resumo
+    _lr = _log_resumo.getLogger("pipeline")
+    _lr.info("")
+    _lr.info("=" * 55)
+    _lr.info("  RESUMO DA EXECUCAO")
+    _lr.info("=" * 55)
+    _lr.info(f"  Agente 1 (coleta): {tempo_ag1:.1f}s")
+    _lr.info(f"  Agente 2 (clustering): {tempo_ag2_cluster:.1f}s")
+    _lr.info(f"  Agente 3+4 (paralelo): {tempo_ag34:.1f}s")
+    _lr.info(f"  Tempo total: {tempo_total:.1f}s")
+    _lr.info("=" * 55)
+
     # Monta resultado para exibição
     # Enriquece resumo com dados da coleta
     resumo["total_coletados"] = len(imoveis_coletados)
