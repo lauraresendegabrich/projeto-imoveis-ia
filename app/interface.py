@@ -204,7 +204,14 @@ elif submitted:
         import requests as req_fotos
         import re as re_fotos
         try:
-            r = req_fotos.get(link_anuncio, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+            headers_foto = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            }
+            r = req_fotos.get(link_anuncio, timeout=15, headers=headers_foto)
+            _log_fotos = __import__("logging").getLogger(__name__)
+            _log_fotos.info(f"  [fotos] Request ao anuncio: status={r.status_code}, HTML={len(r.text)} chars")
             if r.status_code == 200:
                 # Tentativa 1: padrão VivaReal/ZAP (hashes)
                 if "vivareal" in link_anuncio or "zap" in link_anuncio:
@@ -248,6 +255,10 @@ elif submitted:
         fotos_final = [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()][:8]
 
     imovel_alvo["images"] = fotos_final
+    import logging as _log
+    _log.info(f"  [fotos] Alvo: {len(fotos_final)} fotos extraidas do anuncio")
+    if not fotos_final and link_anuncio:
+        _log.warning(f"  [fotos] ATENCAO: link informado mas 0 fotos extraidas — portal pode ter bloqueado (403)")
 
     if preco_anunciado > 0:
         imovel_alvo["price"] = preco_anunciado
