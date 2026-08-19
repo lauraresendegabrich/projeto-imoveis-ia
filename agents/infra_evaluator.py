@@ -829,27 +829,9 @@ Retorne JSON:
 JSON:
 {{"pontos_fortes": [], "pontos_de_atencao": [], "descricao_infraestrutura": "", "conclusao": ""}}"""
 
-    # Tentativa 1: NVIDIA NIM (sem limite diario)
-    try:
-        from openai import OpenAI
-        nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-        if nvidia_key:
-            client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
-            response = client.chat.completions.create(
-                model="meta/llama-3.1-8b-instruct",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=600,
-                temperature=0,
-            )
-            conteudo = response.choices[0].message.content or ""
-            m = re.search(r'\{[\s\S]+\}', conteudo)
-            if m:
-                logger.info("LLM interpretou (NVIDIA NIM)")
-                return json.loads(m.group(0))
-    except Exception as e:
-        logger.warning(f"NVIDIA NIM falhou: {e}")
-
-    # Tentativa 2: Gemini (fallback)
+    # Tentativa 1: Gemini (principal — rapido)
+    import time as t_infra
+    t0 = t_infra.time()
     try:
         from google import genai
         from google.genai import types
@@ -864,13 +846,69 @@ JSON:
             conteudo = response.text or ""
             m = re.search(r'\{[\s\S]+\}', conteudo)
             if m:
-                logger.info("LLM interpretou (Gemini fallback)")
+                logger.info(f"LLM interpretou (Gemini) em {t_infra.time()-t0:.1f}s")
                 return json.loads(m.group(0))
     except Exception as e:
         logger.warning(f"Gemini falhou: {e}")
 
-    logger.warning("Nenhuma LLM disponivel para interpretacao")
-    return {}
+    # Tentativa 2: Groq (fallback)
+    t0 = t_infra.time()
+    try:
+        from groq import Groq
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if groq_key:
+            client_groq = Groq(api_key=groq_key)
+            response = client_groq.chat.completions.create(
+                model="openai/gpt-oss-20b",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_completion_tokens=600,
+            )
+            conteudo = response.choices[0].message.content or ""
+            m = re.search(r'\{[\s\S]+\}', conteudo)
+            if m:
+                logger.info(f"LLM interpretou (Groq) em {t_infra.time()-t0:.1f}s")
+                return json.loads(m.group(0))
+    except Exception as e:
+        logger.warning(f"Groq falhou: {e}")
+
+    # Tentativa 3: NVIDIA NIM (ultimo fallback — timeout 30s)
+    t0 = t_infra.time()
+    try:
+        from openai import OpenAI
+        import httpx
+        nvidia_key = os.getenv("NVIDIA_API_KEY", "")
+        if nvidia_key:
+            client_nv = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=nvidia_key,
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                max_retries=0,
+            )
+            response = client_nv.chat.completions.create(
+                model="meta/llama-3.1-8b-instruct",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=600,
+                temperature=0,
+            )
+            conteudo = response.choices[0].message.content or ""
+            m = re.search(r'\{[\s\S]+\}', conteudo)
+            if m:
+                logger.info(f"LLM interpretou (NVIDIA NIM) em {t_infra.time()-t0:.1f}s")
+                return json.loads(m.group(0))
+    except Exception as e:
+        logger.warning(f"NVIDIA NIM falhou: {e}")
+
+    # Fallback deterministico: gera interpretacao em Python sem LLM
+    logger.info("Todas LLMs falharam — usando interpretacao deterministica")
+    pontos_fortes = [cat for cat, sc in scores_categoria.items() if sc >= 0.70]
+    pontos_atencao = [cat for cat, sc in scores_categoria.items() if sc < 0.50]
+    return {
+        "pontos_fortes": pontos_fortes[:4],
+        "pontos_de_atencao": pontos_atencao[:4],
+        "descricao_infraestrutura": f"Infraestrutura {classificacao} com score {score_final:.2f}.",
+        "conclusao": f"Regiao classificada como {classificacao}."
+    }
 
 
 # =============================================================================

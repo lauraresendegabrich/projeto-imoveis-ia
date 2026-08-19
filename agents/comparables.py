@@ -256,39 +256,48 @@ A justificativa deve ser curta."""
 def _chamar_llm(prompt: str) -> str:
     """
     Chama a LLM com cadeia de fallback:
-      1. NVIDIA NIM — meta/llama-3.3-70b-instruct (128k contexto, sem limite diario)
-      2. Groq (GROQ_API_KEY) — openai/gpt-oss-120b (8k tokens max)
-      3. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b (2a conta)
-      4. Gemini — gemini-3.5-flash-lite (500 req/dia)
-      5. Se tudo falhar → retorna "" (fallback numerico)
+      1. Groq (GROQ_API_KEY) — openai/gpt-oss-120b (principal)
+      2. Gemini — gemini-3.5-flash-lite (primeiro fallback)
+      3. NVIDIA NIM — meta/llama-3.3-70b-instruct (ultimo fallback, timeout 30s)
+      4. Se tudo falhar → retorna "" (fallback numerico)
     """
-    # Tentativa 1: NVIDIA NIM (128k contexto — cabe lotes grandes)
-    nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-    if nvidia_key:
-        resposta = _chamar_nvidia(prompt, nvidia_key)
-        if resposta:
-            return resposta
+    import time as t_mod
 
-    # Tentativa 2: Groq conta 1
-    logger.info("  NVIDIA falhou — tentando Groq...")
+    # Tentativa 1: Groq (principal)
+    t0 = t_mod.time()
     resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b")
     if resposta:
+        logger.info(f"    [tempo] Groq: {t_mod.time()-t0:.1f}s")
         return resposta
 
-    # Tentativa 3: Groq conta 2
+    # Tentativa 1b: Groq conta 2
     groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
     if groq_key_2:
         logger.info("  Groq 1 falhou — tentando GROQ_API_KEY_2...")
+        t0 = t_mod.time()
         resposta = _chamar_groq(prompt, groq_key_2, model="openai/gpt-oss-120b")
         if resposta:
+            logger.info(f"    [tempo] Groq KEY2: {t_mod.time()-t0:.1f}s")
             return resposta
 
-    # Tentativa 4: Gemini
-    google_key = os.getenv("GOOGLE_API_KEY", "")
+    # Tentativa 2: Gemini (primeiro fallback)
+    google_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
     if google_key:
-        logger.info("  Groq 1+2 falhou — tentando Gemini...")
+        logger.info("  Groq falhou — tentando Gemini...")
+        t0 = t_mod.time()
         resposta = _chamar_gemini(prompt, google_key)
         if resposta:
+            logger.info(f"    [tempo] Gemini: {t_mod.time()-t0:.1f}s")
+            return resposta
+
+    # Tentativa 3: NVIDIA NIM (ultimo fallback — timeout 30s, sem retries longos)
+    nvidia_key = os.getenv("NVIDIA_API_KEY", "")
+    if nvidia_key:
+        logger.info("  Gemini falhou — tentando NVIDIA NIM (timeout 30s)...")
+        t0 = t_mod.time()
+        resposta = _chamar_nvidia(prompt, nvidia_key)
+        if resposta:
+            logger.info(f"    [tempo] NVIDIA NIM: {t_mod.time()-t0:.1f}s")
             return resposta
 
     logger.warning("  Todas as LLMs falharam — usando fallback numerico")
@@ -296,14 +305,17 @@ def _chamar_llm(prompt: str) -> str:
 
 
 def _chamar_nvidia(prompt: str, api_key: str) -> str:
-    """Chama NVIDIA NIM (meta/llama-3.3-70b-instruct, 128k contexto). Retorna "" se falhar."""
+    """Chama NVIDIA NIM (meta/llama-3.3-70b-instruct). Timeout 30s, sem retries longos."""
     if not api_key:
         return ""
     try:
         from openai import OpenAI
+        import httpx
         client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=api_key,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            max_retries=0,
         )
 
         response = client.chat.completions.create(
@@ -568,23 +580,38 @@ def identificar_comparaveis(
                     f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
 
     # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Envia candidatos para LLM em lotes de 40
-    # NVIDIA NIM (128k contexto) processa lotes grandes sem problema
-    # Cadeia de fallback: NVIDIA NIM → Groq 1 → Groq 2 → Gemini → numerico
-    TAMANHO_LOTE = 40
+    # Seleciona apenas os top 60 por score numerico para julgamento da LLM.
+    # Candidatos abaixo do top 60 ficam com classificacao pelo score numerico.
+    # Envia em lotes de 20 (cabe nos limites do Groq free tier ~8k TPM).
+    MAX_PARA_LLM = 60
+    TAMANHO_LOTE = 20
 
     if usar_llm:
-        todos_classificados = []
-        lotes = [filtrados[i:i+TAMANHO_LOTE] for i in range(0, len(filtrados), TAMANHO_LOTE)]
-        logger.info(f"Enviando {len(filtrados)} candidatos para LLM em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}...")
+        import time as t_ag2
 
+        # Separa: top 60 vao pra LLM, resto usa fallback numerico
+        candidatos_llm_enviar = filtrados[:MAX_PARA_LLM]
+        candidatos_resto = filtrados[MAX_PARA_LLM:]
+
+        # Resto recebe classificacao pelo score numerico direto
+        if candidatos_resto:
+            logger.info(f"  {len(candidatos_resto)} candidatos abaixo do top {MAX_PARA_LLM} classificados por score numerico")
+            candidatos_resto = _fallback_numerico(candidatos_resto)
+
+        # Envia top 60 em lotes de 20
+        todos_classificados = []
+        lotes = [candidatos_llm_enviar[i:i+TAMANHO_LOTE] for i in range(0, len(candidatos_llm_enviar), TAMANHO_LOTE)]
+        logger.info(f"Enviando {len(candidatos_llm_enviar)} candidatos para LLM em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}...")
+
+        t_inicio_clustering = t_ag2.time()
         for num_lote, lote in enumerate(lotes, 1):
             logger.info(f"  Lote {num_lote}/{len(lotes)}: {len(lote)} candidatos...")
+            t_lote = t_ag2.time()
             prompt = _montar_prompt_clustering(imovel_alvo, lote)
             resposta = _chamar_llm(prompt)
 
             if resposta:
-                logger.info(f"  Lote {num_lote}: LLM respondeu ({len(resposta)} chars)")
+                logger.info(f"  Lote {num_lote}: LLM respondeu ({len(resposta)} chars) em {t_ag2.time()-t_lote:.1f}s")
                 lote = _parsear_resposta_llm(resposta, lote)
             else:
                 logger.warning(f"  Lote {num_lote}: LLM sem resposta — fallback numerico")
@@ -592,12 +619,14 @@ def identificar_comparaveis(
 
             todos_classificados.extend(lote)
 
-            # Pausa entre lotes para nao estourar o rate limit de tokens/min
+            # Pausa entre lotes para nao estourar o rate limit
             if num_lote < len(lotes):
-                import time
-                time.sleep(5)
+                t_ag2.sleep(3)
 
-        candidatos_llm = todos_classificados
+        logger.info(f"  [tempo] Clustering total: {t_ag2.time()-t_inicio_clustering:.1f}s")
+
+        # Combina: candidatos analisados pela LLM + resto (fallback numerico)
+        candidatos_llm = todos_classificados + candidatos_resto
 
         # Ranking global: ordena por score_similaridade (maior primeiro) e atribui ranking 1-N
         candidatos_llm.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
@@ -777,30 +806,47 @@ RESPONDA SOMENTE JSON:
   "confianca": "alta | media | baixa"
 }}"""
 
-    # Tentativa 1: NVIDIA NIM (google/gemma-4-31b-it)
-    if nvidia_key:
-        resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
-        if resultado:
-            return resultado
-        logger.info("  NVIDIA NIM visao falhou — tentando Gemini...")
-
-    # Tentativa 2: Gemini (gemini-3.5-flash-lite com response_mime_type JSON)
+    # Tentativa 1: Gemini (principal — rapido e confiavel)
+    import time as t_zona
     if google_key:
+        t0 = t_zona.time()
         resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
         if resultado:
+            logger.info(f"    [tempo] Gemini zona: {t_zona.time()-t0:.1f}s")
             return resultado
-        logger.info("  Gemini visao falhou — usando raio padrao")
+        logger.info("  Gemini visao falhou — tentando Groq Vision...")
+
+    # Tentativa 2: Groq Vision (qwen3.6-27b)
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if groq_key:
+        t0 = t_zona.time()
+        resultado = _chamar_groq_visao(prompt, img_b64, img_mime, groq_key)
+        if resultado:
+            logger.info(f"    [tempo] Groq Vision zona: {t_zona.time()-t0:.1f}s")
+            return resultado
+        logger.info("  Groq Vision falhou — tentando NVIDIA NIM (timeout 30s)...")
+
+    # Tentativa 3: NVIDIA NIM (ultimo fallback — timeout 30s)
+    if nvidia_key:
+        t0 = t_zona.time()
+        resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
+        if resultado:
+            logger.info(f"    [tempo] NVIDIA NIM zona: {t_zona.time()-t0:.1f}s")
+            return resultado
 
     return {"raio_metros": 500, "descricao_zona_homogenea": "Analise visual nao disponivel"}
 
 
 def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
-    """Chama NVIDIA NIM (google/gemma-4-31b-it) para analise visual. Retorna dict ou None."""
+    """Chama NVIDIA NIM (google/gemma-4-31b-it) para analise visual. Timeout 30s, sem retries."""
     try:
         from openai import OpenAI
+        import httpx
         client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=api_key,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            max_retries=0,
         )
 
         response = client.chat.completions.create(
@@ -828,6 +874,40 @@ def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str)
 
     except Exception as e:
         logger.warning(f"    [LLM] NVIDIA NIM visao falhou: {e}")
+        return None
+
+
+def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
+    """Chama Groq (qwen3.6-27b) com imagem para zona homogenea. Retorna dict ou None."""
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+
+        response = client.chat.completions.create(
+            model="qwen/qwen3.6-27b",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{img_mime};base64,{img_b64}"}
+                        }
+                    ]
+                }
+            ],
+            temperature=0,
+            max_completion_tokens=1024,
+        )
+
+        texto = response.choices[0].message.content or ""
+        logger.info(f"Groq Vision (qwen3.6-27b) respondeu ({len(texto)} chars)")
+
+        return _parsear_json_zona(texto)
+
+    except Exception as e:
+        logger.warning(f"    [LLM] Groq Vision falhou: {e}")
         return None
 
 
