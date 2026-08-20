@@ -109,79 +109,72 @@ class AthenaClient:
         return self.executar_query(sql)
 
     def buscar_bairro(self, cidade: str, bairro: str, tipo: str = None, limit: int = 200) -> list[dict]:
-        """Busca anúncios de um bairro específico. Tenta variações de acento."""
+        """Busca anúncios de um bairro específico. Dedup por URL, tenta variações de acento."""
         import unicodedata
         bairro_sem_acento = unicodedata.normalize("NFD", bairro).encode("ascii", "ignore").decode()
 
-        # Extrai parte principal (sem prefixos como "Jardim", "Vila", "Parque")
         palavras = bairro.split()
         prefixos_bairro = {"jardim", "jd", "jd.", "vila", "vl", "parque", "pq", "residencial", "res", "conjunto", "cj"}
         palavras_sem_prefixo = [p for p in palavras if p.lower() not in prefixos_bairro]
         parte_final = palavras_sem_prefixo[-1] if palavras_sem_prefixo else palavras[-1]
 
-        # Tentativa 1: nome exato como informado
+        def _build_dedup_sql(conditions, limit):
+            where = " AND ".join(conditions)
+            return f"""WITH base AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY url ORDER BY data_publicacao DESC) AS rn
+                FROM vivareal WHERE {where}
+            ) SELECT * FROM base WHERE rn = 1 LIMIT {limit}"""
+
+        # Tentativa 1: nome exato
         conditions = [f"cidade = '{cidade}'", f"bairro = '{bairro}'", "finalidade = 'venda'"]
         if tipo:
             conditions.append(f"tipo = '{tipo}'")
-        where = " AND ".join(conditions)
-        sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
-        resultados = self.executar_query(sql)
+        resultados = self.executar_query(_build_dedup_sql(conditions, limit))
 
         # Tentativa 2: sem acento
         if not resultados and bairro_sem_acento != bairro:
             conditions[1] = f"bairro = '{bairro_sem_acento}'"
-            where = " AND ".join(conditions)
-            sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
-            resultados = self.executar_query(sql)
+            resultados = self.executar_query(_build_dedup_sql(conditions, limit))
 
-        # Tentativa 3: LIKE com parte final (ex: "Guanabara" para "Jardim Guanabara")
+        # Tentativa 3: LIKE parte final
         if not resultados and len(parte_final) >= 4:
             conditions[1] = f"bairro LIKE '%{parte_final}%'"
-            where = " AND ".join(conditions)
-            sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
-            resultados = self.executar_query(sql)
+            resultados = self.executar_query(_build_dedup_sql(conditions, limit))
 
         return resultados
 
     def buscar_rua(self, cidade: str, bairro: str, rua: str, tipo: str = None, limit: int = 50) -> list[dict]:
-        """
-        Busca anúncios de uma rua específica.
-        Tenta variações para lidar com acentos (banco pode ter acento, input não, ou vice-versa).
-        Estratégia: busca pela parte mais significativa do nome (sobrenome/final).
-        """
+        """Busca anúncios de uma rua específica. Dedup por URL via ROW_NUMBER."""
         import unicodedata
         rua_sem_acento = unicodedata.normalize("NFD", rua).encode("ascii", "ignore").decode()
 
-        # Extrai parte final do nome (mais única, menos sensível a acento no prefixo)
-        # Ex: "Rua Conego Nery" → "Nery", "Rua Frei Antonio de Padua" → "Padua"
         palavras = rua.split()
-        # Remove prefixos comuns
         prefixos = {"rua", "avenida", "av", "av.", "alameda", "travessa", "praça", "estrada"}
         palavras_sem_prefixo = [p for p in palavras if p.lower() not in prefixos]
-        # Usa a última palavra (geralmente sobrenome — mais único)
         parte_final = palavras_sem_prefixo[-1] if palavras_sem_prefixo else palavras[-1]
 
-        # Tentativa 1: busca com o nome completo
+        def _build_dedup_sql(conditions, limit):
+            where = " AND ".join(conditions)
+            return f"""WITH base AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY url ORDER BY data_publicacao DESC) AS rn
+                FROM vivareal WHERE {where}
+            ) SELECT * FROM base WHERE rn = 1 LIMIT {limit}"""
+
+        # Tentativa 1: nome completo
         conditions = [f"cidade = '{cidade}'", f"bairro = '{bairro}'", f"rua LIKE '%{rua}%'", "finalidade = 'venda'"]
         if tipo:
             conditions.append(f"tipo = '{tipo}'")
-        where = " AND ".join(conditions)
-        sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
-        resultados = self.executar_query(sql)
+        resultados = self.executar_query(_build_dedup_sql(conditions, limit))
 
-        # Tentativa 2: sem acento no nome completo
+        # Tentativa 2: sem acento
         if not resultados and rua_sem_acento != rua:
             conditions[2] = f"rua LIKE '%{rua_sem_acento}%'"
-            where = " AND ".join(conditions)
-            sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
-            resultados = self.executar_query(sql)
+            resultados = self.executar_query(_build_dedup_sql(conditions, limit))
 
-        # Tentativa 3: só a parte final (ex: "Nery") — funciona independente de acento no meio
+        # Tentativa 3: parte final
         if not resultados and len(parte_final) >= 4:
             conditions[2] = f"rua LIKE '%{parte_final}%'"
-            where = " AND ".join(conditions)
-            sql = f"SELECT * FROM vivareal WHERE {where} LIMIT {limit}"
-            resultados = self.executar_query(sql)
+            resultados = self.executar_query(_build_dedup_sql(conditions, limit))
 
         return resultados
 

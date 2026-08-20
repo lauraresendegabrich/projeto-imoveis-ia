@@ -302,11 +302,19 @@ def _remover_duplicatas_url(imoveis: list[dict]) -> list[dict]:
     if merges_id:
         logger.info(f"  [dedup] {merges_id} merges por ID realizados")
 
-    # === PASSO 2: Dedup por URL ===
+    # === PASSO 2: Dedup por URL (normalizada) ===
+    def _norm_url(u):
+        if not u: return ""
+        u = u.strip().rstrip("/").lower()
+        for param in ["?source=", "&source=", "?utm_", "&utm_", "?from=", "&from="]:
+            idx = u.find(param)
+            if idx > 0: u = u[:idx]
+        return u
+
     por_url = {}
     final = []
     for im in resultado_id:
-        url = im.get("url", "")
+        url = _norm_url(im.get("url", ""))
         if url:
             if url not in por_url:
                 por_url[url] = im
@@ -1193,17 +1201,51 @@ def coletar_imoveis(
                 tipo_principal = list(limites.keys())[0]  # casa ou apartamento
                 athena_imoveis = client.buscar_cidade(cidade_nome, estado=estado_nome, tipo=tipo_principal)
 
-            # Remove duplicatas globais (mesmo URL em tipos diferentes)
-            urls_vistas = set()
+            # Remove duplicatas globais por URL normalizada (mesmo imovel de rua+bairro ou tipos diferentes)
+            def _normalizar_url(url):
+                """Normaliza URL para comparacao: remove trailing /, params de tracking, lowercase."""
+                if not url:
+                    return ""
+                url = url.strip().rstrip("/").lower()
+                # Remove params de tracking comuns
+                for param in ["?source=", "&source=", "?utm_", "&utm_", "?from=", "&from="]:
+                    idx = url.find(param)
+                    if idx > 0:
+                        url = url[:idx]
+                return url
+
+            antes_dedup = len(athena_imoveis)
+            urls_vistas = {}
             athena_unicos = []
+            urls_duplicadas_log = []
             for im in athena_imoveis:
-                url_im = im.get("url", "")
+                url_im = _normalizar_url(im.get("url", ""))
                 if url_im and url_im in urls_vistas:
-                    continue
-                if url_im:
-                    urls_vistas.add(url_im)
-                athena_unicos.append(im)
+                    # Merge: preserva o mais completo
+                    idx_existente = urls_vistas[url_im]
+                    existente = athena_unicos[idx_existente]
+                    # Preserva fotos do mais completo
+                    fotos_ex = existente.get("images") or []
+                    fotos_new = im.get("images") or []
+                    if len(fotos_new) > len(fotos_ex):
+                        existente["images"] = fotos_new
+                        existente["imageCount"] = len(fotos_new)
+                    # Preenche campos ausentes
+                    for campo in ["description", "descricao", "publishedAt", "data_publicacao", "lat", "lon", "latitude", "longitude", "bathrooms", "banheiros", "parkingSpaces", "vagas"]:
+                        if not existente.get(campo) and im.get(campo):
+                            existente[campo] = im[campo]
+                    urls_duplicadas_log.append((url_im, im.get("listing_id", "?")))
+                elif url_im:
+                    urls_vistas[url_im] = len(athena_unicos)
+                    athena_unicos.append(im)
+                else:
+                    athena_unicos.append(im)
             athena_imoveis = athena_unicos
+
+            duplicatas_removidas = antes_dedup - len(athena_imoveis)
+            logger.info(f"[Ag1][Athena][URL-Dedup] antes={antes_dedup} | urls_unicas={len(athena_imoveis)} | duplicatas_url_removidas={duplicatas_removidas}")
+            for url_dup, id_dup in urls_duplicadas_log[:3]:
+                logger.info(f"[Ag1][Athena][URL-Duplicada] url={url_dup[:70]} | id={id_dup}")
 
             logger.info(f"[Ag1][Athena] {len(athena_imoveis)} imoveis total")
 
