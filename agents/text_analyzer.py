@@ -125,24 +125,65 @@ def _normalizar_acabamento(v: str) -> str:
 
 
 # =============================================================================
+# PROVIDER STATE (circuit breaker por execucao)
+# =============================================================================
+
+_provider_state = {
+    "gemini": {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros_429": 0, "puladas": 0},
+    "groq": {"available": True, "reason": None, "last_request": 0.0, "chamadas": 0, "sucessos": 0, "erros_429": 0},
+    "nvidia": {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0},
+}
+
+GROQ_INTERVALO_PREVENTIVO = 8.0  # segundos entre chamadas ao Groq Vision
+
+
+def _reset_provider_state():
+    """Reseta o estado dos provedores (chamado no inicio de cada execucao)."""
+    _provider_state["gemini"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros_429": 0, "puladas": 0}
+    _provider_state["groq"] = {"available": True, "reason": None, "last_request": 0.0, "chamadas": 0, "sucessos": 0, "erros_429": 0}
+    _provider_state["nvidia"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0}
+
+
+# =============================================================================
 # CHAMADA AO LLM VISION (texto + fotos juntos)
 # =============================================================================
 
 def _analisar_imovel_vision(imovel: dict) -> dict:
     """
-    Envia titulo, descricao e fotos para o Gemini 2.5 Flash (multimodal).
-    Uma unica chamada com ate 8 fotos — o modelo analisa texto e imagens juntos.
-    Retorna {} em caso de falha.
-    Fallback: NVIDIA NIM (llama-3.2-11b-vision-instruct).
+    Envia titulo, descricao e fotos para o Gemini (multimodal).
+    Circuit breaker: se Gemini deu 429 nesta execucao, pula direto pro Groq.
+    Retorna {} em caso de falha total.
     """
+    # Tentativa 1: Gemini (se disponivel)
+    if _provider_state["gemini"]["available"]:
+        resultado = _tentar_gemini(imovel)
+        if resultado:
+            return resultado
+    else:
+        _provider_state["gemini"]["puladas"] += 1
+        logger.info(f"[Ag3][LLM] Gemini pulado | motivo={_provider_state['gemini']['reason']}")
+
+    # Tentativa 2: Groq (com intervalo preventivo)
+    if _provider_state["groq"]["available"]:
+        resultado = _tentar_groq(imovel)
+        if resultado:
+            return resultado
+
+    # Tentativa 3: NVIDIA NIM (ultimo fallback)
+    return _analisar_imovel_vision_nvidia(imovel)
+
+
+def _tentar_gemini(imovel: dict) -> dict:
+    """Tenta Gemini. Se 429, ativa circuit breaker."""
     try:
         from google import genai
         from google.genai import types
 
         api_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
         if not api_key:
-            # Fallback para NVIDIA NIM
-            return _analisar_imovel_vision_nvidia(imovel)
+            return {}
+
+        _provider_state["gemini"]["chamadas"] += 1
 
         client = genai.Client(api_key=api_key)
 
@@ -358,11 +399,36 @@ Não crie campos além dos especificados.
         resultado = json.loads(m.group(0))
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
         resultado["llm_usada"] = "gemini-3.5-flash-lite"
+        _provider_state["gemini"]["sucessos"] += 1
         return resultado
 
     except Exception as e:
-        logger.error(f"Gemini falhou: {e} — tentando Groq qwen3.6-27b")
-        return _analisar_imovel_vision_groq(imovel)
+        err_str = str(e).lower()
+        if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
+            _provider_state["gemini"]["available"] = False
+            _provider_state["gemini"]["reason"] = "quota_esgotada_nesta_execucao"
+            _provider_state["gemini"]["erros_429"] += 1
+            logger.warning(f"[Ag3][LLM] Gemini 429 → circuit_breaker ativado")
+        else:
+            logger.error(f"[Ag3][LLM] Gemini falhou: {e}")
+        return _tentar_groq(imovel)
+
+
+def _tentar_groq(imovel: dict) -> dict:
+    """Wrapper Groq com intervalo preventivo e controle de 429."""
+    # Intervalo preventivo entre chamadas
+    elapsed = time.time() - _provider_state["groq"]["last_request"]
+    if elapsed < GROQ_INTERVALO_PREVENTIVO and _provider_state["groq"]["last_request"] > 0:
+        espera = GROQ_INTERVALO_PREVENTIVO - elapsed
+        logger.info(f"[Ag3][Groq] aguardando {espera:.1f}s para respeitar limite preventivo")
+        time.sleep(espera)
+
+    _provider_state["groq"]["chamadas"] += 1
+    _provider_state["groq"]["last_request"] = time.time()
+    resultado = _analisar_imovel_vision_groq(imovel)
+    if resultado:
+        _provider_state["groq"]["sucessos"] += 1
+    return resultado
 
 
 def _analisar_imovel_vision_groq(imovel: dict) -> dict:
@@ -939,6 +1005,11 @@ def analisar_comparaveis(
     logger.info("AGENTE 3: ANALISADOR TEXTUAL")
     logger.info("=" * 60)
 
+    # Reset provider state pra esta execucao
+    _reset_provider_state()
+    logger.info(f"[Ag3][Provider] Gemini disponivel={_provider_state['gemini']['available']}")
+    logger.info(f"[Ag3][Provider] Groq disponivel={_provider_state['groq']['available']}")
+
     if comparaveis is None:
         caminho_zona = os.path.join(DATA_DIR, arquivo_entrada)
         if os.path.exists(caminho_zona):
@@ -1037,5 +1108,12 @@ def analisar_comparaveis(
     with open(caminho_saida, "w", encoding="utf-8") as f:
         json.dump(saida, f, ensure_ascii=False, indent=2)
     logger.info(f"Salvo em: {caminho_saida}")
+
+    # Resumo LLM da execucao
+    g = _provider_state["gemini"]
+    gr = _provider_state["groq"]
+    logger.info(f"[Ag3][Resumo LLM] Gemini chamadas={g['chamadas']} | sucessos={g['sucessos']} | 429={g['erros_429']} | puladas={g['puladas']}")
+    logger.info(f"[Ag3][Resumo LLM] Groq chamadas={gr['chamadas']} | sucessos={gr['sucessos']} | 429={gr['erros_429']}")
+
     return saida
 
