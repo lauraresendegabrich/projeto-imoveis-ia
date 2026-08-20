@@ -1172,28 +1172,27 @@ def coletar_imoveis(
 
             limites = LIMITES_POR_TIPO.get(tipo_imovel, LIMITES_POR_TIPO["house"])
             athena_imoveis = []
+            queries_executadas = 0
 
             for tipo_sql, limite_tipo in limites.items():
-                # PASSO 1: Busca na rua
-                imoveis_tipo_rua = []
-                if rua and bairro:
-                    imoveis_tipo_rua = client.buscar_rua(cidade_nome, bairro, rua, tipo=tipo_sql, limit=limite_tipo)
+                # Query unificada: bairro + rua com prioridade (1 query por tipo)
+                if bairro:
+                    resultado_tipo = client.buscar_bairro_rua(
+                        cidade_nome, bairro, rua=rua or "", tipo=tipo_sql, limit=limite_tipo
+                    )
+                    queries_executadas += 1
+                else:
+                    resultado_tipo = client.buscar_cidade(cidade_nome, tipo=tipo_sql, limit=limite_tipo)
+                    queries_executadas += 1
 
-                # PASSO 2: Se rua < limite, complementa com bairro
-                restante = limite_tipo - len(imoveis_tipo_rua)
-                imoveis_tipo_bairro = []
-                if restante > 0 and bairro:
-                    imoveis_tipo_bairro = client.buscar_bairro(cidade_nome, bairro, tipo=tipo_sql, limit=restante)
-                    # Remove duplicatas que já vieram na rua
-                    urls_rua = {im.get("url") for im in imoveis_tipo_rua if im.get("url")}
-                    imoveis_tipo_bairro = [im for im in imoveis_tipo_bairro if im.get("url") not in urls_rua]
-                    # Corta no restante
-                    imoveis_tipo_bairro = imoveis_tipo_bairro[:restante]
+                if resultado_tipo:
+                    # Conta quantos são da mesma rua (prioridade 0)
+                    mesma_rua = sum(1 for im in resultado_tipo if im.get("prioridade") == "0" or im.get("prioridade") == 0)
+                    bairro_count = len(resultado_tipo) - mesma_rua
+                    logger.info(f"[Ag1][Athena]   {tipo_sql}: retornados={len(resultado_tipo)} | mesma_rua={mesma_rua} | bairro={bairro_count} | urls_unicas={len(resultado_tipo)} (limite {limite_tipo})")
+                athena_imoveis.extend(resultado_tipo)
 
-                total_tipo = imoveis_tipo_rua + imoveis_tipo_bairro
-                if total_tipo:
-                    logger.info(f"[Ag1][Athena]   {tipo_sql}: {len(imoveis_tipo_rua)} rua + {len(imoveis_tipo_bairro)} bairro = {len(total_tipo)} (limite {limite_tipo})")
-                athena_imoveis.extend(total_tipo)
+            logger.info(f"[Ag1][Athena] queries_executadas={queries_executadas}")
 
             # PASSO 3: Se nada encontrado, expande pra cidade
             if not athena_imoveis and bairro:
