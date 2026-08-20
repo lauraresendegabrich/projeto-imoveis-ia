@@ -443,7 +443,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         if not api_key:
             return _analisar_imovel_vision_nvidia(imovel)
 
-        client = Groq(api_key=api_key)
+        client = Groq(api_key=api_key, max_retries=0)
 
         titulo    = imovel.get("title", "") or ""
         descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
@@ -494,7 +494,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         texto_resp = re.sub(r'```\s*', '', texto_resp)
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
-            logger.warning("Groq qwen3.6-27b nao retornou JSON valido — tentando NVIDIA NIM")
+            logger.warning("[Ag3][Groq] nao retornou JSON valido — tentando NVIDIA NIM")
             return _analisar_imovel_vision_nvidia(imovel)
 
         resultado = json.loads(m.group(0))
@@ -503,7 +503,48 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         return resultado
 
     except Exception as e:
-        logger.error(f"Groq qwen3.6-27b falhou: {e} — tentando NVIDIA NIM")
+        err_str = str(e)
+        if "429" in err_str:
+            _provider_state["groq"]["erros_429"] += 1
+            # Extrai retry_after se disponivel
+            import re as _re_retry
+            retry_match = _re_retry.search(r'(\d+(?:\.\d+)?)\s*s', err_str)
+            retry_after = retry_match.group(1) if retry_match else "?"
+            logger.warning(f"[Ag3][Groq] 429 | retry_after={retry_after}s")
+            # Espera se retry_after for curto (<= 15s) e sem outro fallback
+            if retry_after != "?" and float(retry_after) <= 15:
+                wait = float(retry_after) + 1
+                _provider_state["groq"].setdefault("tempo_espera_total", 0.0)
+                _provider_state["groq"]["tempo_espera_total"] = _provider_state["groq"].get("tempo_espera_total", 0.0) + wait
+                logger.info(f"[Ag3][Groq] aguardando {wait:.0f}s (retry_after curto)")
+                time.sleep(wait)
+                # Tenta novamente 1x
+                try:
+                    client2 = Groq(api_key=api_key, max_retries=0)
+                    response2 = client2.chat.completions.create(
+                        model="qwen/qwen3.6-27b",
+                        messages=[{"role": "user", "content": content}],
+                        temperature=0,
+                        max_completion_tokens=4096,
+                    )
+                    texto_resp2 = response2.choices[0].message.content or ""
+                    if '</think>' in texto_resp2:
+                        texto_resp2 = texto_resp2.split('</think>', 1)[1].strip()
+                    texto_resp2 = re.sub(r'```json\s*', '', texto_resp2)
+                    texto_resp2 = re.sub(r'```\s*', '', texto_resp2)
+                    m2 = re.search(r"\{[\s\S]+\}", texto_resp2)
+                    if m2:
+                        resultado2 = json.loads(m2.group(0))
+                        resultado2["fotos_analisadas"] = len(fotos_selecionadas)
+                        resultado2["llm_usada"] = "groq-qwen3.6-27b"
+                        _provider_state["groq"]["sucessos"] += 1
+                        return resultado2
+                except Exception:
+                    pass
+            # Cai pro NVIDIA
+            logger.info("[Ag3][Groq] 429 nao resolvido — tentando NVIDIA NIM")
+        else:
+            logger.error(f"[Ag3][Groq] falhou: {e}")
         return _analisar_imovel_vision_nvidia(imovel)
 
 
@@ -1112,8 +1153,9 @@ def analisar_comparaveis(
     # Resumo LLM da execucao
     g = _provider_state["gemini"]
     gr = _provider_state["groq"]
+    tempo_espera = gr.get("tempo_espera_total", 0.0)
     logger.info(f"[Ag3][Resumo LLM] Gemini chamadas={g['chamadas']} | sucessos={g['sucessos']} | 429={g['erros_429']} | puladas={g['puladas']}")
-    logger.info(f"[Ag3][Resumo LLM] Groq chamadas={gr['chamadas']} | sucessos={gr['sucessos']} | 429={gr['erros_429']}")
+    logger.info(f"[Ag3][Resumo LLM] Groq chamadas={gr['chamadas']} | sucessos={gr['sucessos']} | 429={gr['erros_429']} | tempo_espera_quota={tempo_espera:.0f}s")
 
     return saida
 
