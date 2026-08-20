@@ -1297,6 +1297,51 @@ def coletar_imoveis(
         except Exception as e:
             logger.warning(f"[Ag1][Athena] Indisponivel: {e}")
 
+    # ── DIAGNOSTICO DE DUPLICATAS DO ATHENA (antes de combinar com Apify) ──
+    if athena_imoveis:
+        from collections import Counter
+        import unicodedata as _ud
+
+        # Por listing_id
+        ids_athena = [str(im.get("listing_id") or "") for im in athena_imoveis if im.get("listing_id")]
+        ids_counter = Counter(ids_athena)
+        ids_duplicados = {k: v for k, v in ids_counter.items() if v > 1}
+        logger.info(f"[Ag1][Athena][Dedup-Diag] total_registros={len(athena_imoveis)} | ids_unicos={len(set(ids_athena))} | ids_duplicados={len(ids_duplicados)}")
+
+        for lid, cnt in list(ids_duplicados.items())[:5]:
+            registros = [im for im in athena_imoveis if str(im.get("listing_id") or "") == lid]
+            if len(registros) >= 2:
+                a, b = registros[0], registros[1]
+                logger.info(f"[Ag1][Athena][Duplicado] id={lid} | ocorrencias={cnt} | "
+                            f"tipo={a.get('propertyType') or a.get('tipo','?')} | "
+                            f"rua={a.get('street') or a.get('rua','?')} | "
+                            f"bairro={a.get('neighborhood') or a.get('bairro','?')} | "
+                            f"preco={a.get('price') or a.get('preco','?')} | "
+                            f"fotos_A={len(a.get('images') or [])} | fotos_B={len(b.get('images') or [])}")
+
+        # Por URL
+        urls_athena = [im.get("url", "") for im in athena_imoveis if im.get("url")]
+        urls_dup = {k: v for k, v in Counter(urls_athena).items() if v > 1}
+        if urls_dup:
+            logger.info(f"[Ag1][Athena][Dedup-Diag] URLs duplicadas: {len(urls_dup)}")
+
+        # Por campos combinados
+        def _norm_d(s):
+            if not s: return ""
+            return _ud.normalize("NFD", str(s)).encode("ascii", "ignore").decode().lower().strip()
+        chaves_athena = []
+        for im in athena_imoveis:
+            rua_n = _norm_d(im.get("street") or im.get("rua"))
+            bairro_n = _norm_d(im.get("neighborhood") or im.get("bairro"))
+            tipo_n = _norm_d(im.get("propertyType") or im.get("tipo"))
+            preco = int(float(im.get("price") or im.get("preco") or 0)) if im.get("price") or im.get("preco") else 0
+            area = int(float(im.get("area") or im.get("area_construida") or 0)) if im.get("area") or im.get("area_construida") else 0
+            quartos = int(float(im.get("bedrooms") or im.get("quartos") or 0)) if im.get("bedrooms") or im.get("quartos") else 0
+            chaves_athena.append(f"{rua_n}|{bairro_n}|{tipo_n}|{preco}|{area}|{quartos}")
+        campos_dup = {k: v for k, v in Counter(chaves_athena).items() if v > 1}
+        if campos_dup:
+            logger.info(f"[Ag1][Athena][Dedup-Diag] Duplicatas por campos combinados: {len(campos_dup)}")
+
     # ── FALLBACK: Apify (ocrad) — só roda se Athena retornou pouco ───
     ocrad = []
     t_ocrad = 0.0
