@@ -566,7 +566,7 @@ def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
       - "possui_indicios_de_atendimento": score 0.4
       - "dados_insuficientes": score 0.5 neutro
 
-    Score final = media simples dos 7 scores de categoria.
+    Score final = media simples dos 8 scores de categoria.
     """
     scores_categoria = {}
     detalhes_score = {}
@@ -702,11 +702,14 @@ def _calcular_score(pois_por_faixa: dict, transporte: dict) -> dict:
             "score": score,
         }
 
-    # Score final = media simples dos 7 scores
-    score_final = round(
-        max(0.0, min(1.0, sum(scores_categoria.values()) / len(scores_categoria))),
-        3
-    )
+    # Score final = media simples dos 8 scores de categoria
+    if not scores_categoria:
+        score_final = 0.5  # neutro se nenhuma categoria calculada
+    else:
+        score_final = round(
+            max(0.0, min(1.0, sum(scores_categoria.values()) / len(scores_categoria))),
+            3
+        )
 
     # Validacao de consistencia (nao interrompe execucao)
     try:

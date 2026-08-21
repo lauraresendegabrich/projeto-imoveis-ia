@@ -317,11 +317,11 @@ def _remover_duplicatas_url(imoveis: list[dict]) -> list[dict]:
         url = _norm_url(im.get("url", ""))
         if url:
             if url not in por_url:
-                por_url[url] = im
+                por_url[url] = len(final)  # guarda indice
                 final.append(im)
             else:
-                # Merge silencioso
-                idx = final.index(por_url[url])
+                # Merge silencioso — usa indice guardado
+                idx = por_url[url]
                 final[idx] = _merge(final[idx], im)
         else:
             final.append(im)

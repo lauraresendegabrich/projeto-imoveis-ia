@@ -989,12 +989,12 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
         }
         partes.append(desc_padrao.get(padrao, f"padrão {padrao}"))
     if pontos_pos and not pontos_neg:
-        partes.append(f"Destaques: {', '.join(pontos_pos[:3]).lower()}")
+        partes.append(f"Destaques: {', '.join(str(p) for p in pontos_pos[:3]).lower()}")
     elif pontos_neg and not pontos_pos:
-        partes.append(f"Atenção: {', '.join(pontos_neg[:2]).lower()}")
+        partes.append(f"Atenção: {', '.join(str(n) for n in pontos_neg[:2]).lower()}")
     elif pontos_pos and pontos_neg:
-        partes.append(f"Destaques: {', '.join(pontos_pos[:2]).lower()}")
-        partes.append(f"porém {pontos_neg[0].lower()}")
+        partes.append(f"Destaques: {', '.join(str(p) for p in pontos_pos[:2]).lower()}")
+        partes.append(f"porém {str(pontos_neg[0]).lower()}")
     if confianca == "baixa":
         partes.append("Análise limitada por poucas fotos ou descrição vaga")
     analise_qualitativa = ". ".join(partes) + "." if partes else "Sem evidências suficientes para uma análise detalhada."
