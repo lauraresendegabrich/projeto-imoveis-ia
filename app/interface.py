@@ -889,36 +889,53 @@ if "resultado" in st.session_state:
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
-                # POIs por faixa
+                # POIs por faixa — mostra destaques úteis
                 pois = infra_full.get("pois_por_faixa", {})
                 if pois:
                     st.markdown("---")
-                    st.caption("O que tem perto")
-                    # Mostra só a faixa mais próxima com 2 destaques por categoria
-                    faixa_perto = pois.get("0_400", {})
-                    total_perto = sum(len(v) for v in faixa_perto.values() if isinstance(v, list))
-                    faixa_media = pois.get("401_800", {})
-                    total_media = sum(len(v) for v in faixa_media.values() if isinstance(v, list))
-                    faixa_longe = pois.get("801_1500", {})
-                    total_longe = sum(len(v) for v in faixa_longe.values() if isinstance(v, list))
+                    st.markdown("**📍 O que tem perto do seu imóvel**")
 
-                    if total_perto > 0:
-                        linhas_pois = []
-                        for cat, items in faixa_perto.items():
-                            if items and isinstance(items, list):
-                                nomes = [p.get('nome', '?') for p in items[:2]]
-                                extra = f" (+{len(items)-2})" if len(items) > 2 else ""
-                                linhas_pois.append(f"- **{cat}**: {', '.join(nomes)}{extra}")
-                        st.markdown(f"**Até 400m** ({total_perto} pontos):\n" + "\n".join(linhas_pois))
+                    # Junta todas as faixas e mostra os mais relevantes por categoria
+                    nomes_emojis = {
+                        "comercio": "🛒", "educacao": "🏫", "saude_basica": "💊",
+                        "hospital": "🏥", "lazer": "🌳", "transporte": "🚌",
+                        "equipamentos_regionais": "🎓", "servicos_e_alimentacao": "🍽️",
+                    }
+                    linhas_destaque = []
+                    for cat in ["comercio", "educacao", "saude_basica", "hospital", "lazer", "servicos_e_alimentacao"]:
+                        # Pega os 3 mais próximos de todas as faixas
+                        todos_cat = []
+                        for faixa_nome in ["0_400", "401_800", "801_1500"]:
+                            items = pois.get(faixa_nome, {}).get(cat, [])
+                            if isinstance(items, list):
+                                todos_cat.extend(items)
+                        todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
+                        if todos_cat:
+                            emoji = nomes_emojis.get(cat, "📌")
+                            destaques = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in todos_cat[:3]]
+                            linhas_destaque.append(f"{emoji} **{cat.replace('_', ' ').title()}**: {' · '.join(destaques)}")
+                    if linhas_destaque:
+                        st.markdown("\n\n".join(linhas_destaque))
 
-                    # Resumo das outras faixas
-                    resumo_faixas = []
-                    if total_media > 0:
-                        resumo_faixas.append(f"401-800m: {total_media} pontos")
-                    if total_longe > 0:
-                        resumo_faixas.append(f"801-1500m: {total_longe} pontos")
-                    if resumo_faixas:
-                        st.caption(" | ".join(resumo_faixas))
+                    # Resumo total
+                    total_all = sum(len(v) for fd in pois.values() for v in fd.values() if isinstance(v, list))
+                    st.caption(f"Total: {total_all} pontos de interesse mapeados até 1500m")
+
+                # Imobiliária mais próxima
+                imob = infra_full.get("imobiliaria_proxima", {})
+                if imob and imob.get("encontrada"):
+                    st.markdown("---")
+                    st.markdown("**📞 Imobiliária mais próxima**")
+                    nome_imob = imob.get("nome", "?")
+                    tel_imob = imob.get("telefone", "")
+                    end_imob = imob.get("endereco", "")
+                    dist_imob = imob.get("distancia_metros", "?")
+                    if tel_imob:
+                        st.write(f"**{nome_imob}** — {tel_imob}")
+                    else:
+                        st.write(f"**{nome_imob}**")
+                    if end_imob:
+                        st.caption(f"📍 {end_imob} ({dist_imob}m)")
 
         # Ag.5
         m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
