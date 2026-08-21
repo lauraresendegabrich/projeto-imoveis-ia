@@ -249,8 +249,8 @@ NORMALIZADORES = {
     "saude_basica": 5,
     "transporte": 8,
     "lazer": 5,
-    "hospital": 3,
-    "equipamentos_regionais": 3,
+    "hospital": 2,
+    "equipamentos_regionais": 2,
     "servicos_e_alimentacao": 5,
 }
 
