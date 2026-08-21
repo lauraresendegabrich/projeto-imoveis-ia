@@ -902,7 +902,7 @@ if "resultado" in st.session_state:
                         "equipamentos_regionais": "🎓", "servicos_e_alimentacao": "🍽️",
                     }
                     linhas_destaque = []
-                    for cat in ["comercio", "educacao", "saude_basica", "hospital", "lazer", "servicos_e_alimentacao"]:
+                    for cat in ["comercio", "educacao", "saude_basica", "hospital", "lazer", "equipamentos_regionais", "transporte", "servicos_e_alimentacao"]:
                         # Pega os 3 mais próximos de todas as faixas
                         todos_cat = []
                         for faixa_nome in ["0_400", "401_800", "801_1500"]:
@@ -912,7 +912,11 @@ if "resultado" in st.session_state:
                         todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
                         if todos_cat:
                             emoji = nomes_emojis.get(cat, "📌")
-                            destaques = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in todos_cat[:3]]
+                            # Filtra POIs sem nome real
+                            com_nome = [p for p in todos_cat if p.get("nome") and p.get("nome") != "?"]
+                            if not com_nome:
+                                com_nome = todos_cat  # usa todos se nenhum tem nome
+                            destaques = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in com_nome[:3]]
                             linhas_destaque.append(f"{emoji} **{cat.replace('_', ' ').title()}**: {' · '.join(destaques)}")
                     if linhas_destaque:
                         st.markdown("\n\n".join(linhas_destaque))
