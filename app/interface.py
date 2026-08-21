@@ -905,11 +905,17 @@ if "resultado" in st.session_state:
                     for cat in ["comercio", "educacao", "saude_basica", "hospital", "lazer", "equipamentos_regionais", "transporte", "servicos_e_alimentacao"]:
                         # Pega os 3 mais próximos de todas as faixas
                         todos_cat = []
-                        for faixa_nome in ["0_400", "401_800", "801_1500"]:
-                            items = pois.get(faixa_nome, {}).get(cat, [])
-                            if isinstance(items, list):
-                                todos_cat.extend(items)
-                        todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
+                        if cat == "transporte":
+                            # Transporte vem de campo separado
+                            trans_data = infra_full.get("transporte", {})
+                            todos_cat = trans_data.get("paradas", []) + trans_data.get("estacoes", [])
+                            todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
+                        else:
+                            for faixa_nome in ["0_400", "401_800", "801_1500"]:
+                                items = pois.get(faixa_nome, {}).get(cat, [])
+                                if isinstance(items, list):
+                                    todos_cat.extend(items)
+                            todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
                         if todos_cat:
                             emoji = nomes_emojis.get(cat, "📌")
                             # Filtra POIs sem nome real
