@@ -351,11 +351,11 @@ def _remover_duplicatas_url(imoveis: list[dict]) -> list[dict]:
 
         chave = f"{rua_n}|{bairro_n}|{tipo_n}|{preco}|{area}|{quartos}"
         if chave not in chaves_vistas:
-            chaves_vistas[chave] = im
+            chaves_vistas[chave] = len(resultado_final)  # guarda o indice
             resultado_final.append(im)
         else:
-            # Merge silencioso
-            idx = resultado_final.index(chaves_vistas[chave])
+            # Merge silencioso — usa indice guardado
+            idx = chaves_vistas[chave]
             resultado_final[idx] = _merge(resultado_final[idx], im)
 
     # Verificacao final
