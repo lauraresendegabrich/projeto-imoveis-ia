@@ -1045,13 +1045,16 @@ def _buscar_pois_classificados(
                 )
 
 
-                if len(coords) < 2:
-                    continue
-
-
-                lon_p = float(coords[0])
-
-                lat_p = float(coords[1])
+                if len(coords) >= 2 and isinstance(coords[0], (int, float)):
+                    lon_p = float(coords[0])
+                    lat_p = float(coords[1])
+                else:
+                    lon_p = prop.get('lon')
+                    lat_p = prop.get('lat')
+                    if lon_p is None or lat_p is None:
+                        continue
+                    lon_p = float(lon_p)
+                    lat_p = float(lat_p)
 
 
                 cats = (
@@ -1574,15 +1577,16 @@ def _buscar_transporte(
             )
 
 
-            if len(coords) < 2:
-                continue
-
-
-            lon_p = float(
-                coords[0]
-            )
-
-            lat_p = float(
+            if len(coords) >= 2 and isinstance(coords[0], (int, float)):
+                lon_p = float(coords[0])
+                lat_p = float(coords[1])
+            else:
+                lon_p = prop.get('lon')
+                lat_p = prop.get('lat')
+                if lon_p is None or lat_p is None:
+                    continue
+                lon_p = float(lon_p)
+                lat_p = float(
                 coords[1]
             )
 
@@ -2079,15 +2083,16 @@ def _buscar_imobiliaria_proxima(
         )
 
 
-        if len(coords) < 2:
-            continue
-
-
-        lon_p = float(
-            coords[0]
-        )
-
-        lat_p = float(
+        if len(coords) >= 2 and isinstance(coords[0], (int, float)):
+            lon_p = float(coords[0])
+            lat_p = float(coords[1])
+        else:
+            lon_p = prop.get('lon')
+            lat_p = prop.get('lat')
+            if lon_p is None or lat_p is None:
+                continue
+            lon_p = float(lon_p)
+            lat_p = float(
             coords[1]
         )
 
