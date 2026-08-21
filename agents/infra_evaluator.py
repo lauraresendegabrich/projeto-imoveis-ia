@@ -244,14 +244,14 @@ LIMITES_SERVICOS_ALIMENTACAO = {
 
 
 NORMALIZADORES = {
-    "comercio": 12,
-    "educacao": 8,
-    "saude_basica": 10,
-    "transporte": 12,
-    "lazer": 8,
-    "hospital": 4,
-    "equipamentos_regionais": 4,
-    "servicos_e_alimentacao": 10,
+    "comercio": 7,
+    "educacao": 4,
+    "saude_basica": 5,
+    "transporte": 8,
+    "lazer": 5,
+    "hospital": 3,
+    "equipamentos_regionais": 3,
+    "servicos_e_alimentacao": 5,
 }
 
 
