@@ -919,11 +919,13 @@ if "resultado" in st.session_state:
                         if todos_cat:
                             emoji = nomes_emojis.get(cat, "📌")
                             # Filtra POIs sem nome real
-                            com_nome = [p for p in todos_cat if p.get("nome") and p.get("nome") != "?"]
+                            com_nome = [p for p in todos_cat if p.get("nome") and p.get("nome") != "?" and p.get("nome") != "parada"]
                             if not com_nome:
                                 com_nome = todos_cat  # usa todos se nenhum tem nome
                             destaques = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in com_nome[:3]]
-                            linhas_destaque.append(f"{emoji} **{cat.replace('_', ' ').title()}**: {' · '.join(destaques)}")
+                            qtd_total = len(todos_cat)
+                            extra_qtd = f" — {qtd_total} encontrados" if qtd_total > 3 else ""
+                            linhas_destaque.append(f"{emoji} **{cat.replace('_', ' ').title()}** ({qtd_total}): {' · '.join(destaques)}")
                     if linhas_destaque:
                         st.markdown("\n\n".join(linhas_destaque))
 
