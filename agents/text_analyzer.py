@@ -28,14 +28,14 @@ FLUXO:
 CADEIA DE FALLBACK (LLMs):
     ALVO: Gemini (ate 2 tentativas em 429 curto) -> Groq -> NVIDIA
     COMPARAVEIS: Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
-    Gemini: ate 4 fotos + JSON Schema
+    Gemini: ate 4 fotos + JSON
     Groq qwen3.6-27b: ate 2 fotos + JSON Object Mode
-    NVIDIA NIM llama-3.2-11b-vision: 1 foto + JSON Schema
+    NVIDIA NIM llama-3.2-11b-vision: 1 foto + JSON solicitado no prompt
 
 SAIDA ESTRUTURADA:
-    - Gemini: response_mime_type=application/json + response_schema
-    - Groq/Qwen: response_format={"type": "json_object"}
-    - NVIDIA NIM: response_format={"type": "json_schema", ...}
+    - Gemini: response_mime_type=application/json; validacao final em Python
+    - Groq/Qwen: response_format={"type": "json_object"}; validacao final em Python
+    - NVIDIA NIM: JSON solicitado no prompt, sem JSON Schema rigido; validacao tolerante em Python
 
 CALCULO DO SCORE (deterministico, Python):
     Base: 0.50
@@ -87,6 +87,7 @@ import re
 import json
 import time
 import logging
+import unicodedata
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -171,9 +172,10 @@ CARACTERISTICAS_CONDOMINIO_CONTROLADAS = [
 # =============================================================================
 #
 # O mesmo contrato logico e usado nos tres provedores.
-# Gemini e NVIDIA recebem o JSON Schema diretamente.
-# O Groq/Qwen usa JSON Object Mode (o modelo garante JSON valido, enquanto
-# o Python continua validando/normalizando os campos).
+# O schema abaixo documenta o contrato esperado. A validacao final e feita
+# em Python para nao perder informacao util por pequenas variacoes textuais.
+# Groq/Qwen usa JSON Object Mode. Gemini usa application/json. NVIDIA recebe
+# o formato esperado no prompt, sem JSON Schema rigido na API.
 #
 SCHEMA_AGENTE3 = {
     "type": "object",
@@ -314,44 +316,133 @@ def _deduplicar_lista(valores) -> list:
     return saida
 
 
-def _filtrar_controlados(valores, permitidos: list) -> list:
-    """Mantem somente itens do vocabulario controlado, preservando ordem."""
-    mapa = {str(item).casefold(): item for item in permitidos}
-    saida = []
-    vistos = set()
+def _chave_vocabulario(valor) -> str:
+    """
+    Normaliza texto para comparacao de vocabulario sem perder o valor original.
+    Remove acentos e trata '_'/'-' como espaco.
+    """
+    texto = str(valor or "").strip().casefold()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    texto = re.sub(r"[_\-]+", " ", texto)
+    texto = re.sub(r"\s+", " ", texto).strip()
+    return texto
+
+
+# Variacoes equivalentes que podem ser devolvidas pelos modelos.
+# Apenas equivalencias seguras viram itens pontuaveis. Termos mais livres
+# continuam preservados em observacoes e NAO alteram o score.
+_ALIASES_NEGATIVOS = {
+    "documentacao irregular": "documentação irregular",
+    "infiltracao": "infiltração/umidade",
+    "infiltracao/umidade": "infiltração/umidade",
+    "infiltracao e umidade": "infiltração/umidade",
+    "precisa de reforma": "precisa reforma",
+    "necessita reforma": "precisa reforma",
+    "necessita de reforma": "precisa reforma",
+    "pintura deteriorada": "pintura deteriorada",
+    "pintura descascada": "pintura deteriorada",
+    "acabamento desgastado": "acabamento desgastado",
+    "acabamentos desgastados": "acabamento desgastado",
+    "danos visiveis": "danos visíveis",
+    "dano visivel": "danos visíveis",
+}
+
+_ALIASES_POSITIVOS = {
+    "armarios planejados": "armários planejados",
+    "boa iluminacao natural": "boa iluminação natural",
+    "integracao de ambientes": "integração de ambientes",
+    "area externa privativa": "área externa privativa",
+}
+
+_ALIASES_UNIDADE = {
+    "suite": "suíte",
+    "vaga garagem": "vaga de garagem",
+    "vaga": "vaga de garagem",
+    "ar condicionado": "ar-condicionado",
+}
+
+_ALIASES_CONDOMINIO = {
+    "portao eletronico": "portão eletrônico",
+    "cameras de seguranca": "câmeras de segurança",
+    "piscina condominio": "piscina do condomínio",
+    "salao de festas": "salão de festas",
+}
+
+
+def _filtrar_controlados_com_extras(
+    valores,
+    permitidos: list,
+    aliases: Optional[dict] = None,
+) -> tuple[list, list]:
+    """
+    Separa itens pontuaveis/controlados de textos livres.
+
+    - Itens equivalentes ao vocabulario sao convertidos para a forma canonica.
+    - Itens fora do vocabulario NAO sao apagados: voltam em `extras` para
+      serem preservados em observacoes, sem afetar o score.
+    """
+    mapa = {_chave_vocabulario(item): item for item in permitidos}
+    for alias, canonico in (aliases or {}).items():
+        mapa[_chave_vocabulario(alias)] = canonico
+
+    controlados = []
+    extras = []
+    vistos_controlados = set()
+    vistos_extras = set()
+
     for valor in _deduplicar_lista(valores):
-        chave = valor.casefold()
+        chave = _chave_vocabulario(valor)
         canonico = mapa.get(chave)
-        if canonico is None or chave in vistos:
+
+        if canonico is not None:
+            chave_canonica = _chave_vocabulario(canonico)
+            if chave_canonica not in vistos_controlados:
+                vistos_controlados.add(chave_canonica)
+                controlados.append(canonico)
             continue
-        vistos.add(chave)
-        saida.append(canonico)
-    return saida
+
+        if chave and chave not in vistos_extras:
+            vistos_extras.add(chave)
+            extras.append(valor)
+
+    return controlados, extras
+
+
+def _filtrar_controlados(valores, permitidos: list) -> list:
+    """Compatibilidade: retorna apenas a parte controlada."""
+    controlados, _ = _filtrar_controlados_com_extras(valores, permitidos)
+    return controlados
 
 
 def _validar_saida_llm(dados: dict) -> dict:
     """
-    Garante o contrato minimo do Agente 3 mesmo quando o provedor usa
-    JSON Object Mode sem enforcement de schema (caso do Groq/Qwen).
+    Normaliza a resposta dos provedores sem destruir informacao util.
+
+    Estado/padrao aceitam variacoes textuais conhecidas.
+    Somente vocabulario controlado altera o score.
+    Qualquer item livre devolvido em positivos/negativos/caracteristicas e
+    preservado em `observacoes` em vez de ser descartado.
     """
     if not isinstance(dados, dict):
         return {}
 
-    estado = str(dados.get("estado_conservacao", "desconhecido")).strip().lower()
-    if estado not in {
-        "novo", "reformado", "bom", "regular", "precisa_reforma", "desconhecido"
-    }:
-        estado = "desconhecido"
+    estado = _normalizar_conservacao(
+        dados.get("estado_conservacao", "desconhecido")
+    )
+    padrao = _normalizar_acabamento(
+        dados.get("padrao_acabamento", "desconhecido")
+    )
 
-    padrao = str(dados.get("padrao_acabamento", "desconhecido")).strip().lower()
-    if padrao not in {"alto_padrao", "medio", "simples", "desconhecido"}:
-        padrao = "desconhecido"
-
-    qualidade = str(dados.get("qualidade_imagens", "razoavel")).strip().lower()
+    qualidade = _chave_vocabulario(
+        dados.get("qualidade_imagens", "razoavel")
+    )
     if qualidade not in {"boa", "razoavel", "ruim"}:
         qualidade = "razoavel"
 
-    confianca = str(dados.get("confianca_extracao", "baixa")).strip().lower()
+    confianca = _chave_vocabulario(
+        dados.get("confianca_extracao", "baixa")
+    )
     if confianca not in {"baixa", "media", "alta"}:
         confianca = "baixa"
 
@@ -359,13 +450,46 @@ def _validar_saida_llm(dados: dict) -> dict:
     if not isinstance(evidencias, dict):
         evidencias = {}
 
+    positivos, positivos_livres = _filtrar_controlados_com_extras(
+        dados.get("pontos_positivos", []),
+        PONTOS_POSITIVOS_CONTROLADOS,
+        _ALIASES_POSITIVOS,
+    )
+    negativos, negativos_livres = _filtrar_controlados_com_extras(
+        dados.get("pontos_negativos", []),
+        PONTOS_NEGATIVOS_CONTROLADOS,
+        _ALIASES_NEGATIVOS,
+    )
+    unidade, unidade_livre = _filtrar_controlados_com_extras(
+        dados.get("caracteristicas_unidade", []),
+        CARACTERISTICAS_UNIDADE_CONTROLADAS,
+        _ALIASES_UNIDADE,
+    )
+    condominio, condominio_livre = _filtrar_controlados_com_extras(
+        dados.get("caracteristicas_condominio", []),
+        CARACTERISTICAS_CONDOMINIO_CONTROLADAS,
+        _ALIASES_CONDOMINIO,
+    )
+
+    observacoes_originais = dados.get("observacoes", [])
+    if not isinstance(observacoes_originais, list):
+        observacoes_originais = [observacoes_originais] if observacoes_originais else []
+
+    observacoes = _deduplicar_lista(
+        observacoes_originais
+        + positivos_livres
+        + negativos_livres
+        + unidade_livre
+        + condominio_livre
+    )
+
     return {
         "estado_conservacao": estado,
         "padrao_acabamento": padrao,
-        "pontos_positivos": _filtrar_controlados(dados.get("pontos_positivos", []), PONTOS_POSITIVOS_CONTROLADOS),
-        "pontos_negativos": _filtrar_controlados(dados.get("pontos_negativos", []), PONTOS_NEGATIVOS_CONTROLADOS),
-        "caracteristicas_unidade": _filtrar_controlados(dados.get("caracteristicas_unidade", []), CARACTERISTICAS_UNIDADE_CONTROLADAS),
-        "caracteristicas_condominio": _filtrar_controlados(dados.get("caracteristicas_condominio", []), CARACTERISTICAS_CONDOMINIO_CONTROLADAS),
+        "pontos_positivos": positivos,
+        "pontos_negativos": negativos,
+        "caracteristicas_unidade": unidade,
+        "caracteristicas_condominio": condominio,
         "limitacoes_analise": _deduplicar_lista(dados.get("limitacoes_analise", [])),
         "qualidade_imagens": qualidade,
         "confianca_extracao": confianca,
@@ -373,7 +497,7 @@ def _validar_saida_llm(dados: dict) -> dict:
             "conservacao": _deduplicar_lista(evidencias.get("conservacao", [])),
             "acabamento": _deduplicar_lista(evidencias.get("acabamento", [])),
         },
-        "observacoes": _deduplicar_lista(dados.get("observacoes", [])),
+        "observacoes": observacoes,
     }
 
 
@@ -537,10 +661,33 @@ caracteristicas_unidade deve conter somente:
 caracteristicas_condominio deve conter somente:
 {'; '.join(CARACTERISTICAS_CONDOMINIO_CONTROLADAS)}
 
-Se uma informacao relevante nao estiver nesses vocabularios, coloque-a
-em observacoes. Nao duplique itens entre listas.
+Se uma informacao relevante nao estiver nesses vocabularios, NAO a descarte:
+coloque-a em observacoes como texto livre. Isso vale especialmente para um
+ponto de atencao objetivo que nao tenha equivalente exato em pontos_negativos.
+Itens em observacoes sao informativos e NAO alteram o score.
+Nao duplique itens entre listas.
 
-Responda somente conforme o formato JSON estruturado solicitado pela API.
+FORMATO OBRIGATORIO DA RESPOSTA
+Use exatamente estas chaves:
+{{
+  "estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",
+  "padrao_acabamento": "alto_padrao|medio|simples|desconhecido",
+  "pontos_positivos": [],
+  "pontos_negativos": [],
+  "caracteristicas_unidade": [],
+  "caracteristicas_condominio": [],
+  "limitacoes_analise": [],
+  "qualidade_imagens": "boa|razoavel|ruim",
+  "confianca_extracao": "baixa|media|alta",
+  "evidencias": {{
+    "conservacao": [],
+    "acabamento": []
+  }},
+  "observacoes": []
+}}
+
+Os textos com "|" acima indicam alternativas permitidas: escolha apenas UMA delas.
+Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSON.
 """
 
 # =============================================================================
@@ -553,8 +700,13 @@ _NORM_CONSERVACAO = {
     "recém reformado": "reformado", "recem reformado": "reformado",
     "bom": "bom", "excelente": "bom", "ótimo": "bom", "otimo": "bom",
     "impecável": "bom", "impecavel": "bom", "pronto para morar": "bom",
-    "regular": "regular", "precisa_reforma": "precisa_reforma",
+    "bom estado": "bom", "bom estado de conservação": "bom",
+    "bom estado de conservacao": "bom", "bem conservado": "bom",
+    "bem conservada": "bom",
+    "regular": "regular", "estado regular": "regular",
+    "precisa_reforma": "precisa_reforma",
     "precisa de reforma": "precisa_reforma", "necessita reforma": "precisa_reforma",
+    "necessita de reforma": "precisa_reforma",
     "desconhecido": "desconhecido", "indefinido": "desconhecido",
 }
 
@@ -562,18 +714,33 @@ _NORM_ACABAMENTO = {
     "alto_padrao": "alto_padrao", "alto padrao": "alto_padrao",
     "alto padrão": "alto_padrao", "alto": "alto_padrao",
     "luxo": "alto_padrao", "premium": "alto_padrao",
+    "padrao alto": "alto_padrao", "padrão alto": "alto_padrao",
     "medio": "medio", "médio": "medio", "bom": "medio",
-    "simples": "simples", "desconhecido": "desconhecido",
+    "padrao medio": "medio", "padrão médio": "medio",
+    "acabamento medio": "medio", "acabamento médio": "medio",
+    "simples": "simples", "padrao simples": "simples", "padrão simples": "simples",
+    "acabamento simples": "simples", "desconhecido": "desconhecido",
     "indefinido": "desconhecido",
 }
 
 
+def _buscar_normalizado(valor, mapa: dict, padrao: str = "desconhecido") -> str:
+    """Busca por chave literal e, se necessario, por forma sem acento/underscore."""
+    bruto = str(valor or "").strip().casefold()
+    if bruto in mapa:
+        return mapa[bruto]
+
+    chave = _chave_vocabulario(bruto)
+    mapa_flex = {_chave_vocabulario(k): v for k, v in mapa.items()}
+    return mapa_flex.get(chave, padrao)
+
+
 def _normalizar_conservacao(v: str) -> str:
-    return _NORM_CONSERVACAO.get(str(v).lower().strip(), "desconhecido")
+    return _buscar_normalizado(v, _NORM_CONSERVACAO)
 
 
 def _normalizar_acabamento(v: str) -> str:
-    return _NORM_ACABAMENTO.get(str(v).lower().strip(), "desconhecido")
+    return _buscar_normalizado(v, _NORM_ACABAMENTO)
 
 
 # =============================================================================
@@ -606,59 +773,130 @@ def _reset_provider_state():
 # CHAMADA AO LLM VISION (texto + fotos juntos)
 # =============================================================================
 
+def _resultado_conclusivo(resultado: dict) -> bool:
+    """
+    Considera conclusiva uma resposta que trouxe informacao qualitativa util.
+    JSON valido com estado/padrao desconhecidos e confianca baixa nao encerra
+    prematuramente a cadeia de fallback.
+    """
+    if not isinstance(resultado, dict) or not resultado:
+        return False
+
+    estado = _normalizar_conservacao(
+        resultado.get("estado_conservacao", "desconhecido")
+    )
+    padrao = _normalizar_acabamento(
+        resultado.get("padrao_acabamento", "desconhecido")
+    )
+    confianca = _chave_vocabulario(
+        resultado.get("confianca_extracao", "baixa")
+    )
+
+    if estado != "desconhecido" or padrao != "desconhecido":
+        return True
+    if resultado.get("pontos_positivos") or resultado.get("pontos_negativos"):
+        return True
+    if confianca in {"media", "alta"}:
+        return True
+    return False
+
+
+def _riqueza_resultado(resultado: dict) -> int:
+    """Pontua apenas para escolher o melhor fallback inconclusivo."""
+    if not isinstance(resultado, dict) or not resultado:
+        return -1
+
+    score = 0
+    if _normalizar_conservacao(resultado.get("estado_conservacao")) != "desconhecido":
+        score += 5
+    if _normalizar_acabamento(resultado.get("padrao_acabamento")) != "desconhecido":
+        score += 4
+
+    score += min(len(resultado.get("pontos_positivos") or []), 3)
+    score += min(len(resultado.get("pontos_negativos") or []), 3)
+    score += min(len(resultado.get("observacoes") or []), 2)
+    evidencias = resultado.get("evidencias") or {}
+    if isinstance(evidencias, dict):
+        score += min(len(evidencias.get("conservacao") or []), 2)
+        score += min(len(evidencias.get("acabamento") or []), 2)
+    return score
+
+
+def _melhor_resultado(*resultados: dict) -> dict:
+    validos = [r for r in resultados if isinstance(r, dict) and r]
+    return max(validos, key=_riqueza_resultado) if validos else {}
+
+
 def _analisar_imovel_vision(imovel: dict, is_alvo: bool = False) -> dict:
     """
-    Roteamento dos provedores do Agente 3.
+    Roteamento centralizado dos provedores.
 
-    IMOVEL ALVO:
-        1. Gemini — prioridade maxima, com ate 2 tentativas em 429 curto
-        2. Groq/Qwen
-        3. NVIDIA NIM (fallback interno do fluxo Groq)
+    ALVO:
+        Gemini -> Groq -> NVIDIA
 
     COMPARAVEIS:
-        1. Groq/Qwen
-        2. NVIDIA NIM (fallback interno do fluxo Groq)
-        3. Gemini — somente como ultimo fallback, sem retry de 429
+        Groq -> NVIDIA -> Gemini
 
-    A ideia e preservar a cota do Gemini para o imovel alvo, onde a analise
-    multimodal com mais fotos tem maior impacto na avaliacao final.
+    Resposta "desconhecido/desconhecido" com confianca baixa nao encerra
+    prematuramente o fluxo: o proximo provedor ainda e tentado.
     """
     if is_alvo:
-        logger.info(
-            "[Ag3][Roteamento][Alvo] prioridade: Gemini -> Groq -> NVIDIA"
-        )
+        logger.info("[Ag3][Roteamento][Alvo] prioridade: Gemini -> Groq -> NVIDIA")
 
-        resultado = _tentar_gemini(
+        gemini = _tentar_gemini(
             imovel,
             permitir_retry_429=True,
             max_tentativas=GEMINI_MAX_TENTATIVAS_ALVO,
         )
-        if resultado:
-            return resultado
+        if _resultado_conclusivo(gemini):
+            return gemini
+        if gemini:
+            logger.info("[Ag3][Roteamento][Alvo] Gemini respondeu, mas foi inconclusivo")
 
-        logger.info(
-            "[Ag3][Roteamento][Alvo] Gemini indisponivel/falhou -> tentando Groq"
-        )
-        return _tentar_groq(imovel)
+        logger.info("[Ag3][Roteamento][Alvo] tentando Groq")
+        groq = _tentar_groq(imovel)
+        if _resultado_conclusivo(groq):
+            return groq
+        if groq:
+            logger.info("[Ag3][Roteamento][Alvo] Groq respondeu, mas foi inconclusivo")
 
-    # Comparaveis: poupa Gemini e usa primeiro os provedores de volume.
-    logger.info(
-        "[Ag3][Roteamento][Comparavel] prioridade: Groq -> NVIDIA -> Gemini"
-    )
+        logger.info("[Ag3][Roteamento][Alvo] tentando NVIDIA")
+        nvidia = _analisar_imovel_vision_nvidia(imovel)
+        if nvidia:
+            return nvidia
 
-    resultado = _tentar_groq(imovel)
-    if resultado:
-        return resultado
+        return _melhor_resultado(gemini, groq)
 
-    # Se Groq e seu fallback NVIDIA falharem, Gemini vira ultimo recurso.
-    logger.info(
-        "[Ag3][Roteamento][Comparavel] Groq/NVIDIA falharam -> Gemini ultimo fallback"
-    )
-    return _tentar_gemini(
+    logger.info("[Ag3][Roteamento][Comparavel] prioridade: Groq -> NVIDIA -> Gemini")
+
+    groq = _tentar_groq(imovel)
+    if _resultado_conclusivo(groq):
+        return groq
+
+    if groq:
+        logger.info("[Ag3][Roteamento][Comparavel] Groq inconclusivo -> tentando NVIDIA")
+    else:
+        logger.info("[Ag3][Roteamento][Comparavel] Groq falhou/indisponivel -> tentando NVIDIA")
+
+    nvidia = _analisar_imovel_vision_nvidia(imovel)
+    if _resultado_conclusivo(nvidia):
+        return nvidia
+
+    if nvidia:
+        logger.info("[Ag3][Roteamento][Comparavel] NVIDIA inconclusiva -> Gemini ultimo fallback")
+    else:
+        logger.info("[Ag3][Roteamento][Comparavel] NVIDIA falhou -> Gemini ultimo fallback")
+
+    gemini = _tentar_gemini(
         imovel,
         permitir_retry_429=False,
         max_tentativas=1,
     )
+    if _resultado_conclusivo(gemini):
+        return gemini
+
+    return _melhor_resultado(gemini, nvidia, groq)
+
 
 def _extrair_retry_after_segundos(erro: str):
     """
@@ -765,6 +1003,10 @@ REGRAS FUNDAMENTAIS
 14. caracteristicas_unidade e caracteristicas_condominio sao informativas e NAO alteram o score.
 15. Se algo relevante nao estiver no vocabulario permitido, registre em observacoes.
 16. Nao duplique informacoes entre listas.
+17. Se identificar uma informacao relevante que nao tenha equivalente exato
+    nos vocabularios controlados, preserve-a em observacoes. Nunca descarte
+    um achado relevante apenas por nao estar no vocabulario pontuavel.
+18. observacoes aceita texto livre e NAO altera o score.
 
 POSITIVOS PERMITIDOS
 {'; '.join(PONTOS_POSITIVOS_CONTROLADOS)}
@@ -784,7 +1026,27 @@ padrao_acabamento: alto_padrao | medio | simples | desconhecido
 qualidade_imagens: boa | razoavel | ruim
 confianca_extracao: baixa | media | alta
 
-Responda SOMENTE conforme o JSON Schema configurado na API.
+FORMATO OBRIGATORIO DA RESPOSTA
+Use exatamente estas chaves:
+{{
+  "estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",
+  "padrao_acabamento": "alto_padrao|medio|simples|desconhecido",
+  "pontos_positivos": [],
+  "pontos_negativos": [],
+  "caracteristicas_unidade": [],
+  "caracteristicas_condominio": [],
+  "limitacoes_analise": [],
+  "qualidade_imagens": "boa|razoavel|ruim",
+  "confianca_extracao": "baixa|media|alta",
+  "evidencias": {{
+    "conservacao": [],
+    "acabamento": []
+  }},
+  "observacoes": []
+}}
+
+Os textos com "|" acima indicam alternativas permitidas: escolha apenas UMA delas.
+Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSON.
 """
 
     parts = [types.Part.from_text(text=prompt_texto)]
@@ -914,13 +1176,17 @@ def _tentar_groq(imovel: dict) -> dict:
 
 
 def _analisar_imovel_vision_groq(imovel: dict) -> dict:
-    """Fallback Groq: ate 2 fotos + JSON Object Mode."""
+    """
+    Chamada Groq pura: ate 2 fotos + JSON Object Mode.
+    Nao chama NVIDIA internamente. O fallback fica centralizado no roteador.
+    """
     try:
         from groq import Groq
 
         api_key = os.getenv("GROQ_API_KEY", "")
         if not api_key:
-            return _analisar_imovel_vision_nvidia(imovel)
+            logger.warning("[Ag3][Groq] chave nao configurada")
+            return {}
 
         client = Groq(api_key=api_key, max_retries=0)
         images = imovel.get("images", []) or []
@@ -931,20 +1197,22 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         for url in fotos_selecionadas:
             content.append({"type": "image_url", "image_url": {"url": url}})
 
-        response = client.chat.completions.create(
-            model="qwen/qwen3.6-27b",
-            messages=[{"role": "user", "content": content}],
-            temperature=0,
-            max_completion_tokens=1400,
-            reasoning_effort="none",
-            response_format={"type": "json_object"},
-        )
+        def _executar(client_obj):
+            return client_obj.chat.completions.create(
+                model="qwen/qwen3.6-27b",
+                messages=[{"role": "user", "content": content}],
+                temperature=0,
+                max_completion_tokens=1400,
+                reasoning_effort="none",
+                response_format={"type": "json_object"},
+            )
 
+        response = _executar(client)
         texto_resp = response.choices[0].message.content or ""
         resultado = _validar_saida_llm(_parse_json_obj(texto_resp))
         if not resultado:
-            logger.warning("[Ag3][Groq] JSON Object Mode retornou objeto inutilizavel — tentando NVIDIA NIM")
-            return _analisar_imovel_vision_nvidia(imovel)
+            logger.warning("[Ag3][Groq] JSON Object Mode retornou objeto inutilizavel")
+            return {}
 
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
         resultado["llm_usada"] = "groq-qwen3.6-27b"
@@ -954,89 +1222,117 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         err_str = str(e)
         if "429" in err_str:
             _provider_state["groq"]["erros_429"] += 1
-            import re as _re_retry
-            retry_match = _re_retry.search(r"(\d+(?:\.\d+)?)\s*s", err_str)
-            retry_after = retry_match.group(1) if retry_match else "?"
-            logger.warning(f"[Ag3][Groq] 429 | retry_after={retry_after}s")
+            retry_after = _extrair_retry_after_segundos(err_str)
+            logger.warning(
+                "[Ag3][Groq] 429 | retry_after="
+                + (f"{retry_after:.2f}s" if retry_after is not None else "nao_informado")
+            )
 
-            if retry_after != "?" and float(retry_after) <= 15:
-                wait = float(retry_after) + 1
+            if retry_after is not None and retry_after <= 15:
+                wait = retry_after + 1
                 _provider_state["groq"].setdefault("tempo_espera_total", 0.0)
-                _provider_state["groq"]["tempo_espera_total"] = _provider_state["groq"].get("tempo_espera_total", 0.0) + wait
-                logger.info(f"[Ag3][Groq] aguardando {wait:.0f}s (retry_after curto)")
+                _provider_state["groq"]["tempo_espera_total"] += wait
+                logger.info(f"[Ag3][Groq] aguardando {wait:.1f}s (retry_after curto)")
                 time.sleep(wait)
                 try:
                     client2 = Groq(api_key=api_key, max_retries=0)
-                    response2 = client2.chat.completions.create(
-                        model="qwen/qwen3.6-27b",
-                        messages=[{"role": "user", "content": content}],
-                        temperature=0,
-                        max_completion_tokens=1400,
-                        reasoning_effort="none",
-                        response_format={"type": "json_object"},
-                    )
+                    response2 = _executar(client2)
                     texto_resp2 = response2.choices[0].message.content or ""
                     resultado2 = _validar_saida_llm(_parse_json_obj(texto_resp2))
                     if resultado2:
                         resultado2["fotos_analisadas"] = len(fotos_selecionadas)
                         resultado2["llm_usada"] = "groq-qwen3.6-27b"
                         return resultado2
-                except Exception:
-                    pass
+                except Exception as retry_error:
+                    logger.warning(f"[Ag3][Groq] retry falhou: {retry_error}")
 
-            logger.info("[Ag3][Groq] 429 nao resolvido — tentando NVIDIA NIM")
-        else:
-            logger.error(f"[Ag3][Groq] falhou: {e}")
-        return _analisar_imovel_vision_nvidia(imovel)
+            logger.info("[Ag3][Groq] 429 nao resolvido — devolvendo controle ao roteador")
+            return {}
+
+        logger.error(f"[Ag3][Groq] falhou: {e}")
+        return {}
+
 
 def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
-    """Ultimo fallback: NVIDIA NIM, 1 foto + JSON Schema."""
+    """
+    NVIDIA NIM: 1 foto, JSON solicitado no prompt e normalizacao tolerante.
+
+    Mantem o comportamento que funcionava melhor anteriormente:
+    nao usa JSON Schema rigido na API. A resposta e parseada e validada
+    em Python, preservando observacoes livres.
+    """
+    _provider_state["nvidia"]["chamadas"] += 1
+
     try:
         from openai import OpenAI
 
         api_key = os.getenv("NVIDIA_API_KEY", "")
         if not api_key:
-            logger.warning("NVIDIA_API_KEY nao configurada")
+            logger.warning("[Ag3][NVIDIA] NVIDIA_API_KEY nao configurada")
             return {}
 
-        client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=api_key)
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key,
+        )
+
         images = imovel.get("images", []) or []
         fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_NVIDIA)
         prompt_texto = _prompt_compacto(imovel, len(fotos_selecionadas))
 
+        prompt_texto += """
+IMPORTANTE PARA A RESPOSTA NVIDIA:
+- Retorne APENAS um objeto JSON valido.
+- Use exatamente as chaves solicitadas no prompt.
+- Se houver evidencia razoavel no conjunto foto + descricao + dados,
+  classifique estado e padrao; nao escolha "desconhecido" apenas por haver
+  uma unica foto.
+- Se observar algo relevante fora dos vocabularios controlados, preserve
+  essa informacao em observacoes. Nao a descarte.
+"""
+
         content = [{"type": "text", "text": prompt_texto}]
         if fotos_selecionadas:
-            content.append({"type": "image_url", "image_url": {"url": fotos_selecionadas[0]}})
+            content.append(
+                {"type": "image_url", "image_url": {"url": fotos_selecionadas[0]}}
+            )
 
         response = client.chat.completions.create(
             model="meta/llama-3.2-11b-vision-instruct",
             messages=[{"role": "user", "content": content}],
-            max_tokens=900,
+            max_tokens=1000,
             temperature=0,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "analise_imovel",
-                    "schema": SCHEMA_AGENTE3,
-                },
-            },
         )
 
         texto_resp = response.choices[0].message.content or ""
-        resultado_nim = _validar_saida_llm(_parse_json_obj(texto_resp))
+        bruto = _parse_json_obj(texto_resp)
+        if not bruto:
+            logger.warning("[Ag3][NVIDIA] nao retornou JSON utilizavel")
+            _provider_state["nvidia"]["erros"] += 1
+            return {}
+
+        resultado_nim = _validar_saida_llm(bruto)
         if not resultado_nim:
-            logger.warning("[Ag3][NVIDIA] resposta estruturada vazia/invalida")
+            logger.warning("[Ag3][NVIDIA] resposta JSON nao passou na validacao")
+            _provider_state["nvidia"]["erros"] += 1
             return {}
 
         resultado_nim["fotos_analisadas"] = len(fotos_selecionadas)
         resultado_nim["llm_usada"] = "nvidia-llama-3.2-11b-vision"
+        _provider_state["nvidia"]["sucessos"] += 1
+
+        logger.info(
+            "[Ag3][NVIDIA] resposta | "
+            f"estado={resultado_nim.get('estado_conservacao')} | "
+            f"padrao={resultado_nim.get('padrao_acabamento')} | "
+            f"confianca={resultado_nim.get('confianca_extracao')} | "
+            f"observacoes={len(resultado_nim.get('observacoes') or [])}"
+        )
         return resultado_nim
 
-    except json.JSONDecodeError:
-        logger.warning("JSON invalido retornado pela NVIDIA NIM")
-        return {}
     except Exception as e:
-        logger.error(f"Erro ao chamar NVIDIA NIM: {e}")
+        _provider_state["nvidia"]["erros"] += 1
+        logger.error(f"[Ag3][NVIDIA] erro ao chamar NIM: {e}")
         return {}
 
 
@@ -1539,7 +1835,9 @@ def analisar_comparaveis(
     g = _provider_state["gemini"]
     gr = _provider_state["groq"]
     tempo_espera = gr.get("tempo_espera_total", 0.0)
+    nv = _provider_state["nvidia"]
     logger.info(f"[Ag3][Resumo LLM] Gemini chamadas={g['chamadas']} | sucessos={g['sucessos']} | 429={g['erros_429']} | puladas={g['puladas']}")
     logger.info(f"[Ag3][Resumo LLM] Groq chamadas={gr['chamadas']} | sucessos={gr['sucessos']} | 429={gr['erros_429']} | tempo_espera_quota={tempo_espera:.0f}s")
+    logger.info(f"[Ag3][Resumo LLM] NVIDIA chamadas={nv['chamadas']} | sucessos={nv['sucessos']} | erros={nv['erros']}")
 
     return saida
