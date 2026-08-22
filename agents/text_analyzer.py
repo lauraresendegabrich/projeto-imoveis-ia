@@ -431,7 +431,15 @@ def _normalizar_amenities(valor, limite: int = MAX_AMENITIES) -> list:
 
 
 def _prompt_compacto(imovel: dict, qtd_fotos: int) -> str:
-    """Prompt enxuto usado nos fallbacks para reduzir consumo de tokens."""
+    """
+    Prompt usado por Groq/NVIDIA.
+
+    Importante:
+    - uma única foto NÃO torna automaticamente a análise inconclusiva;
+    - descrição, amenities e dados estruturados também são evidências;
+    - "desconhecido" só deve ser usado quando o conjunto das evidências
+      realmente não permitir uma classificação razoável.
+    """
     titulo = imovel.get("title", "") or ""
     descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
     tipo = imovel.get("propertyType", "") or ""
@@ -444,36 +452,130 @@ def _prompt_compacto(imovel: dict, qtd_fotos: int) -> str:
     amenities = _normalizar_amenities(imovel.get("amenities"))
     amenities_txt = "; ".join(amenities) if amenities else "nao informado"
 
-    return f"""Voce e um avaliador imobiliario especializado em analise qualitativa.
-Foram fornecidas exatamente {qtd_fotos} imagem(ns).
+    return f"""Voce e um avaliador imobiliario especializado em analise qualitativa de imoveis.
+Foram fornecidas exatamente {qtd_fotos} imagem(ns) nesta chamada.
 
-DADOS
+Analise o CONJUNTO das evidencias:
+- imagens;
+- titulo;
+- descricao;
+- dados estruturados;
+- amenities informadas no anuncio.
+
+DADOS DO IMOVEL
 Titulo: {titulo[:200]}
-Descricao: {descricao[:MAX_DESC_CHARS]}
-Tipo: {tipo} | Area: {area} m2 | Area do terreno: {area_terreno} m2 | Quartos: {quartos} | Banheiros: {banheiros} | Suites: {suites} | Vagas: {vagas}
+Descricao:
+{descricao[:MAX_DESC_CHARS]}
+
+Tipo: {tipo}
+Area: {area} m2
+Area do terreno: {area_terreno} m2
+Quartos: {quartos}
+Banheiros: {banheiros}
+Suites: {suites}
+Vagas: {vagas}
 Amenities: {amenities_txt}
 
-REGRAS
-- Use apenas evidencias das imagens, descricao e campos estruturados.
-- Nao invente nem complete texto truncado.
-- Poucas fotos, ambientes ausentes, descricao incompleta e imagens repetidas pertencem apenas a limitacoes_analise.
-- Acabamento antigo, madeira aparente, piso antigo ou estilo simples nao sao defeitos por si so.
-- Estado de conservacao e padrao de acabamento sao independentes.
-- Nao use preco/localizacao/IPTU/condominio para inferir conservacao ou padrao.
-- Amenities do condominio nao provam acabamento interno.
-- Se houver somente 1 foto, nao classifique alto_padrao apenas pela imagem; sem evidencias suficientes, use medio ou desconhecido.
-- pontos_positivos e pontos_negativos devem conter SOMENTE itens dos vocabularios abaixo.
-- caracteristicas_unidade e caracteristicas_condominio sao informativas e NAO alteram o score.
-- Se uma informacao relevante nao estiver nos vocabularios, registre em observacoes.
-- Nao duplique itens.
+REGRA CENTRAL
+Uma quantidade pequena de fotos NAO significa automaticamente que
+estado_conservacao ou padrao_acabamento devam ser "desconhecido".
 
-POSITIVOS PERMITIDOS: {'; '.join(PONTOS_POSITIVOS_CONTROLADOS)}
-NEGATIVOS PERMITIDOS: {'; '.join(PONTOS_NEGATIVOS_CONTROLADOS)}
-CARACTERISTICAS DA UNIDADE: {'; '.join(CARACTERISTICAS_UNIDADE_CONTROLADAS)}
-CARACTERISTICAS DO CONDOMINIO: {'; '.join(CARACTERISTICAS_CONDOMINIO_CONTROLADAS)}
+Mesmo com 1 foto, use a descricao e os demais dados como evidencias.
+Use "desconhecido" SOMENTE quando o conjunto de texto + imagens + dados
+for realmente insuficiente, contraditorio ou nao trouxer qualquer evidencia
+util para aquela classificacao.
+
+ESTADO DE CONSERVACAO
+Escolha exatamente uma opcao:
+- "novo": evidencia clara de imovel novo, recem-construido, recem-entregue
+  ou nunca habitado.
+- "reformado": evidencia clara de reforma/modernizacao relevante.
+- "bom": imovel aparentemente bem conservado, funcional, sem sinais
+  relevantes de deterioracao ou necessidade evidente de intervencao.
+  Acabamentos antigos podem estar em bom estado.
+- "regular": existem sinais concretos de desgaste, manutencao pendente,
+  pintura deteriorada, pequenos danos ou acabamento visivelmente desgastado.
+- "precisa_reforma": existem evidencias claras de deterioracao significativa,
+  danos relevantes, infiltracao/umidade importante ou necessidade de reforma.
+- "desconhecido": somente quando o conjunto das evidencias nao permite
+  classificar de modo razoavel.
+
+PADRAO DE ACABAMENTO
+Escolha exatamente uma opcao:
+- "alto_padrao": evidencia consistente de materiais/acabamentos superiores.
+- "medio": acabamentos intermediarios, adequados e de boa apresentacao.
+- "simples": acabamentos basicos e funcionais.
+- "desconhecido": somente quando nao ha evidencia suficiente para diferenciar
+  simples, medio ou alto_padrao.
+
+REGRAS IMPORTANTES
+1. Nao invente informacoes e nao complete frases truncadas.
+2. Nao confunda conservacao com padrao de acabamento.
+3. Acabamento antigo, madeira aparente, piso antigo ou estilo simples
+   NAO significam automaticamente estado regular ou necessidade de reforma.
+4. So use pontos_negativos quando houver problema objetivo.
+5. Poucas fotos, ambientes nao fotografados, imagens repetidas ou descricao
+   incompleta sao limitacoes_analise, nunca defeitos do imovel.
+6. Limitacoes da analise NAO reduzem diretamente o score.
+7. Nao use preco, preco/m2, bairro, cidade, rua, IPTU ou condominio para
+   inferir conservacao ou padrao.
+8. Amenities do condominio nao provam acabamento interno da unidade.
+9. Se houver apenas 1 foto, evite afirmar "alto_padrao" APENAS pela foto.
+   Entretanto, se descricao + amenities + imagem trouxerem evidencias
+   suficientes, classifique normalmente como simples, medio, bom, reformado etc.
+10. Nao escolha "desconhecido" apenas por cautela. Escolha-o somente quando
+    realmente faltarem evidencias.
+
+VOCABULARIO CONTROLADO
+pontos_positivos deve conter somente:
+{'; '.join(PONTOS_POSITIVOS_CONTROLADOS)}
+
+pontos_negativos deve conter somente:
+{'; '.join(PONTOS_NEGATIVOS_CONTROLADOS)}
+
+caracteristicas_unidade deve conter somente:
+{'; '.join(CARACTERISTICAS_UNIDADE_CONTROLADAS)}
+
+caracteristicas_condominio deve conter somente:
+{'; '.join(CARACTERISTICAS_CONDOMINIO_CONTROLADAS)}
+
+Se uma informacao relevante nao estiver nesses vocabularios, coloque-a
+em observacoes. Nao duplique itens entre listas.
 
 Responda somente conforme o formato JSON estruturado solicitado pela API.
 """
+
+# =============================================================================
+# NORMALIZACAO DE VOCABULARIO
+# =============================================================================
+
+_NORM_CONSERVACAO = {
+    "novo": "novo", "lancamento": "novo", "lançamento": "novo",
+    "nunca habitado": "novo", "reformado": "reformado",
+    "recém reformado": "reformado", "recem reformado": "reformado",
+    "bom": "bom", "excelente": "bom", "ótimo": "bom", "otimo": "bom",
+    "impecável": "bom", "impecavel": "bom", "pronto para morar": "bom",
+    "regular": "regular", "precisa_reforma": "precisa_reforma",
+    "precisa de reforma": "precisa_reforma", "necessita reforma": "precisa_reforma",
+    "desconhecido": "desconhecido", "indefinido": "desconhecido",
+}
+
+_NORM_ACABAMENTO = {
+    "alto_padrao": "alto_padrao", "alto padrao": "alto_padrao",
+    "alto padrão": "alto_padrao", "alto": "alto_padrao",
+    "luxo": "alto_padrao", "premium": "alto_padrao",
+    "medio": "medio", "médio": "medio", "bom": "medio",
+    "simples": "simples", "desconhecido": "desconhecido",
+    "indefinido": "desconhecido",
+}
+
+
+def _normalizar_conservacao(v: str) -> str:
+    return _NORM_CONSERVACAO.get(str(v).lower().strip(), "desconhecido")
+
+
+def _normalizar_acabamento(v: str) -> str:
+    return _NORM_ACABAMENTO.get(str(v).lower().strip(), "desconhecido")
 
 
 # =============================================================================
@@ -651,19 +753,20 @@ Amenities: {amenities_txt}
 REGRAS FUNDAMENTAIS
 1. Use SOMENTE informacoes visiveis nas imagens, explicitamente presentes na descricao ou nos campos estruturados.
 2. Nao invente, nao complete frases truncadas e nao presuma caracteristicas comuns.
-3. Se faltarem evidencias, use desconhecido e reduza a confianca.
-4. Ausencia de informacao NAO e defeito do imovel.
-5. Poucas fotos, ambientes nao fotografados, imagens repetidas/concentradas e descricao incompleta pertencem apenas a limitacoes_analise.
-6. Acabamento antigo, madeira aparente, piso/revestimento antigo ou estilo simples nao sao negativos por si so.
-7. Estado de conservacao e padrao de acabamento sao independentes.
-8. Nao use preco, preco/m2, bairro, cidade, rua, IPTU ou condominio para inferir conservacao ou padrao.
-9. Amenities do condominio nao provam acabamento interno.
-10. Considere as imagens em conjunto e nao generalize um problema localizado.
-11. Se houver somente 1 foto, NAO classifique alto_padrao apenas pela imagem; sem evidencias textuais/visuais suficientes de materiais superiores, use medio ou desconhecido conforme o conjunto.
-12. pontos_positivos e pontos_negativos sao VOCABULARIOS CONTROLADOS. Nao escreva frases livres nesses campos.
-13. caracteristicas_unidade e caracteristicas_condominio sao informativas e NAO alteram o score.
-14. Se algo relevante nao estiver no vocabulario permitido, registre em observacoes.
-15. Nao duplique informacoes entre listas.
+3. Use "desconhecido" SOMENTE quando o conjunto de texto + imagens + dados estruturados realmente nao permitir uma classificacao razoavel.
+4. Uma quantidade pequena de fotos NAO torna automaticamente a analise inconclusiva: considere tambem descricao, amenities e dados estruturados.
+5. Ausencia de informacao NAO e defeito do imovel.
+6. Poucas fotos, ambientes nao fotografados, imagens repetidas/concentradas e descricao incompleta pertencem apenas a limitacoes_analise.
+7. Acabamento antigo, madeira aparente, piso/revestimento antigo ou estilo simples nao sao negativos por si so.
+8. Estado de conservacao e padrao de acabamento sao independentes.
+9. Nao use preco, preco/m2, bairro, cidade, rua, IPTU ou condominio para inferir conservacao ou padrao.
+10. Amenities do condominio nao provam acabamento interno.
+11. Considere as imagens em conjunto e nao generalize um problema localizado.
+12. Se houver somente 1 foto, NAO classifique alto_padrao apenas pela imagem. Porem, uma unica foto nao obriga estado ou padrao a serem desconhecidos: use descricao, amenities e dados estruturados quando trouxerem evidencias suficientes.
+13. pontos_positivos e pontos_negativos sao VOCABULARIOS CONTROLADOS. Nao escreva frases livres nesses campos.
+14. caracteristicas_unidade e caracteristicas_condominio sao informativas e NAO alteram o score.
+15. Se algo relevante nao estiver no vocabulario permitido, registre em observacoes.
+16. Nao duplique informacoes entre listas.
 
 POSITIVOS PERMITIDOS
 {'; '.join(PONTOS_POSITIVOS_CONTROLADOS)}
@@ -1194,13 +1297,9 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
             "observacoes": obs_fallback,
         }
 
-    # Normaliza (a validacao ja foi feita em _validar_saida_llm, mas o fallback pode nao ter passado por la)
-    estado    = str(dados.get("estado_conservacao", "desconhecido")).strip().lower()
-    if estado not in ("novo", "reformado", "bom", "regular", "precisa_reforma", "desconhecido"):
-        estado = "desconhecido"
-    padrao    = str(dados.get("padrao_acabamento", "desconhecido")).strip().lower()
-    if padrao not in ("alto_padrao", "medio", "simples", "desconhecido"):
-        padrao = "desconhecido"
+    # Normaliza
+    estado    = _normalizar_conservacao(dados.get("estado_conservacao", "desconhecido"))
+    padrao    = _normalizar_acabamento(dados.get("padrao_acabamento", "desconhecido"))
     confianca = str(dados.get("confianca_extracao", "baixa")).lower().strip()
     if confianca not in ("alta", "media", "baixa"):
         confianca = "baixa"
@@ -1409,7 +1508,9 @@ def analisar_comparaveis(
         im["analise_qualitativa"] = analise
         llm_usada = analise.get("llm_usada", "fallback")
         logger.info(f"[Ag3][Comparavel {idx}/{len(comparaveis)}] LLM={llm_usada} | tempo={t1-t0:.1f}s | "
-                    f"estado={analise['estado_conservacao']} | score={analise['scores']['score_qualitativo']}")
+                    f"estado={analise['estado_conservacao']} | padrao={analise['padrao_acabamento']} | "
+                    f"confianca={analise.get('confianca_extracao', 'baixa')} | "
+                    f"score={analise['scores']['score_qualitativo']}")
         if analise["status"] == "ok":
             com_ok += 1
         else:
