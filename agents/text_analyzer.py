@@ -811,7 +811,6 @@ Responda SOMENTE conforme o JSON Schema configurado na API.
                 config=types.GenerateContentConfig(
                     temperature=0,
                     response_mime_type="application/json",
-                    response_schema=SCHEMA_AGENTE3,
                 ),
             )
 
