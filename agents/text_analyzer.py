@@ -1,5 +1,5 @@
 """
-Agente 3 - Analisador Qualitativo de Descricao e Imagens
+Agente 3 - Analisador Qualitativo de Descricao e Imagens (vocabulario controlado)
 ==========================================================
 
 RESPONSABILIDADE:
@@ -26,9 +26,16 @@ FLUXO:
     5. Salva em data/imoveis_analisados_ag3.json
 
 CADEIA DE FALLBACK (LLMs):
-    1. Gemini Flash Lite (GOOGLE_API_KEY) — operacionalmente ate 4 fotos por chamada
-    2. Groq qwen3.6-27b (GROQ_API_KEY) — operacionalmente ate 2 fotos por chamada
-    3. NVIDIA NIM llama-3.2-11b-vision (NVIDIA_API_KEY) — 1 foto por chamada
+    ALVO: Gemini (ate 2 tentativas em 429 curto) -> Groq -> NVIDIA
+    COMPARAVEIS: Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
+    Gemini: ate 4 fotos + JSON Schema
+    Groq qwen3.6-27b: ate 2 fotos + JSON Object Mode
+    NVIDIA NIM llama-3.2-11b-vision: 1 foto + JSON Schema
+
+SAIDA ESTRUTURADA:
+    - Gemini: response_mime_type=application/json + response_schema
+    - Groq/Qwen: response_format={"type": "json_object"}
+    - NVIDIA NIM: response_format={"type": "json_schema", ...}
 
 CALCULO DO SCORE (deterministico, Python):
     Base: 0.50
@@ -51,8 +58,10 @@ REGRA NEUTRA:
 SAIDA POR IMOVEL:
     - estado_conservacao (novo/reformado/bom/regular/precisa_reforma/desconhecido)
     - padrao_acabamento (alto_padrao/medio/simples/desconhecido)
-    - pontos_positivos (lista)
-    - pontos_negativos (lista)
+    - pontos_positivos (vocabulario controlado; pode alterar score)
+    - pontos_negativos (vocabulario controlado; pode alterar score)
+    - caracteristicas_unidade (vocabulario controlado; informativo)
+    - caracteristicas_condominio (vocabulario controlado; informativo)
     - qualidade_imagens (boa/razoavel/ruim)
     - confianca_extracao (alta/media/baixa)
     - evidencias (conservacao: [], acabamento: [])
@@ -103,6 +112,271 @@ MAX_FOTOS_GROQ = 2
 MAX_FOTOS_NVIDIA = 1
 MAX_DESC_CHARS = 1500
 MAX_AMENITIES = 20
+
+# =============================================================================
+# VOCABULARIOS CONTROLADOS
+# =============================================================================
+# Somente pontos positivos/negativos controlados podem alterar o score.
+# Caracteristicas da unidade e do condominio sao informativas.
+PONTOS_POSITIVOS_CONTROLADOS = [
+    "acabamento diferenciado",
+    "cozinha planejada",
+    "armários planejados",
+    "varanda gourmet",
+    "vista livre",
+    "boa iluminação natural",
+    "integração de ambientes",
+    "área externa privativa",
+    "churrasqueira privativa",
+    "piscina privativa",
+]
+
+PONTOS_NEGATIVOS_CONTROLADOS = [
+    "documentação irregular",
+    "infiltração/umidade",
+    "precisa reforma",
+    "pintura deteriorada",
+    "acabamento desgastado",
+    "danos visíveis",
+]
+
+CARACTERISTICAS_UNIDADE_CONTROLADAS = [
+    "varanda",
+    "suíte",
+    "vaga de garagem",
+    "closet",
+    "ar-condicionado",
+    "bancada em granito",
+    "banheira",
+    "quarto de despejo",
+    "copa",
+    "lavabo",
+]
+
+CARACTERISTICAS_CONDOMINIO_CONTROLADAS = [
+    "interfone",
+    "portão eletrônico",
+    "câmeras de segurança",
+    "alarme",
+    "portaria",
+    "elevador",
+    "piscina do condomínio",
+    "academia",
+    "salão de festas",
+    "playground",
+]
+
+# =============================================================================
+# SCHEMA UNICO DA RESPOSTA DO AGENTE 3
+# =============================================================================
+#
+# O mesmo contrato logico e usado nos tres provedores.
+# Gemini e NVIDIA recebem o JSON Schema diretamente.
+# O Groq/Qwen usa JSON Object Mode (o modelo garante JSON valido, enquanto
+# o Python continua validando/normalizando os campos).
+#
+SCHEMA_AGENTE3 = {
+    "type": "object",
+    "properties": {
+        "estado_conservacao": {
+            "type": "string",
+            "enum": [
+                "novo",
+                "reformado",
+                "bom",
+                "regular",
+                "precisa_reforma",
+                "desconhecido",
+            ],
+        },
+        "padrao_acabamento": {
+            "type": "string",
+            "enum": [
+                "alto_padrao",
+                "medio",
+                "simples",
+                "desconhecido",
+            ],
+        },
+        "pontos_positivos": {
+            "type": "array",
+            "items": {"type": "string", "enum": PONTOS_POSITIVOS_CONTROLADOS},
+        },
+        "pontos_negativos": {
+            "type": "array",
+            "items": {"type": "string", "enum": PONTOS_NEGATIVOS_CONTROLADOS},
+        },
+        "caracteristicas_unidade": {
+            "type": "array",
+            "items": {"type": "string", "enum": CARACTERISTICAS_UNIDADE_CONTROLADAS},
+        },
+        "caracteristicas_condominio": {
+            "type": "array",
+            "items": {"type": "string", "enum": CARACTERISTICAS_CONDOMINIO_CONTROLADAS},
+        },
+        "limitacoes_analise": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "qualidade_imagens": {
+            "type": "string",
+            "enum": ["boa", "razoavel", "ruim"],
+        },
+        "confianca_extracao": {
+            "type": "string",
+            "enum": ["baixa", "media", "alta"],
+        },
+        "evidencias": {
+            "type": "object",
+            "properties": {
+                "conservacao": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "acabamento": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["conservacao", "acabamento"],
+            "additionalProperties": False,
+        },
+        "observacoes": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": [
+        "estado_conservacao",
+        "padrao_acabamento",
+        "pontos_positivos",
+        "pontos_negativos",
+        "caracteristicas_unidade",
+        "caracteristicas_condominio",
+        "limitacoes_analise",
+        "qualidade_imagens",
+        "confianca_extracao",
+        "evidencias",
+        "observacoes",
+    ],
+    "additionalProperties": False,
+}
+
+
+def _parse_json_obj(texto: str) -> dict:
+    """
+    Converte a resposta do provedor em dict.
+
+    Com structured output/JSON mode a resposta normalmente ja e JSON puro.
+    O pequeno fallback de limpeza existe apenas para compatibilidade com
+    respostas antigas ou provedores que eventualmente envolvam o JSON em
+    bloco Markdown.
+    """
+    if not texto:
+        return {}
+
+    texto = str(texto).strip()
+    if "</think>" in texto:
+        texto = texto.split("</think>", 1)[1].strip()
+
+    texto = re.sub(r"^```json\s*", "", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"^```\s*", "", texto)
+    texto = re.sub(r"\s*```$", "", texto).strip()
+
+    try:
+        obj = json.loads(texto)
+        return obj if isinstance(obj, dict) else {}
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]*\}", texto)
+        if not m:
+            return {}
+        try:
+            obj = json.loads(m.group(0))
+            return obj if isinstance(obj, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
+def _deduplicar_lista(valores) -> list:
+    """Remove duplicatas textuais preservando a ordem."""
+    if not isinstance(valores, list):
+        return []
+
+    vistos = set()
+    saida = []
+    for valor in valores:
+        item = str(valor).strip()
+        if not item:
+            continue
+        chave = item.casefold()
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        saida.append(item)
+    return saida
+
+
+def _filtrar_controlados(valores, permitidos: list) -> list:
+    """Mantem somente itens do vocabulario controlado, preservando ordem."""
+    mapa = {str(item).casefold(): item for item in permitidos}
+    saida = []
+    vistos = set()
+    for valor in _deduplicar_lista(valores):
+        chave = valor.casefold()
+        canonico = mapa.get(chave)
+        if canonico is None or chave in vistos:
+            continue
+        vistos.add(chave)
+        saida.append(canonico)
+    return saida
+
+
+def _validar_saida_llm(dados: dict) -> dict:
+    """
+    Garante o contrato minimo do Agente 3 mesmo quando o provedor usa
+    JSON Object Mode sem enforcement de schema (caso do Groq/Qwen).
+    """
+    if not isinstance(dados, dict):
+        return {}
+
+    estado = str(dados.get("estado_conservacao", "desconhecido")).strip().lower()
+    if estado not in {
+        "novo", "reformado", "bom", "regular", "precisa_reforma", "desconhecido"
+    }:
+        estado = "desconhecido"
+
+    padrao = str(dados.get("padrao_acabamento", "desconhecido")).strip().lower()
+    if padrao not in {"alto_padrao", "medio", "simples", "desconhecido"}:
+        padrao = "desconhecido"
+
+    qualidade = str(dados.get("qualidade_imagens", "razoavel")).strip().lower()
+    if qualidade not in {"boa", "razoavel", "ruim"}:
+        qualidade = "razoavel"
+
+    confianca = str(dados.get("confianca_extracao", "baixa")).strip().lower()
+    if confianca not in {"baixa", "media", "alta"}:
+        confianca = "baixa"
+
+    evidencias = dados.get("evidencias")
+    if not isinstance(evidencias, dict):
+        evidencias = {}
+
+    return {
+        "estado_conservacao": estado,
+        "padrao_acabamento": padrao,
+        "pontos_positivos": _filtrar_controlados(dados.get("pontos_positivos", []), PONTOS_POSITIVOS_CONTROLADOS),
+        "pontos_negativos": _filtrar_controlados(dados.get("pontos_negativos", []), PONTOS_NEGATIVOS_CONTROLADOS),
+        "caracteristicas_unidade": _filtrar_controlados(dados.get("caracteristicas_unidade", []), CARACTERISTICAS_UNIDADE_CONTROLADAS),
+        "caracteristicas_condominio": _filtrar_controlados(dados.get("caracteristicas_condominio", []), CARACTERISTICAS_CONDOMINIO_CONTROLADAS),
+        "limitacoes_analise": _deduplicar_lista(dados.get("limitacoes_analise", [])),
+        "qualidade_imagens": qualidade,
+        "confianca_extracao": confianca,
+        "evidencias": {
+            "conservacao": _deduplicar_lista(evidencias.get("conservacao", [])),
+            "acabamento": _deduplicar_lista(evidencias.get("acabamento", [])),
+        },
+        "observacoes": _deduplicar_lista(dados.get("observacoes", [])),
+    }
 
 
 def _selecionar_fotos(images: list, limite: int) -> list:
@@ -171,69 +445,35 @@ def _prompt_compacto(imovel: dict, qtd_fotos: int) -> str:
     amenities_txt = "; ".join(amenities) if amenities else "nao informado"
 
     return f"""Voce e um avaliador imobiliario especializado em analise qualitativa.
-Foram fornecidas exatamente {qtd_fotos} imagem(ns) nesta chamada.
-Use somente o que estiver visivel nas imagens, explicitamente escrito na descricao ou nos campos estruturados.
+Foram fornecidas exatamente {qtd_fotos} imagem(ns).
 
 DADOS
 Titulo: {titulo[:200]}
 Descricao: {descricao[:MAX_DESC_CHARS]}
 Tipo: {tipo} | Area: {area} m2 | Area do terreno: {area_terreno} m2 | Quartos: {quartos} | Banheiros: {banheiros} | Suites: {suites} | Vagas: {vagas}
-Amenities informadas no anuncio: {amenities_txt}
+Amenities: {amenities_txt}
 
 REGRAS
-- Nao invente nem complete frases truncadas.
-- Nao diga que recebeu quantidade de imagens diferente de {qtd_fotos}.
-- Se as imagens mostrarem o mesmo ambiente, registre isso em limitacoes_analise.
-- Poucas fotos, ambientes nao fotografados, descricao incompleta ou imagens repetidas sao LIMITACOES DA ANALISE, nunca defeitos do imovel.
-- Limitacoes da analise nao entram em pontos_negativos.
+- Use apenas evidencias das imagens, descricao e campos estruturados.
+- Nao invente nem complete texto truncado.
+- Poucas fotos, ambientes ausentes, descricao incompleta e imagens repetidas pertencem apenas a limitacoes_analise.
 - Acabamento antigo, madeira aparente, piso antigo ou estilo simples nao sao defeitos por si so.
-- So use pontos_negativos para problemas objetivos: infiltracao/umidade, danos visiveis, pintura deteriorada, acabamento desgastado, necessidade clara de reforma ou documentacao irregular explicitamente informada.
-- Estado de conservacao e padrao de acabamento sao conceitos independentes.
-- Se faltarem evidencias para classificar, use desconhecido e reduza a confianca.
-- Nao use localizacao, preco, preco por m2, IPTU ou valor de condominio para inferir conservacao ou padrao.
-- Amenities sao evidencia textual do anuncio; nao trate amenidades do condominio como prova de acabamento interno da unidade.
+- Estado de conservacao e padrao de acabamento sao independentes.
+- Nao use preco/localizacao/IPTU/condominio para inferir conservacao ou padrao.
+- Amenities do condominio nao provam acabamento interno.
+- Se houver somente 1 foto, nao classifique alto_padrao apenas pela imagem; sem evidencias suficientes, use medio ou desconhecido.
+- pontos_positivos e pontos_negativos devem conter SOMENTE itens dos vocabularios abaixo.
+- caracteristicas_unidade e caracteristicas_condominio sao informativas e NAO alteram o score.
+- Se uma informacao relevante nao estiver nos vocabularios, registre em observacoes.
+- Nao duplique itens.
 
-Retorne SOMENTE JSON valido, sem Markdown:
-{{
-  "estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",
-  "padrao_acabamento": "alto_padrao|medio|simples|desconhecido",
-  "pontos_positivos": [],
-  "pontos_negativos": [],
-  "limitacoes_analise": [],
-  "qualidade_imagens": "boa|razoavel|ruim",
-  "confianca_extracao": "baixa|media|alta",
-  "evidencias": {{"conservacao": [], "acabamento": []}},
-  "observacoes": []
-}}"""
+POSITIVOS PERMITIDOS: {'; '.join(PONTOS_POSITIVOS_CONTROLADOS)}
+NEGATIVOS PERMITIDOS: {'; '.join(PONTOS_NEGATIVOS_CONTROLADOS)}
+CARACTERISTICAS DA UNIDADE: {'; '.join(CARACTERISTICAS_UNIDADE_CONTROLADAS)}
+CARACTERISTICAS DO CONDOMINIO: {'; '.join(CARACTERISTICAS_CONDOMINIO_CONTROLADAS)}
 
-# Normalizacao de vocabulario
-_NORM_CONSERVACAO = {
-    "novo": "novo", "lancamento": "novo", "lançamento": "novo",
-    "nunca habitado": "novo", "reformado": "reformado",
-    "recém reformado": "reformado", "recem reformado": "reformado",
-    "bom": "bom", "excelente": "bom", "ótimo": "bom", "otimo": "bom",
-    "impecável": "bom", "impecavel": "bom", "pronto para morar": "bom",
-    "regular": "regular", "precisa_reforma": "precisa_reforma",
-    "precisa de reforma": "precisa_reforma", "necessita reforma": "precisa_reforma",
-    "desconhecido": "desconhecido", "indefinido": "desconhecido",
-}
-
-_NORM_ACABAMENTO = {
-    "alto_padrao": "alto_padrao", "alto padrao": "alto_padrao",
-    "alto padrão": "alto_padrao", "alto": "alto_padrao",
-    "luxo": "alto_padrao", "premium": "alto_padrao",
-    "medio": "medio", "médio": "medio", "bom": "medio",
-    "simples": "simples", "desconhecido": "desconhecido",
-    "indefinido": "desconhecido",
-}
-
-
-def _normalizar_conservacao(v: str) -> str:
-    return _NORM_CONSERVACAO.get(str(v).lower().strip(), "desconhecido")
-
-
-def _normalizar_acabamento(v: str) -> str:
-    return _NORM_ACABAMENTO.get(str(v).lower().strip(), "desconhecido")
+Responda somente conforme o formato JSON estruturado solicitado pela API.
+"""
 
 
 # =============================================================================
@@ -248,6 +488,12 @@ _provider_state = {
 
 GROQ_INTERVALO_PREVENTIVO = 8.0  # segundos entre chamadas ao Groq Vision
 
+# Gemini é priorizado para o imóvel alvo.
+# Faz no máximo 2 tentativas no alvo quando o 429 pedir uma espera curta.
+GEMINI_MAX_TENTATIVAS_ALVO = 2
+GEMINI_RETRY_CURTO_MAX_SEGUNDOS = 15.0
+GEMINI_RETRY_PADRAO_SEGUNDOS = 5.0
+
 
 def _reset_provider_state():
     """Reseta o estado dos provedores (chamado no inicio de cada execucao)."""
@@ -260,62 +506,139 @@ def _reset_provider_state():
 # CHAMADA AO LLM VISION (texto + fotos juntos)
 # =============================================================================
 
-def _analisar_imovel_vision(imovel: dict) -> dict:
+def _analisar_imovel_vision(imovel: dict, is_alvo: bool = False) -> dict:
     """
-    Envia titulo, descricao e fotos para o Gemini (multimodal).
-    Circuit breaker: se Gemini deu 429 nesta execucao, pula direto pro Groq.
-    Retorna {} em caso de falha total.
+    Roteamento dos provedores do Agente 3.
+
+    IMOVEL ALVO:
+        1. Gemini — prioridade maxima, com ate 2 tentativas em 429 curto
+        2. Groq/Qwen
+        3. NVIDIA NIM (fallback interno do fluxo Groq)
+
+    COMPARAVEIS:
+        1. Groq/Qwen
+        2. NVIDIA NIM (fallback interno do fluxo Groq)
+        3. Gemini — somente como ultimo fallback, sem retry de 429
+
+    A ideia e preservar a cota do Gemini para o imovel alvo, onde a analise
+    multimodal com mais fotos tem maior impacto na avaliacao final.
     """
-    # Tentativa 1: Gemini (se disponivel)
-    if _provider_state["gemini"]["available"]:
-        resultado = _tentar_gemini(imovel)
+    if is_alvo:
+        logger.info(
+            "[Ag3][Roteamento][Alvo] prioridade: Gemini -> Groq -> NVIDIA"
+        )
+
+        resultado = _tentar_gemini(
+            imovel,
+            permitir_retry_429=True,
+            max_tentativas=GEMINI_MAX_TENTATIVAS_ALVO,
+        )
         if resultado:
             return resultado
-    else:
-        _provider_state["gemini"]["puladas"] += 1
-        logger.info(f"[Ag3][LLM] Gemini pulado | motivo={_provider_state['gemini']['reason']}")
 
-    # Tentativa 2: Groq (com intervalo preventivo)
-    if _provider_state["groq"]["available"]:
-        resultado = _tentar_groq(imovel)
-        if resultado:
-            return resultado
+        logger.info(
+            "[Ag3][Roteamento][Alvo] Gemini indisponivel/falhou -> tentando Groq"
+        )
+        return _tentar_groq(imovel)
 
-    # Tentativa 3: NVIDIA NIM (ultimo fallback)
-    return _analisar_imovel_vision_nvidia(imovel)
+    # Comparaveis: poupa Gemini e usa primeiro os provedores de volume.
+    logger.info(
+        "[Ag3][Roteamento][Comparavel] prioridade: Groq -> NVIDIA -> Gemini"
+    )
+
+    resultado = _tentar_groq(imovel)
+    if resultado:
+        return resultado
+
+    # Se Groq e seu fallback NVIDIA falharem, Gemini vira ultimo recurso.
+    logger.info(
+        "[Ag3][Roteamento][Comparavel] Groq/NVIDIA falharam -> Gemini ultimo fallback"
+    )
+    return _tentar_gemini(
+        imovel,
+        permitir_retry_429=False,
+        max_tentativas=1,
+    )
+
+def _extrair_retry_after_segundos(erro: str):
+    """
+    Tenta extrair um tempo de retry de mensagens de erro 429.
+    Aceita formatos comuns como '3.27s', 'retryDelay: 5s' etc.
+    """
+    if not erro:
+        return None
+
+    padroes = [
+        r"retry[_\s-]*after[^\d]*(\d+(?:\.\d+)?)\s*s",
+        r"retrydelay[^\d]*(\d+(?:\.\d+)?)\s*s",
+        r"(\d+(?:\.\d+)?)\s*s",
+    ]
+
+    texto = str(erro).lower()
+    for padrao in padroes:
+        m = re.search(padrao, texto)
+        if m:
+            try:
+                return float(m.group(1))
+            except (TypeError, ValueError):
+                pass
+    return None
 
 
-def _tentar_gemini(imovel: dict) -> dict:
-    """Tenta Gemini. Se 429, ativa circuit breaker."""
+def _tentar_gemini(
+    imovel: dict,
+    permitir_retry_429: bool = False,
+    max_tentativas: int = 1,
+) -> dict:
+    """
+    Chama Gemini com JSON Schema.
+
+    Para o imovel alvo:
+      - max_tentativas=2;
+      - se houver 429 com retry curto (<= 15s), espera e tenta mais 1 vez;
+      - se o retry indicado for longo, nao prende a execucao: retorna {} e
+        o roteador segue para Groq/NVIDIA.
+
+    Para comparaveis:
+      - Gemini e apenas ultimo fallback;
+      - faz uma unica tentativa;
+      - nao espera 429.
+
+    Esta funcao NAO chama outro provedor por dentro. O roteamento fica
+    centralizado em _analisar_imovel_vision().
+    """
     try:
         from google import genai
         from google.genai import types
+    except Exception as e:
+        logger.error(f"[Ag3][Gemini] erro ao importar SDK: {e}")
+        return {}
 
-        api_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
-        if not api_key:
-            return {}
+    api_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
+    if not api_key:
+        logger.warning("[Ag3][Gemini] chave nao configurada")
+        return {}
 
-        _provider_state["gemini"]["chamadas"] += 1
-        client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
-        titulo = imovel.get("title", "") or ""
-        descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
-        tipo = imovel.get("propertyType", "") or ""
-        area = imovel.get("area", "")
-        quartos = imovel.get("bedrooms", "")
-        banheiros = imovel.get("bathrooms", "")
-        suites = imovel.get("suites", "") or ""
-        vagas = imovel.get("parkingSpaces", "")
-        area_terreno = imovel.get("lotArea", "") or imovel.get("area_terreno", "") or ""
-        amenities = _normalizar_amenities(imovel.get("amenities"))
-        amenities_txt = "; ".join(amenities) if amenities else "nao informado"
-        images = imovel.get("images", []) or []
-        fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_GEMINI)
-        qtd_fotos = len(fotos_selecionadas)
+    titulo = imovel.get("title", "") or ""
+    descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
+    tipo = imovel.get("propertyType", "") or ""
+    area = imovel.get("area", "")
+    quartos = imovel.get("bedrooms", "")
+    banheiros = imovel.get("bathrooms", "")
+    suites = imovel.get("suites", "") or ""
+    vagas = imovel.get("parkingSpaces", "")
+    area_terreno = imovel.get("lotArea", "") or imovel.get("area_terreno", "") or ""
+    amenities = _normalizar_amenities(imovel.get("amenities"))
+    amenities_txt = "; ".join(amenities) if amenities else "nao informado"
+    images = imovel.get("images", []) or []
+    fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_GEMINI)
+    qtd_fotos = len(fotos_selecionadas)
 
-        prompt_texto = f"""Voce e um avaliador imobiliario especializado em analise qualitativa de imoveis por texto e imagens.
-Todas as imagens pertencem ao MESMO imovel. Foram fornecidas exatamente {qtd_fotos} imagem(ns) nesta chamada.
-Voce NAO deve calcular preco, valor de mercado, score ou classificacao favoravel/desfavoravel; o Python faz isso depois.
+    prompt_texto = f"""Voce e um avaliador imobiliario especializado em analise qualitativa de imoveis por texto e imagens.
+Todas as imagens pertencem ao MESMO imovel. Foram fornecidas exatamente {qtd_fotos} imagem(ns).
+Voce NAO calcula preco, valor de mercado, score ou classificacao favoravel/desfavoravel; o Python faz isso depois.
 
 DADOS DO IMOVEL
 Titulo: {titulo[:200]}
@@ -323,22 +646,36 @@ Descricao:
 {descricao[:MAX_DESC_CHARS]}
 Tipo: {tipo}
 Area: {area} m2 | Area do terreno: {area_terreno} m2 | Quartos: {quartos} | Banheiros: {banheiros} | Suites: {suites} | Vagas: {vagas}
-Amenities informadas no anuncio: {amenities_txt}
+Amenities: {amenities_txt}
 
 REGRAS FUNDAMENTAIS
 1. Use SOMENTE informacoes visiveis nas imagens, explicitamente presentes na descricao ou nos campos estruturados.
-2. Nao invente, nao complete frases truncadas e nao presuma caracteristicas comuns a imoveis semelhantes.
-3. Se faltarem evidencias, use "desconhecido" e reduza a confianca.
+2. Nao invente, nao complete frases truncadas e nao presuma caracteristicas comuns.
+3. Se faltarem evidencias, use desconhecido e reduza a confianca.
 4. Ausencia de informacao NAO e defeito do imovel.
-5. Poucas fotos, ambientes nao fotografados, imagens repetidas/concentradas no mesmo ambiente e descricao incompleta devem ir apenas em "limitacoes_analise". Nunca coloque esses itens em "pontos_negativos".
-6. Nao diga que recebeu quantidade de imagens diferente de {qtd_fotos}. Se as imagens estiverem concentradas no mesmo ambiente, diga isso, sem alterar a quantidade.
-7. Acabamento antigo nao significa ma conservacao. Madeira aparente, piso antigo, revestimento antigo ou estilo simples nao sao negativos por si so.
-8. Pontos negativos exigem evidencia concreta: documentacao irregular explicitamente informada, infiltracao/umidade, necessidade clara de reforma, pintura deteriorada, acabamento desgastado ou danos visiveis.
-9. Estado de conservacao e padrao de acabamento sao independentes.
-10. Nao use preco, preco por m2, bairro, cidade, rua, IPTU ou condominio para inferir conservacao ou padrao. Esses dados nem sao fornecidos no prompt.
-11. Amenities sao evidencia textual do anuncio. Use apenas as que forem relevantes ao imovel; amenidades do condominio nao provam acabamento interno da unidade.
-12. Considere todas as imagens em conjunto. Nao generalize um problema localizado para todo o imovel.
-13. Se vagas > 0, pode incluir "vagas de garagem" em pontos_positivos. Se houver suite explicita, pode incluir "suite".
+5. Poucas fotos, ambientes nao fotografados, imagens repetidas/concentradas e descricao incompleta pertencem apenas a limitacoes_analise.
+6. Acabamento antigo, madeira aparente, piso/revestimento antigo ou estilo simples nao sao negativos por si so.
+7. Estado de conservacao e padrao de acabamento sao independentes.
+8. Nao use preco, preco/m2, bairro, cidade, rua, IPTU ou condominio para inferir conservacao ou padrao.
+9. Amenities do condominio nao provam acabamento interno.
+10. Considere as imagens em conjunto e nao generalize um problema localizado.
+11. Se houver somente 1 foto, NAO classifique alto_padrao apenas pela imagem; sem evidencias textuais/visuais suficientes de materiais superiores, use medio ou desconhecido conforme o conjunto.
+12. pontos_positivos e pontos_negativos sao VOCABULARIOS CONTROLADOS. Nao escreva frases livres nesses campos.
+13. caracteristicas_unidade e caracteristicas_condominio sao informativas e NAO alteram o score.
+14. Se algo relevante nao estiver no vocabulario permitido, registre em observacoes.
+15. Nao duplique informacoes entre listas.
+
+POSITIVOS PERMITIDOS
+{'; '.join(PONTOS_POSITIVOS_CONTROLADOS)}
+
+NEGATIVOS PERMITIDOS
+{'; '.join(PONTOS_NEGATIVOS_CONTROLADOS)}
+
+CARACTERISTICAS DA UNIDADE
+{'; '.join(CARACTERISTICAS_UNIDADE_CONTROLADAS)}
+
+CARACTERISTICAS DO CONDOMINIO
+{'; '.join(CARACTERISTICAS_CONDOMINIO_CONTROLADAS)}
 
 CATEGORIAS
 estado_conservacao: novo | reformado | bom | regular | precisa_reforma | desconhecido
@@ -346,64 +683,118 @@ padrao_acabamento: alto_padrao | medio | simples | desconhecido
 qualidade_imagens: boa | razoavel | ruim
 confianca_extracao: baixa | media | alta
 
-Retorne SOMENTE JSON valido:
-{{
-  "estado_conservacao": "desconhecido",
-  "padrao_acabamento": "desconhecido",
-  "pontos_positivos": [],
-  "pontos_negativos": [],
-  "limitacoes_analise": [],
-  "qualidade_imagens": "razoavel",
-  "confianca_extracao": "baixa",
-  "evidencias": {{"conservacao": [], "acabamento": []}},
-  "observacoes": []
-}}"""
+Responda SOMENTE conforme o JSON Schema configurado na API.
+"""
 
-        parts = [types.Part.from_text(text=prompt_texto)]
-        for url in fotos_selecionadas:
-            try:
-                parts.append(types.Part.from_uri(file_uri=url, mime_type="image/webp"))
-            except Exception:
-                pass
+    parts = [types.Part.from_text(text=prompt_texto)]
+    for url in fotos_selecionadas:
+        try:
+            parts.append(types.Part.from_uri(file_uri=url, mime_type="image/webp"))
+        except Exception:
+            pass
 
-        texto_resp = ""
-        for tentativa in range(2):
-            try:
-                response = client.models.generate_content(
-                    model="gemini-3.5-flash-lite",
-                    contents=[types.Content(role="user", parts=parts)],
-                    config=types.GenerateContentConfig(temperature=0),
+    max_tentativas = max(1, int(max_tentativas))
+
+    for tentativa in range(1, max_tentativas + 1):
+        _provider_state["gemini"]["chamadas"] += 1
+
+        logger.info(
+            f"[Ag3][Gemini] tentativa={tentativa}/{max_tentativas} | "
+            f"fotos={qtd_fotos} | desc_chars={min(len(descricao), MAX_DESC_CHARS)}"
+        )
+
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.5-flash-lite",
+                contents=[types.Content(role="user", parts=parts)],
+                config=types.GenerateContentConfig(
+                    temperature=0,
+                    response_mime_type="application/json",
+                    response_schema=SCHEMA_AGENTE3,
+                ),
+            )
+
+            texto_resp = response.text or ""
+            resultado = _validar_saida_llm(_parse_json_obj(texto_resp))
+            if not resultado:
+                logger.warning(
+                    "[Ag3][Gemini] resposta estruturada vazia/invalida"
                 )
-                texto_resp = response.text or ""
-                break
-            except Exception as e:
-                if "500" in str(e) and tentativa == 0:
-                    logger.warning("Gemini 500 — retry em 3s...")
-                    time.sleep(3)
-                    continue
-                raise
+                return {}
 
-        m = re.search(r"\{[\s\S]+\}", texto_resp)
-        if not m:
-            logger.warning("Gemini nao retornou JSON valido")
+            resultado["fotos_analisadas"] = qtd_fotos
+            resultado["llm_usada"] = "gemini-3.5-flash-lite"
+            _provider_state["gemini"]["sucessos"] += 1
+            _provider_state["gemini"]["available"] = True
+            _provider_state["gemini"]["reason"] = None
+            return resultado
+
+        except Exception as e:
+            err_str = str(e)
+            err_lower = err_str.lower()
+
+            # Retry de erro interno 500 somente uma vez, sem exceder o limite
+            # total de tentativas definido para esta chamada.
+            if "500" in err_lower and tentativa < max_tentativas:
+                logger.warning("[Ag3][Gemini] erro 500 -> retry em 3s")
+                time.sleep(3)
+                continue
+
+            eh_429 = (
+                "429" in err_lower
+                or "resource_exhausted" in err_lower
+                or "quota" in err_lower
+            )
+
+            if eh_429:
+                _provider_state["gemini"]["erros_429"] += 1
+                retry_after = _extrair_retry_after_segundos(err_str)
+
+                if retry_after is not None:
+                    logger.warning(
+                        f"[Ag3][Gemini] 429 | retry_after={retry_after:.2f}s"
+                    )
+                else:
+                    logger.warning("[Ag3][Gemini] 429 | retry_after=nao_informado")
+
+                pode_repetir = (
+                    permitir_retry_429
+                    and tentativa < max_tentativas
+                    and (
+                        retry_after is None
+                        or retry_after <= GEMINI_RETRY_CURTO_MAX_SEGUNDOS
+                    )
+                )
+
+                if pode_repetir:
+                    espera = (
+                        retry_after + 1.0
+                        if retry_after is not None
+                        else GEMINI_RETRY_PADRAO_SEGUNDOS
+                    )
+                    logger.info(
+                        f"[Ag3][Gemini] aguardando {espera:.1f}s antes da "
+                        f"tentativa {tentativa + 1}/{max_tentativas}"
+                    )
+                    time.sleep(espera)
+                    continue
+
+                # Nao mata o Gemini pela execucao inteira. Apenas registra
+                # que esta chamada nao conseguiu prosseguir.
+                _provider_state["gemini"]["available"] = True
+                if retry_after is not None and retry_after > GEMINI_RETRY_CURTO_MAX_SEGUNDOS:
+                    _provider_state["gemini"]["reason"] = (
+                        f"429_retry_longo_{retry_after:.1f}s"
+                    )
+                else:
+                    _provider_state["gemini"]["reason"] = "429_sem_retry"
+
+                return {}
+
+            logger.error(f"[Ag3][Gemini] falhou: {e}")
             return {}
 
-        resultado = json.loads(m.group(0))
-        resultado["fotos_analisadas"] = qtd_fotos
-        resultado["llm_usada"] = "gemini-3.5-flash-lite"
-        _provider_state["gemini"]["sucessos"] += 1
-        return resultado
-
-    except Exception as e:
-        err_str = str(e).lower()
-        if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
-            _provider_state["gemini"]["available"] = False
-            _provider_state["gemini"]["reason"] = "quota_esgotada_nesta_execucao"
-            _provider_state["gemini"]["erros_429"] += 1
-            logger.warning("[Ag3][LLM] Gemini 429 -> circuit_breaker ativado")
-        else:
-            logger.error(f"[Ag3][LLM] Gemini falhou: {e}")
-        return _tentar_groq(imovel)
+    return {}
 
 def _tentar_groq(imovel: dict) -> dict:
     """Wrapper Groq com intervalo preventivo e controle de 429."""
@@ -423,7 +814,7 @@ def _tentar_groq(imovel: dict) -> dict:
 
 
 def _analisar_imovel_vision_groq(imovel: dict) -> dict:
-    """Fallback Groq: prompt compacto, ate 2 fotos espacadas."""
+    """Fallback Groq: ate 2 fotos + JSON Object Mode."""
     try:
         from groq import Groq
 
@@ -445,19 +836,16 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
             messages=[{"role": "user", "content": content}],
             temperature=0,
             max_completion_tokens=1400,
+            reasoning_effort="none",
+            response_format={"type": "json_object"},
         )
 
         texto_resp = response.choices[0].message.content or ""
-        if "</think>" in texto_resp:
-            texto_resp = texto_resp.split("</think>", 1)[1].strip()
-        texto_resp = re.sub(r"```json\s*", "", texto_resp)
-        texto_resp = re.sub(r"```\s*", "", texto_resp)
-        m = re.search(r"\{[\s\S]+\}", texto_resp)
-        if not m:
-            logger.warning("[Ag3][Groq] nao retornou JSON valido — tentando NVIDIA NIM")
+        resultado = _validar_saida_llm(_parse_json_obj(texto_resp))
+        if not resultado:
+            logger.warning("[Ag3][Groq] JSON Object Mode retornou objeto inutilizavel — tentando NVIDIA NIM")
             return _analisar_imovel_vision_nvidia(imovel)
 
-        resultado = json.loads(m.group(0))
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
         resultado["llm_usada"] = "groq-qwen3.6-27b"
         return resultado
@@ -484,18 +872,14 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
                         messages=[{"role": "user", "content": content}],
                         temperature=0,
                         max_completion_tokens=1400,
+                        reasoning_effort="none",
+                        response_format={"type": "json_object"},
                     )
                     texto_resp2 = response2.choices[0].message.content or ""
-                    if "</think>" in texto_resp2:
-                        texto_resp2 = texto_resp2.split("</think>", 1)[1].strip()
-                    texto_resp2 = re.sub(r"```json\s*", "", texto_resp2)
-                    texto_resp2 = re.sub(r"```\s*", "", texto_resp2)
-                    m2 = re.search(r"\{[\s\S]+\}", texto_resp2)
-                    if m2:
-                        resultado2 = json.loads(m2.group(0))
+                    resultado2 = _validar_saida_llm(_parse_json_obj(texto_resp2))
+                    if resultado2:
                         resultado2["fotos_analisadas"] = len(fotos_selecionadas)
                         resultado2["llm_usada"] = "groq-qwen3.6-27b"
-                        _provider_state["groq"]["sucessos"] += 1
                         return resultado2
                 except Exception:
                     pass
@@ -506,7 +890,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         return _analisar_imovel_vision_nvidia(imovel)
 
 def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
-    """Ultimo fallback: NVIDIA NIM, uma foto representativa."""
+    """Ultimo fallback: NVIDIA NIM, 1 foto + JSON Schema."""
     try:
         from openai import OpenAI
 
@@ -529,15 +913,21 @@ def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
             messages=[{"role": "user", "content": content}],
             max_tokens=900,
             temperature=0,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "analise_imovel",
+                    "schema": SCHEMA_AGENTE3,
+                },
+            },
         )
 
         texto_resp = response.choices[0].message.content or ""
-        m = re.search(r"\{[\s\S]+\}", texto_resp)
-        if not m:
-            logger.warning("NVIDIA NIM nao retornou JSON valido")
+        resultado_nim = _validar_saida_llm(_parse_json_obj(texto_resp))
+        if not resultado_nim:
+            logger.warning("[Ag3][NVIDIA] resposta estruturada vazia/invalida")
             return {}
 
-        resultado_nim = json.loads(m.group(0))
         resultado_nim["fotos_analisadas"] = len(fotos_selecionadas)
         resultado_nim["llm_usada"] = "nvidia-llama-3.2-11b-vision"
         return resultado_nim
@@ -595,17 +985,12 @@ def _calcular_score(estado: str, padrao: str,
     pesos_positivos_map = {
         "acabamento diferenciado": 0.05,
         "cozinha planejada": 0.03,
-        "armarios planejados": 0.03,
         "armários planejados": 0.03,
         "varanda gourmet": 0.04,
         "vista livre": 0.03,
-        "boa iluminacao natural": 0.02,
         "boa iluminação natural": 0.02,
-        "integracao de ambientes": 0.02,
         "integração de ambientes": 0.02,
-        "area externa privativa": 0.04,
         "área externa privativa": 0.04,
-        "churrasqueira": 0.02,
         "churrasqueira privativa": 0.02,
         "piscina privativa": 0.04,
     }
@@ -615,20 +1000,11 @@ def _calcular_score(estado: str, padrao: str,
     # 5. PENALIZAÇÕES
     # ============================================================
     pesos_negativos_map = {
-        "documentacao_irregular": -0.20,
         "documentação irregular": -0.20,
-        "infiltracao_umidade": -0.15,
-        "infiltração_umidade": -0.15,
-        "infiltracao": -0.15,
-        "infiltração": -0.15,
-        "umidade": -0.15,
-        "precisa_reforma": -0.25,
+        "infiltração/umidade": -0.15,
         "precisa reforma": -0.25,
-        "danos_visiveis": -0.10,
         "danos visíveis": -0.10,
-        "pintura_deteriorada": -0.06,
         "pintura deteriorada": -0.06,
-        "acabamento_desgastado": -0.06,
         "acabamento desgastado": -0.06,
     }
     LIMITE_PENALIZACOES = -0.30
@@ -674,19 +1050,6 @@ def _calcular_score(estado: str, padrao: str,
     for positivo in pontos_positivos:
         positivo_normalizado = str(positivo).strip().lower()
 
-        # Vagas e suítes ficam no JSON para descrição,
-        # mas NÃO alteram o score qualitativo.
-        if positivo_normalizado in [
-            "vagas de garagem", "vaga de garagem", "suite", "suíte"
-        ]:
-            continue
-
-        # Evita dupla bonificação: se já classificamos como reformado,
-        # "imóvel reformado" não gera outro bônus.
-        if (positivo_normalizado in ["imovel reformado", "imóvel reformado"]
-                and estado == "reformado"):
-            continue
-
         peso = pesos_positivos_map.get(positivo_normalizado)
         if peso is not None:
             bonus_positivos += peso
@@ -709,10 +1072,7 @@ def _calcular_score(estado: str, padrao: str,
         # Se o estado geral já foi classificado como "precisa_reforma",
         # não descontamos novamente pelo mesmo problema.
         if (estado == "precisa_reforma"
-                and negativo_normalizado in [
-                    "precisa_reforma", "precisa reforma",
-                    "necessita reforma", "necessidade de reforma"
-                ]):
+                and negativo_normalizado == "precisa reforma"):
             continue
 
         peso = pesos_negativos_map.get(negativo_normalizado)
@@ -801,6 +1161,7 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
             "id_imovel": id_imovel, "status": "descricao_insuficiente",
             "estado_conservacao": "desconhecido", "padrao_acabamento": "desconhecido",
             "pontos_positivos": [], "pontos_negativos": [],
+            "caracteristicas_unidade": [], "caracteristicas_condominio": [],
             "limitacoes_analise": ["Sem descricao suficiente e sem fotos para analise."],
             "confianca_extracao": "baixa",
             "observacoes": ["Descricao insuficiente para analise."],
@@ -812,7 +1173,7 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
         }
 
     # Chama LLM Vision (texto + fotos juntos)
-    dados = _analisar_imovel_vision(imovel)
+    dados = _analisar_imovel_vision(imovel, is_alvo=is_alvo)
 
     # Fallback se falhar
     if not dados:
@@ -826,20 +1187,28 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
             "padrao_acabamento": "desconhecido",
             "pontos_positivos": [],
             "pontos_negativos": [],
+            "caracteristicas_unidade": [],
+            "caracteristicas_condominio": [],
             "limitacoes_analise": obs_fallback.copy(),
             "confianca_extracao": "baixa",
             "observacoes": obs_fallback,
         }
 
-    # Normaliza
-    estado    = _normalizar_conservacao(dados.get("estado_conservacao", "desconhecido"))
-    padrao    = _normalizar_acabamento(dados.get("padrao_acabamento", "desconhecido"))
+    # Normaliza (a validacao ja foi feita em _validar_saida_llm, mas o fallback pode nao ter passado por la)
+    estado    = str(dados.get("estado_conservacao", "desconhecido")).strip().lower()
+    if estado not in ("novo", "reformado", "bom", "regular", "precisa_reforma", "desconhecido"):
+        estado = "desconhecido"
+    padrao    = str(dados.get("padrao_acabamento", "desconhecido")).strip().lower()
+    if padrao not in ("alto_padrao", "medio", "simples", "desconhecido"):
+        padrao = "desconhecido"
     confianca = str(dados.get("confianca_extracao", "baixa")).lower().strip()
     if confianca not in ("alta", "media", "baixa"):
         confianca = "baixa"
 
     pontos_pos = dados.get("pontos_positivos", [])
     pontos_neg = dados.get("pontos_negativos", [])
+    caracteristicas_unidade = dados.get("caracteristicas_unidade", [])
+    caracteristicas_condominio = dados.get("caracteristicas_condominio", [])
     observacoes = dados.get("observacoes", [])
     limitacoes_analise = dados.get("limitacoes_analise", [])
     qualidade_imagens = str(dados.get("qualidade_imagens", "razoavel")).lower().strip()
@@ -851,6 +1220,8 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
 
     if not isinstance(pontos_pos, list): pontos_pos = []
     if not isinstance(pontos_neg, list): pontos_neg = []
+    if not isinstance(caracteristicas_unidade, list): caracteristicas_unidade = []
+    if not isinstance(caracteristicas_condominio, list): caracteristicas_condominio = []
     if not isinstance(observacoes, list): observacoes = []
     if not isinstance(limitacoes_analise, list): limitacoes_analise = []
 
@@ -878,6 +1249,8 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
         partes_just.append(f"{len(pontos_pos)} pontos positivos identificados")
     if pontos_neg:
         partes_just.append(f"{len(pontos_neg)} pontos negativos identificados")
+    if caracteristicas_unidade:
+        partes_just.append(f"{len(caracteristicas_unidade)} caracteristicas da unidade registradas")
     partes_just.append(f"score qualitativo {score} -> classificacao {classificacao}")
     justificativa = ". ".join(partes_just) + "." if partes_just else "Sem evidencias suficientes para justificar ajuste no valor."
 
@@ -917,6 +1290,8 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
         "padrao_acabamento":     padrao,
         "pontos_positivos":      pontos_pos,
         "pontos_negativos":      pontos_neg,
+        "caracteristicas_unidade": caracteristicas_unidade,
+        "caracteristicas_condominio": caracteristicas_condominio,
         "qualidade_imagens":     qualidade_imagens,
         "confianca_extracao":    confianca,
         "evidencias":            evidencias,
