@@ -18,7 +18,7 @@ FLUXO:
     1. Carrega zona_homogenea_ag2.json (Agente 2 - Etapa 4)
     2. Filtra: cluster="A" E classificacao_zona="na_zona"
     3. Para cada imovel:
-         a. Seleciona ate 8 fotos espacadas uniformemente
+         a. Seleciona fotos espacadas conforme o provedor (Gemini 4, Groq 2, NVIDIA 1)
          b. Monta prompt com titulo, descricao, campos estruturados e fotos
          c. LLM multimodal analisa texto + fotos juntos e retorna JSON
          d. Python valida, normaliza vocabulario e calcula score deterministico
@@ -26,8 +26,8 @@ FLUXO:
     5. Salva em data/imoveis_analisados_ag3.json
 
 CADEIA DE FALLBACK (LLMs):
-    1. Gemini 2.5 Flash (GOOGLE_API_KEY) — multimodal, ate 8 fotos por chamada
-    2. Groq qwen3.6-27b (GROQ_API_KEY) — multimodal, ate 5 fotos por chamada
+    1. Gemini Flash Lite (GOOGLE_API_KEY) — operacionalmente ate 4 fotos por chamada
+    2. Groq qwen3.6-27b (GROQ_API_KEY) — operacionalmente ate 2 fotos por chamada
     3. NVIDIA NIM llama-3.2-11b-vision (NVIDIA_API_KEY) — 1 foto por chamada
 
 CALCULO DO SCORE (deterministico, Python):
@@ -65,7 +65,7 @@ QUEM USA A SAIDA:
     Interface → exibe estado, padrao, score pro usuario
 
 DEPENDENCIAS:
-    - google-generativeai (Gemini 2.5 Flash)
+    - google-genai (Gemini 3.5 Flash Lite)
     - groq (qwen3.6-27b)
     - openai (NVIDIA NIM)
 
@@ -93,6 +93,118 @@ LIMITACOES_PADRAO = [
     "A analise depende da qualidade e completude da descricao e das fotos do anuncio.",
     "As informacoes extraidas devem ser validadas por vistoria ou fonte oficial.",
 ]
+
+# Limites operacionais do Agente 3.
+# A interface pode continuar aceitando ate 8 URLs, mas cada provedor recebe
+# somente a quantidade adequada ao seu perfil de uso.
+MAX_FOTOS_INTERFACE = 8
+MAX_FOTOS_GEMINI = 4
+MAX_FOTOS_GROQ = 2
+MAX_FOTOS_NVIDIA = 1
+MAX_DESC_CHARS = 1500
+MAX_AMENITIES = 20
+
+
+def _selecionar_fotos(images: list, limite: int) -> list:
+    """Seleciona fotos espacadas para evitar varias imagens quase iguais."""
+    images = [u for u in (images or []) if isinstance(u, str) and u.strip()]
+    if not images or limite <= 0:
+        return []
+    if len(images) <= limite:
+        return images
+    if limite == 1:
+        return [images[len(images) // 2]]
+
+    step = (len(images) - 1) / (limite - 1)
+    indices = [round(i * step) for i in range(limite)]
+    return [images[i] for i in indices]
+
+
+def _normalizar_amenities(valor, limite: int = MAX_AMENITIES) -> list:
+    """Converte amenities em uma lista curta e legivel para o prompt."""
+    if not valor:
+        return []
+
+    if isinstance(valor, dict):
+        itens = []
+        for chave, v in valor.items():
+            if isinstance(v, bool):
+                if v:
+                    itens.append(str(chave))
+            elif v not in (None, "", [], {}):
+                itens.append(f"{chave}: {v}")
+    elif isinstance(valor, (list, tuple, set)):
+        itens = [str(x) for x in valor if x not in (None, "")]
+    else:
+        texto = str(valor).strip()
+        if not texto:
+            return []
+        sep = "|" if "|" in texto else ","
+        itens = [x.strip() for x in texto.split(sep) if x.strip()]
+
+    # remove duplicatas preservando ordem
+    vistos = set()
+    saida = []
+    for item in itens:
+        chave = item.casefold()
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        saida.append(item)
+        if len(saida) >= limite:
+            break
+    return saida
+
+
+def _prompt_compacto(imovel: dict, qtd_fotos: int) -> str:
+    """Prompt enxuto usado nos fallbacks para reduzir consumo de tokens."""
+    titulo = imovel.get("title", "") or ""
+    descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
+    tipo = imovel.get("propertyType", "") or ""
+    area = imovel.get("area", "")
+    quartos = imovel.get("bedrooms", "")
+    banheiros = imovel.get("bathrooms", "")
+    suites = imovel.get("suites", "") or ""
+    vagas = imovel.get("parkingSpaces", "")
+    area_terreno = imovel.get("lotArea", "") or imovel.get("area_terreno", "") or ""
+    amenities = _normalizar_amenities(imovel.get("amenities"))
+    amenities_txt = "; ".join(amenities) if amenities else "nao informado"
+
+    return f"""Voce e um avaliador imobiliario especializado em analise qualitativa.
+Foram fornecidas exatamente {qtd_fotos} imagem(ns) nesta chamada.
+Use somente o que estiver visivel nas imagens, explicitamente escrito na descricao ou nos campos estruturados.
+
+DADOS
+Titulo: {titulo[:200]}
+Descricao: {descricao[:MAX_DESC_CHARS]}
+Tipo: {tipo} | Area: {area} m2 | Area do terreno: {area_terreno} m2 | Quartos: {quartos} | Banheiros: {banheiros} | Suites: {suites} | Vagas: {vagas}
+Amenities informadas no anuncio: {amenities_txt}
+
+REGRAS
+- Nao invente nem complete frases truncadas.
+- Nao diga que recebeu quantidade de imagens diferente de {qtd_fotos}.
+- Se as imagens mostrarem o mesmo ambiente, registre isso em limitacoes_analise.
+- Poucas fotos, ambientes nao fotografados, descricao incompleta ou imagens repetidas sao LIMITACOES DA ANALISE, nunca defeitos do imovel.
+- Limitacoes da analise nao entram em pontos_negativos.
+- Acabamento antigo, madeira aparente, piso antigo ou estilo simples nao sao defeitos por si so.
+- So use pontos_negativos para problemas objetivos: infiltracao/umidade, danos visiveis, pintura deteriorada, acabamento desgastado, necessidade clara de reforma ou documentacao irregular explicitamente informada.
+- Estado de conservacao e padrao de acabamento sao conceitos independentes.
+- Se faltarem evidencias para classificar, use desconhecido e reduza a confianca.
+- Nao use localizacao, preco, preco por m2, IPTU ou valor de condominio para inferir conservacao ou padrao.
+- Amenities sao evidencia textual do anuncio; nao trate amenidades do condominio como prova de acabamento interno da unidade.
+
+Retorne SOMENTE JSON valido, sem Markdown:
+{{
+  "estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",
+  "padrao_acabamento": "alto_padrao|medio|simples|desconhecido",
+  "pontos_positivos": [],
+  "pontos_negativos": [],
+  "limitacoes_analise": [],
+  "qualidade_imagens": "boa|razoavel|ruim",
+  "confianca_extracao": "baixa|media|alta",
+  "evidencias": {{"conservacao": [], "acabamento": []}},
+  "observacoes": []
+}}"""
 
 # Normalizacao de vocabulario
 _NORM_CONSERVACAO = {
@@ -184,189 +296,69 @@ def _tentar_gemini(imovel: dict) -> dict:
             return {}
 
         _provider_state["gemini"]["chamadas"] += 1
-
         client = genai.Client(api_key=api_key)
 
-        titulo    = imovel.get("title", "") or ""
+        titulo = imovel.get("title", "") or ""
         descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
-        tipo      = imovel.get("propertyType", "") or ""
-        area      = imovel.get("area", "")
-        quartos   = imovel.get("bedrooms", "")
+        tipo = imovel.get("propertyType", "") or ""
+        area = imovel.get("area", "")
+        quartos = imovel.get("bedrooms", "")
         banheiros = imovel.get("bathrooms", "")
-        suites    = imovel.get("suites", "") or ""
-        vagas     = imovel.get("parkingSpaces", "")
-        preco     = imovel.get("priceFormatted", "") or imovel.get("price", "")
-        bairro    = imovel.get("neighborhood", "") or imovel.get("bairro", "") or ""
-        cidade    = imovel.get("city", "") or imovel.get("cidade", "") or ""
-        images    = imovel.get("images", []) or []
+        suites = imovel.get("suites", "") or ""
+        vagas = imovel.get("parkingSpaces", "")
+        area_terreno = imovel.get("lotArea", "") or imovel.get("area_terreno", "") or ""
+        amenities = _normalizar_amenities(imovel.get("amenities"))
+        amenities_txt = "; ".join(amenities) if amenities else "nao informado"
+        images = imovel.get("images", []) or []
+        fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_GEMINI)
+        qtd_fotos = len(fotos_selecionadas)
 
-        prompt_texto = f"""Você é um avaliador imobiliário especializado em análise qualitativa de imóveis a partir de fotografias, descrição do anúncio e dados estruturados.
-Todas as imagens fornecidas pertencem ao MESMO imóvel.
-Sua tarefa é interpretar somente características qualitativas do imóvel que possam ser observadas ou explicitamente informadas.
-Você NÃO deve calcular preço, valor de mercado, score qualitativo ou classificação favorável/desfavorável. Essas etapas serão realizadas posteriormente pelo sistema por meio de regras determinísticas.
+        prompt_texto = f"""Voce e um avaliador imobiliario especializado em analise qualitativa de imoveis por texto e imagens.
+Todas as imagens pertencem ao MESMO imovel. Foram fornecidas exatamente {qtd_fotos} imagem(ns) nesta chamada.
+Voce NAO deve calcular preco, valor de mercado, score ou classificacao favoravel/desfavoravel; o Python faz isso depois.
 
-# OBJETIVO
-Analise conjuntamente:
-1. estado geral de conservação;
-2. padrão aparente de acabamento;
-3. diferenciais relevantes;
-4. problemas ou aspectos negativos comprovados;
-5. evidências que sustentam as classificações;
-6. qualidade das imagens;
-7. nível de confiança da análise.
-
-# DADOS DO IMÓVEL
-Título: {titulo[:200]}
-Descrição:
-{descricao[:500]}
+DADOS DO IMOVEL
+Titulo: {titulo[:200]}
+Descricao:
+{descricao[:MAX_DESC_CHARS]}
 Tipo: {tipo}
-Área: {area} m²
-Quartos: {quartos}
-Banheiros: {banheiros}
-Suítes: {suites}
-Vagas: {vagas}
-Preço anunciado: {preco}
-Bairro: {bairro}
-Cidade: {cidade}
-Também são fornecidas até 8 imagens do imóvel.
+Area: {area} m2 | Area do terreno: {area_terreno} m2 | Quartos: {quartos} | Banheiros: {banheiros} | Suites: {suites} | Vagas: {vagas}
+Amenities informadas no anuncio: {amenities_txt}
 
-# REGRA FUNDAMENTAL
-Use SOMENTE informações:
-* visualmente identificáveis nas imagens;
-* explicitamente presentes na descrição;
-* fornecidas nos campos estruturados.
-NÃO invente informações.
-NÃO complete informações com conhecimento externo.
-NÃO presuma características comuns a imóveis semelhantes.
-Quando não houver evidência suficiente, use "desconhecido".
-Ausência de informação NÃO significa ausência da característica e NÃO deve ser tratada como ponto negativo.
+REGRAS FUNDAMENTAIS
+1. Use SOMENTE informacoes visiveis nas imagens, explicitamente presentes na descricao ou nos campos estruturados.
+2. Nao invente, nao complete frases truncadas e nao presuma caracteristicas comuns a imoveis semelhantes.
+3. Se faltarem evidencias, use "desconhecido" e reduza a confianca.
+4. Ausencia de informacao NAO e defeito do imovel.
+5. Poucas fotos, ambientes nao fotografados, imagens repetidas/concentradas no mesmo ambiente e descricao incompleta devem ir apenas em "limitacoes_analise". Nunca coloque esses itens em "pontos_negativos".
+6. Nao diga que recebeu quantidade de imagens diferente de {qtd_fotos}. Se as imagens estiverem concentradas no mesmo ambiente, diga isso, sem alterar a quantidade.
+7. Acabamento antigo nao significa ma conservacao. Madeira aparente, piso antigo, revestimento antigo ou estilo simples nao sao negativos por si so.
+8. Pontos negativos exigem evidencia concreta: documentacao irregular explicitamente informada, infiltracao/umidade, necessidade clara de reforma, pintura deteriorada, acabamento desgastado ou danos visiveis.
+9. Estado de conservacao e padrao de acabamento sao independentes.
+10. Nao use preco, preco por m2, bairro, cidade, rua, IPTU ou condominio para inferir conservacao ou padrao. Esses dados nem sao fornecidos no prompt.
+11. Amenities sao evidencia textual do anuncio. Use apenas as que forem relevantes ao imovel; amenidades do condominio nao provam acabamento interno da unidade.
+12. Considere todas as imagens em conjunto. Nao generalize um problema localizado para todo o imovel.
+13. Se vagas > 0, pode incluir "vagas de garagem" em pontos_positivos. Se houver suite explicita, pode incluir "suite".
 
-# INDEPENDÊNCIA DO PREÇO
-O preço anunciado NÃO deve influenciar:
-* estado de conservação;
-* padrão de acabamento;
-* pontos positivos;
-* pontos negativos;
-* confiança da análise.
-Nunca conclua que um imóvel é de alto padrão por ser caro.
-Nunca conclua que um imóvel é simples por ser barato.
-Analise exclusivamente suas características observáveis.
+CATEGORIAS
+estado_conservacao: novo | reformado | bom | regular | precisa_reforma | desconhecido
+padrao_acabamento: alto_padrao | medio | simples | desconhecido
+qualidade_imagens: boa | razoavel | ruim
+confianca_extracao: baixa | media | alta
 
-# ANÁLISE DAS MÚLTIPLAS IMAGENS
-Considere TODAS as imagens como diferentes perspectivas ou ambientes do mesmo imóvel.
-NÃO determine o estado geral com base em uma única fotografia.
-Antes de produzir a resposta final:
-1. observe as imagens individualmente;
-2. identifique os ambientes que podem ser reconhecidos;
-3. procure características que se repetem em várias imagens;
-4. diferencie situações isoladas de situações predominantes;
-5. consolide as evidências para representar o imóvel como um todo.
-Uma cozinha moderna NÃO significa automaticamente que todo o imóvel foi reformado.
-Um banheiro antigo NÃO significa automaticamente que todo o imóvel está em estado regular.
-Uma pequena mancha isolada NÃO significa automaticamente que existe infiltração generalizada.
-
-# CONFLITOS ENTRE IMAGENS
-Se diferentes ambientes apresentarem estados distintos:
-* considere a quantidade de ambientes afetados;
-* considere a intensidade das diferenças;
-* considere se a característica é localizada ou generalizada;
-* escolha a classificação que melhor represente o conjunto do imóvel.
-Se não for possível determinar qual situação predomina:
-→ reduza a confiança.
-
-# 1. ESTADO DE CONSERVAÇÃO
-Escolha EXATAMENTE UMA opção:
-"novo" — evidência clara de imóvel novo, recém-construído, recém-entregue ou nunca habitado. Apenas possuir acabamento moderno NÃO é suficiente.
-"reformado" — evidências claras de reforma ou modernização relevante em parte significativa do imóvel. NÃO classifique como reformado porque apenas um ambiente parece novo.
-"bom" — bem conservado, sem deterioração relevante, funcional, sem necessidade evidente de intervenção significativa. Pode possuir acabamentos antigos e ainda estar em bom estado.
-"regular" — sinais perceptíveis de desgaste, acabamento envelhecido, manutenção pendente, pintura desgastada, pequenos danos. Problemas perceptíveis mas sem necessidade de reforma ampla.
-"precisa_reforma" — evidências claras de deterioração significativa, danos relevantes, sinais fortes de umidade/infiltração, revestimentos bastante danificados, vários ambientes deteriorados. NÃO utilize por questões meramente estéticas ou acabamento antigo.
-"desconhecido" — poucas imagens, imagens ruins, ambientes internos não aparecem, evidências insuficientes.
-
-# 2. PADRÃO DE ACABAMENTO
-Escolha EXATAMENTE UMA opção:
-"alto_padrao" — evidência consistente de materiais, acabamentos ou soluções visualmente superiores. NÃO utilize por localização, preço, tamanho ou número de quartos.
-"medio" — acabamentos intermediários, boa apresentação, materiais aparentemente adequados.
-"simples" — acabamentos básicos, materiais aparentemente simples, soluções funcionais. "Simples" NÃO significa "mal conservado".
-"desconhecido" — imagens ou informações insuficientes para avaliar.
-REGRA ESSENCIAL: estado de conservação e padrão de acabamento são conceitos independentes.
-
-# 3. PONTOS POSITIVOS
-Inclua somente características claramente visíveis, explicitamente mencionadas na descrição ou presentes nos dados estruturados.
-Se {vagas} > 0: inclua "vagas de garagem".
-Se {suites} > 0 ou houver suíte explicitamente informada: inclua "suite".
-Evite duplicidades e expressões subjetivas.
-
-# 4. PONTOS NEGATIVOS
-Inclua SOMENTE problemas com evidência concreta. Use expressões padronizadas quando possível:
-"documentacao_irregular" — somente quando explicitamente informado no texto, NUNCA infira pelas imagens.
-"infiltracao_umidade" — sinais visuais consistentes, manchas características ou informação textual explícita.
-"precisa_reforma" — evidências de necessidade relevante de reforma.
-"pintura_deteriorada" — desgaste visível de pintura.
-"acabamento_desgastado" — revestimentos ou materiais visivelmente desgastados.
-"danos_visiveis" — danos concretos observáveis.
-A ausência de piscina, varanda, suíte, garagem, churrasqueira, móveis planejados NÃO é ponto negativo.
-
-# 5. QUALIDADE DAS IMAGENS
-"boa" — claras, variadas, mostram vários ambientes relevantes.
-"razoavel" — utilizáveis, mas poucos ambientes, repetição ou enquadramentos limitados.
-"ruim" — desfocadas, muito pequenas, escuras, repetitivas, predominantemente externas, insuficientes.
-
-# 6. CONFIANÇA DA EXTRAÇÃO
-"alta" — várias imagens claras, diferentes ambientes, evidências consistentes.
-"media" — análise possível, algumas ambiguidades, parte do imóvel não é mostrada.
-"baixa" — poucas evidências, imagens ruins, poucos ambientes, conflitos importantes.
-NÃO aumente a confiança apenas porque a descrição usa palavras como "luxuoso", "impecável", "excelente". Textos comerciais são evidência mais fraca quando incompatíveis com as imagens.
-
-# 7. EVIDÊNCIAS
-Forneça até 3 observações objetivas para conservação e até 3 para acabamento, baseadas apenas no que é visível ou explicitamente informado.
-
-# 8. OBSERVAÇÕES
-Informações importantes que não alteram necessariamente a classificação geral. Máximo de 4 observações.
-
-# VERIFICAÇÃO FINAL OBRIGATÓRIA
-Antes de responder, confira internamente:
-1. Analisei todas as imagens em conjunto?
-2. Minha classificação representa o imóvel como um todo?
-3. Estou confundindo conservação com padrão?
-4. Alguma característica foi inventada?
-5. Algum ponto negativo representa apenas ausência de um diferencial?
-6. O preço influenciou indevidamente minha avaliação?
-7. Os pontos positivos possuem evidência?
-8. Os pontos negativos possuem evidência?
-9. Minhas evidências sustentam as classificações?
-10. Minha confiança está compatível com a quantidade e qualidade das imagens?
-11. Usei apenas os valores permitidos nos campos categóricos?
-12. Meu JSON é válido?
-
-# FORMATO DE RESPOSTA
-Responda SOMENTE com um objeto JSON válido.
-Não utilize Markdown.
-Não escreva texto antes ou depois do JSON.
-Não crie campos além dos especificados.
+Retorne SOMENTE JSON valido:
 {{
-  "estado_conservacao": "novo | reformado | bom | regular | precisa_reforma | desconhecido",
-  "padrao_acabamento": "alto_padrao | medio | simples | desconhecido",
+  "estado_conservacao": "desconhecido",
+  "padrao_acabamento": "desconhecido",
   "pontos_positivos": [],
   "pontos_negativos": [],
-  "qualidade_imagens": "boa | razoavel | ruim",
-  "confianca_extracao": "baixa | media | alta",
-  "evidencias": {{
-    "conservacao": [],
-    "acabamento": []
-  }},
+  "limitacoes_analise": [],
+  "qualidade_imagens": "razoavel",
+  "confianca_extracao": "baixa",
+  "evidencias": {{"conservacao": [], "acabamento": []}},
   "observacoes": []
 }}"""
 
-        # Seleciona ate 8 fotos espaçadas uniformemente
-        if len(images) <= 8:
-            fotos_selecionadas = images
-        else:
-            step = len(images) / 8
-            indices = [int(i * step) for i in range(8)]
-            fotos_selecionadas = [images[i] for i in indices]
-
-        # Monta conteudo: texto + fotos (Gemini aceita multiplas imagens por chamada)
         parts = [types.Part.from_text(text=prompt_texto)]
         for url in fotos_selecionadas:
             try:
@@ -374,7 +366,6 @@ Não crie campos além dos especificados.
             except Exception:
                 pass
 
-        # Retry: tenta ate 2x se Gemini der 500
         texto_resp = ""
         for tentativa in range(2):
             try:
@@ -387,17 +378,18 @@ Não crie campos além dos especificados.
                 break
             except Exception as e:
                 if "500" in str(e) and tentativa == 0:
-                    logger.warning(f"Gemini 500 — retry em 3s...")
+                    logger.warning("Gemini 500 — retry em 3s...")
                     time.sleep(3)
                     continue
                 raise
+
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
             logger.warning("Gemini nao retornou JSON valido")
             return {}
 
         resultado = json.loads(m.group(0))
-        resultado["fotos_analisadas"] = len(fotos_selecionadas)
+        resultado["fotos_analisadas"] = qtd_fotos
         resultado["llm_usada"] = "gemini-3.5-flash-lite"
         _provider_state["gemini"]["sucessos"] += 1
         return resultado
@@ -408,11 +400,10 @@ Não crie campos além dos especificados.
             _provider_state["gemini"]["available"] = False
             _provider_state["gemini"]["reason"] = "quota_esgotada_nesta_execucao"
             _provider_state["gemini"]["erros_429"] += 1
-            logger.warning(f"[Ag3][LLM] Gemini 429 → circuit_breaker ativado")
+            logger.warning("[Ag3][LLM] Gemini 429 -> circuit_breaker ativado")
         else:
             logger.error(f"[Ag3][LLM] Gemini falhou: {e}")
         return _tentar_groq(imovel)
-
 
 def _tentar_groq(imovel: dict) -> dict:
     """Wrapper Groq com intervalo preventivo e controle de 429."""
@@ -432,10 +423,7 @@ def _tentar_groq(imovel: dict) -> dict:
 
 
 def _analisar_imovel_vision_groq(imovel: dict) -> dict:
-    """
-    Fallback 1: Groq qwen3.6-27b (multimodal, ate 5 fotos por request).
-    Envia texto + ate 5 fotos via URL numa unica chamada.
-    """
+    """Fallback Groq: prompt compacto, ate 2 fotos espacadas."""
     try:
         from groq import Groq
 
@@ -444,37 +432,10 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
             return _analisar_imovel_vision_nvidia(imovel)
 
         client = Groq(api_key=api_key, max_retries=0)
+        images = imovel.get("images", []) or []
+        fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_GROQ)
+        prompt_texto = _prompt_compacto(imovel, len(fotos_selecionadas))
 
-        titulo    = imovel.get("title", "") or ""
-        descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
-        tipo      = imovel.get("propertyType", "") or ""
-        area      = imovel.get("area", "")
-        quartos   = imovel.get("bedrooms", "")
-        banheiros = imovel.get("bathrooms", "")
-        suites    = imovel.get("suites", "") or ""
-        vagas     = imovel.get("parkingSpaces", "")
-        preco     = imovel.get("priceFormatted", "") or imovel.get("price", "")
-        bairro    = imovel.get("neighborhood", "") or imovel.get("bairro", "") or ""
-        cidade    = imovel.get("city", "") or imovel.get("cidade", "") or ""
-        images    = imovel.get("images", []) or []
-
-        # Groq qwen3.6-27b: max 1 imagem pra caber no limite de 8000 TPM
-        fotos_selecionadas = [images[0]] if images else []
-
-        prompt_texto = (
-            f"Analise este imovel. Retorne JSON.\n"
-            f"Tipo: {tipo} | Area: {area}m2 | Quartos: {quartos} | Bairro: {bairro}\n"
-            f"Descricao: {descricao[:150]}\n\n"
-            f"JSON: {{\"estado_conservacao\": \"novo|reformado|bom|regular|precisa_reforma|desconhecido\","
-            f"\"padrao_acabamento\": \"alto_padrao|medio|simples|desconhecido\","
-            f"\"pontos_positivos\": [],\"pontos_negativos\": [],"
-            f"\"qualidade_imagens\": \"boa|razoavel|ruim\","
-            f"\"confianca_extracao\": \"baixa|media|alta\","
-            f"\"evidencias\": {{\"conservacao\": [], \"acabamento\": []}},"
-            f"\"observacoes\": []}}"
-        )
-
-        # Monta content com texto + fotos como URLs
         content = [{"type": "text", "text": prompt_texto}]
         for url in fotos_selecionadas:
             content.append({"type": "image_url", "image_url": {"url": url}})
@@ -483,15 +444,14 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
             model="qwen/qwen3.6-27b",
             messages=[{"role": "user", "content": content}],
             temperature=0,
-            max_completion_tokens=4096,
+            max_completion_tokens=1400,
         )
 
         texto_resp = response.choices[0].message.content or ""
-        # Remove bloco <think>...</think> se presente
-        if '</think>' in texto_resp:
-            texto_resp = texto_resp.split('</think>', 1)[1].strip()
-        texto_resp = re.sub(r'```json\s*', '', texto_resp)
-        texto_resp = re.sub(r'```\s*', '', texto_resp)
+        if "</think>" in texto_resp:
+            texto_resp = texto_resp.split("</think>", 1)[1].strip()
+        texto_resp = re.sub(r"```json\s*", "", texto_resp)
+        texto_resp = re.sub(r"```\s*", "", texto_resp)
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
             logger.warning("[Ag3][Groq] nao retornou JSON valido — tentando NVIDIA NIM")
@@ -506,32 +466,30 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         err_str = str(e)
         if "429" in err_str:
             _provider_state["groq"]["erros_429"] += 1
-            # Extrai retry_after se disponivel
             import re as _re_retry
-            retry_match = _re_retry.search(r'(\d+(?:\.\d+)?)\s*s', err_str)
+            retry_match = _re_retry.search(r"(\d+(?:\.\d+)?)\s*s", err_str)
             retry_after = retry_match.group(1) if retry_match else "?"
             logger.warning(f"[Ag3][Groq] 429 | retry_after={retry_after}s")
-            # Espera se retry_after for curto (<= 15s) e sem outro fallback
+
             if retry_after != "?" and float(retry_after) <= 15:
                 wait = float(retry_after) + 1
                 _provider_state["groq"].setdefault("tempo_espera_total", 0.0)
                 _provider_state["groq"]["tempo_espera_total"] = _provider_state["groq"].get("tempo_espera_total", 0.0) + wait
                 logger.info(f"[Ag3][Groq] aguardando {wait:.0f}s (retry_after curto)")
                 time.sleep(wait)
-                # Tenta novamente 1x
                 try:
                     client2 = Groq(api_key=api_key, max_retries=0)
                     response2 = client2.chat.completions.create(
                         model="qwen/qwen3.6-27b",
                         messages=[{"role": "user", "content": content}],
                         temperature=0,
-                        max_completion_tokens=4096,
+                        max_completion_tokens=1400,
                     )
                     texto_resp2 = response2.choices[0].message.content or ""
-                    if '</think>' in texto_resp2:
-                        texto_resp2 = texto_resp2.split('</think>', 1)[1].strip()
-                    texto_resp2 = re.sub(r'```json\s*', '', texto_resp2)
-                    texto_resp2 = re.sub(r'```\s*', '', texto_resp2)
+                    if "</think>" in texto_resp2:
+                        texto_resp2 = texto_resp2.split("</think>", 1)[1].strip()
+                    texto_resp2 = re.sub(r"```json\s*", "", texto_resp2)
+                    texto_resp2 = re.sub(r"```\s*", "", texto_resp2)
                     m2 = re.search(r"\{[\s\S]+\}", texto_resp2)
                     if m2:
                         resultado2 = json.loads(m2.group(0))
@@ -541,18 +499,14 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
                         return resultado2
                 except Exception:
                     pass
-            # Cai pro NVIDIA
+
             logger.info("[Ag3][Groq] 429 nao resolvido — tentando NVIDIA NIM")
         else:
             logger.error(f"[Ag3][Groq] falhou: {e}")
         return _analisar_imovel_vision_nvidia(imovel)
 
-
 def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
-    """
-    Fallback: NVIDIA NIM (meta/llama-3.2-11b-vision-instruct).
-    Envia apenas 1 foto (a principal).
-    """
+    """Ultimo fallback: NVIDIA NIM, uma foto representativa."""
     try:
         from openai import OpenAI
 
@@ -562,77 +516,29 @@ def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
             return {}
 
         client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=api_key)
+        images = imovel.get("images", []) or []
+        fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_NVIDIA)
+        prompt_texto = _prompt_compacto(imovel, len(fotos_selecionadas))
 
-        titulo    = imovel.get("title", "") or ""
-        descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
-        tipo      = imovel.get("propertyType", "") or ""
-        area      = imovel.get("area", "")
-        quartos   = imovel.get("bedrooms", "")
-        banheiros = imovel.get("bathrooms", "")
-        vagas     = imovel.get("parkingSpaces", "")
-        preco     = imovel.get("priceFormatted", "") or imovel.get("price", "")
-        bairro    = imovel.get("neighborhood", "") or imovel.get("bairro", "") or ""
-        cidade    = imovel.get("city", "") or imovel.get("cidade", "") or ""
-        images    = imovel.get("images", []) or []
-
-        prompt_texto = f"""Voce e um avaliador imobiliario especializado.
-Analise o anuncio abaixo considerando o texto E as fotos juntos.
-Retorne APENAS JSON valido, sem texto fora do JSON.
-
-Dados do imovel:
-- Titulo: {titulo[:200]}
-- Descricao: {descricao[:500]}
-- Tipo: {tipo} | Area: {area}m2 | Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas}
-- Preco: {preco} | Bairro: {bairro} | Cidade: {cidade}
-
-Regras:
-1. Use o texto E as fotos para chegar a uma conclusao integrada.
-2. Nao invente informacoes que nao aparecem no texto nem nas fotos.
-3. Se nao houver evidencia suficiente, use "desconhecido".
-4. Ausencia de informacao NAO e ponto negativo.
-5. So classifique como negativo se houver evidencia explicita.
-6. Se parkingSpaces > 0, inclua "vagas de garagem" em pontos_positivos.
-7. Se mencionar ou visualizar suite, inclua "suite" em pontos_positivos.
-
-Retorne exatamente este JSON:
-{{
-  "estado_conservacao": "novo|reformado|bom|regular|precisa_reforma|desconhecido",
-  "padrao_acabamento": "alto_padrao|medio|simples|desconhecido",
-  "pontos_positivos": [],
-  "pontos_negativos": [],
-  "confianca_extracao": "baixa|media|alta",
-  "observacoes": []
-}}"""
-
-        # Seleciona ate 8 fotos espaçadas
-        if len(images) <= 8:
-            fotos_selecionadas = images
-        else:
-            step = len(images) / 8
-            indices = [int(i * step) for i in range(8)]
-            fotos_selecionadas = [images[i] for i in indices]
-
-        # Chamada principal: texto + 1 foto (a do meio)
         content = [{"type": "text", "text": prompt_texto}]
         if fotos_selecionadas:
-            foto_principal = fotos_selecionadas[len(fotos_selecionadas) // 2]
-            content.append({"type": "image_url", "image_url": {"url": foto_principal}})
+            content.append({"type": "image_url", "image_url": {"url": fotos_selecionadas[0]}})
 
         response = client.chat.completions.create(
             model="meta/llama-3.2-11b-vision-instruct",
             messages=[{"role": "user", "content": content}],
-            max_tokens=512,
+            max_tokens=900,
             temperature=0,
         )
 
         texto_resp = response.choices[0].message.content or ""
-
         m = re.search(r"\{[\s\S]+\}", texto_resp)
         if not m:
             logger.warning("NVIDIA NIM nao retornou JSON valido")
             return {}
 
         resultado_nim = json.loads(m.group(0))
+        resultado_nim["fotos_analisadas"] = len(fotos_selecionadas)
         resultado_nim["llm_usada"] = "nvidia-llama-3.2-11b-vision"
         return resultado_nim
 
@@ -810,9 +716,10 @@ def _calcular_score(estado: str, padrao: str,
             continue
 
         peso = pesos_negativos_map.get(negativo_normalizado)
-        # Problema não previsto na tabela: penalização genérica
+        # Segurança: somente problemas previstos na tabela alteram o score.
+        # Observações livres da LLM nunca recebem penalização genérica.
         if peso is None:
-            peso = -0.05
+            continue
 
         penalizacoes += peso
         negativos_aplicados.append({"item": negativo, "peso": peso})
@@ -886,14 +793,15 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
     images    = imovel.get("images", []) or []
     texto     = f"{titulo} {descricao}".strip()
 
-    logger.info(f"    [diag] id={label} | fotos_brutas={len(images)} | fotos_enviadas_ag3={min(len(images), 8)} | titulo={len(titulo)} chars | desc={len(descricao)} chars")
+    logger.info(f"    [diag] id={label} | fotos_brutas={len(images)} | limite_interface={MAX_FOTOS_INTERFACE} | titulo={len(titulo)} chars | desc={len(descricao)} chars")
 
     # Descricao insuficiente e sem fotos
-    if not texto or len(texto) < 10:
+    if (not texto or len(texto) < 10) and not images:
         return {
             "id_imovel": id_imovel, "status": "descricao_insuficiente",
             "estado_conservacao": "desconhecido", "padrao_acabamento": "desconhecido",
             "pontos_positivos": [], "pontos_negativos": [],
+            "limitacoes_analise": ["Sem descricao suficiente e sem fotos para analise."],
             "confianca_extracao": "baixa",
             "observacoes": ["Descricao insuficiente para analise."],
             "scores": {"score_qualitativo": 0.50},
@@ -918,6 +826,7 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
             "padrao_acabamento": "desconhecido",
             "pontos_positivos": [],
             "pontos_negativos": [],
+            "limitacoes_analise": obs_fallback.copy(),
             "confianca_extracao": "baixa",
             "observacoes": obs_fallback,
         }
@@ -932,6 +841,7 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
     pontos_pos = dados.get("pontos_positivos", [])
     pontos_neg = dados.get("pontos_negativos", [])
     observacoes = dados.get("observacoes", [])
+    limitacoes_analise = dados.get("limitacoes_analise", [])
     qualidade_imagens = str(dados.get("qualidade_imagens", "razoavel")).lower().strip()
     if qualidade_imagens not in ("boa", "razoavel", "ruim"):
         qualidade_imagens = "razoavel"
@@ -942,6 +852,7 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
     if not isinstance(pontos_pos, list): pontos_pos = []
     if not isinstance(pontos_neg, list): pontos_neg = []
     if not isinstance(observacoes, list): observacoes = []
+    if not isinstance(limitacoes_analise, list): limitacoes_analise = []
 
     # Observacao quando estado desconhecido
     if estado == "desconhecido":
@@ -1009,10 +920,11 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
         "qualidade_imagens":     qualidade_imagens,
         "confianca_extracao":    confianca,
         "evidencias":            evidencias,
-        "fotos_analisadas":      min(len(images), 8),
+        "fotos_analisadas":      int(dados.get("fotos_analisadas", 0) or 0),
         "total_fotos_disponiveis": len(images),
         "llm_usada":             dados.get("llm_usada", "fallback"),
         "observacoes":           observacoes,
+        "limitacoes_analise":    limitacoes_analise,
         "scores":                {"score_qualitativo": score},
         "detalhes_calculo":      detalhes_calculo,
         "classificacao_qualitativa": classificacao,
@@ -1158,4 +1070,3 @@ def analisar_comparaveis(
     logger.info(f"[Ag3][Resumo LLM] Groq chamadas={gr['chamadas']} | sucessos={gr['sucessos']} | 429={gr['erros_429']} | tempo_espera_quota={tempo_espera:.0f}s")
 
     return saida
-
