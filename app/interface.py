@@ -726,6 +726,16 @@ if "resultado" in st.session_state:
                     bullets_neg = "\n".join([f"- {n}" for n in negativos])
                     st.markdown(f"⚠️ **Pontos de atenção:**\n{bullets_neg}")
 
+                # Características da unidade
+                carac_unidade = alvo_analise.get("caracteristicas_unidade", [])
+                if carac_unidade:
+                    st.markdown(f"🏢 **Unidade:** {', '.join(carac_unidade)}")
+
+                # Características do condomínio
+                carac_condo = alvo_analise.get("caracteristicas_condominio", [])
+                if carac_condo:
+                    st.markdown(f"🏘️ **Condomínio:** {', '.join(carac_condo)}")
+
                 # Observações
                 observacoes = alvo_analise.get("observacoes", [])
                 if observacoes:
