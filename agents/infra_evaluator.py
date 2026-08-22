@@ -28,7 +28,7 @@ FLUXO:
 GEOAPIFY:
     - 20 resultados por consulta.
     - ate 1 credito por consulta.
-    - maximo planejado: 8 creditos por avaliacao.
+    - ate 8 creditos nas buscas base + ate 3 creditos opcionais de Place Details para imobiliaria.
 """
 
 import os
@@ -66,6 +66,7 @@ RAIO_MAX = 1500
 
 GEOAPIFY_LIMIT = 20
 RAIO_IMOBILIARIA = 8000
+GEOAPIFY_DETAILS_IMOBILIARIA_MAX = 3
 SCORE_NEUTRO = 0.5
 
 
@@ -467,6 +468,149 @@ def _geoapify_request(
             "tempo_s": time.perf_counter() - t0,
             "erro": str(e),
         }
+
+
+def _geoapify_place_details(place_id: str) -> dict:
+    """Busca detalhes de um place_id da Geoapify.
+
+    A chamada e feita somente quando necessario, para evitar consumo desnecessario
+    de creditos. Retorna apenas o feature do tipo "details".
+    """
+
+    import time
+
+    api_key = (
+        os.getenv("GEOAPIFY_API_KEY", "")
+        or os.getenv("GEOAPIFY_KEY", "")
+    )
+
+    if not api_key or not place_id:
+        return {
+            "ok": False,
+            "http_status": None,
+            "properties": {},
+            "tempo_s": 0.0,
+            "erro": "API key ou place_id ausente",
+        }
+
+    url = "https://api.geoapify.com/v2/place-details"
+    params = {
+        "id": place_id,
+        "features": "details",
+        "apiKey": api_key,
+    }
+
+    t0 = time.perf_counter()
+
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        tempo = time.perf_counter() - t0
+
+        if resp.status_code != 200:
+            return {
+                "ok": False,
+                "http_status": resp.status_code,
+                "properties": {},
+                "tempo_s": tempo,
+                "erro": f"HTTP {resp.status_code}",
+            }
+
+        data = resp.json()
+        details_prop = {}
+
+        for feat in data.get("features", []) or []:
+            prop = feat.get("properties", {}) or {}
+            if prop.get("feature_type") == "details":
+                details_prop = prop
+                break
+
+        # Algumas respostas podem conter apenas um feature utilizavel.
+        if not details_prop:
+            features = data.get("features", []) or []
+            if features:
+                details_prop = features[0].get("properties", {}) or {}
+
+        return {
+            "ok": True,
+            "http_status": 200,
+            "properties": details_prop,
+            "tempo_s": tempo,
+            "erro": None,
+        }
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "http_status": None,
+            "properties": {},
+            "tempo_s": time.perf_counter() - t0,
+            "erro": str(e),
+        }
+
+
+def _primeiro_valor_telefone(contact: dict) -> Optional[str]:
+    """Extrai o melhor telefone disponivel do objeto contact da Geoapify."""
+
+    contact = contact or {}
+
+    telefone = contact.get("phone")
+    if telefone:
+        return telefone
+
+    outros = contact.get("phone_other") or []
+    if isinstance(outros, list):
+        for valor in outros:
+            if valor:
+                return valor
+
+    internacionais = contact.get("phone_international") or {}
+    if isinstance(internacionais, dict):
+        for valor in internacionais.values():
+            if isinstance(valor, str) and valor:
+                return valor
+            if isinstance(valor, list):
+                for item in valor:
+                    if item:
+                        return item
+
+    return None
+
+
+def _dados_contato_geoapify(prop: dict) -> dict:
+    """Normaliza os campos de contato e informacoes uteis da Geoapify."""
+
+    prop = prop or {}
+    contact = prop.get("contact", {}) or {}
+
+    return {
+        "telefone": _primeiro_valor_telefone(contact),
+        "telefone_outros": contact.get("phone_other") or [],
+        "telefone_international": contact.get("phone_international") or {},
+        "email": contact.get("email"),
+        "email_outros": contact.get("email_other") or [],
+        "website": prop.get("website"),
+        "website_outros": prop.get("website_other") or [],
+        "website_international": prop.get("website_international") or {},
+        "opening_hours": prop.get("opening_hours"),
+    }
+
+
+def _tem_contato_util(candidato: dict) -> bool:
+    """Considera contato util telefone, email ou website."""
+
+    if not candidato:
+        return False
+
+    return bool(
+        candidato.get("telefone")
+        or candidato.get("email")
+        or candidato.get("website")
+        or candidato.get("telefone_outros")
+        or candidato.get("email_outros")
+        or candidato.get("website_outros")
+        or candidato.get("telefone_international")
+        or candidato.get("website_international")
+    )
 
 
 # =============================================================================
@@ -1984,408 +2128,309 @@ def _buscar_imobiliaria_proxima(
 
     import time
 
-
     t0 = time.perf_counter()
 
-
     retorno = {
-
         "encontrada": False,
-
         "nome": None,
-
         "telefone": None,
-
+        "telefone_outros": [],
+        "telefone_international": {},
+        "email": None,
+        "email_outros": [],
+        "website": None,
+        "website_outros": [],
+        "website_international": {},
+        "opening_hours": None,
         "endereco": None,
-
         "distancia_metros": None,
-
         "fonte": None,
-
+        "place_id": None,
         "fallback_google": False,
-
         "geoapify_resultados": 0,
-
+        "geoapify_details_chamadas": 0,
+        "geoapify_details_sucesso": False,
         "google_resultados": 0,
-
         "tempo_s": 0.0,
     }
 
+    # -----------------------------------------------------------------
+    # 1. GEOAPIFY PLACES
+    # -----------------------------------------------------------------
 
     consulta = _geoapify_request(
-
         lat,
-
         lon,
-
-        GEOAPIFY_GRUPOS[
-            "imobiliaria"
-        ],
-
+        GEOAPIFY_GRUPOS["imobiliaria"],
         RAIO_IMOBILIARIA,
-
         GEOAPIFY_LIMIT
     )
 
-
     features = (
-
-        consulta.get(
-            "features",
-            []
-        )
-
-        if consulta.get(
-            "ok"
-        )
-
+        consulta.get("features", [])
+        if consulta.get("ok")
         else []
     )
 
-
-    retorno[
-        "geoapify_resultados"
-    ] = len(
-        features
-    )
-
-
+    retorno["geoapify_resultados"] = len(features)
     candidatos_geo = []
-
 
     for feat in features:
 
+        prop = feat.get("properties", {}) or {}
+        geom = feat.get("geometry", {}) or {}
+        coords = geom.get("coordinates", []) or []
 
-        prop = (
-            feat.get(
-                "properties",
-                {}
-            )
-            or {}
-        )
-
-
-        geom = (
-            feat.get(
-                "geometry",
-                {}
-            )
-            or {}
-        )
-
-
-        coords = (
-            geom.get(
-                "coordinates",
-                []
-            )
-            or []
-        )
-
-
-        if len(coords) >= 2 and isinstance(coords[0], (int, float)):
+        # Geoapify pode devolver Point, Polygon, MultiPolygon etc.
+        # Para geometrias que nao sao Point, usamos properties.lat/lon.
+        if (
+            len(coords) >= 2
+            and isinstance(coords[0], (int, float))
+            and isinstance(coords[1], (int, float))
+        ):
             lon_p = float(coords[0])
             lat_p = float(coords[1])
         else:
-            lon_p = prop.get('lon')
-            lat_p = prop.get('lat')
+            lon_p = prop.get("lon")
+            lat_p = prop.get("lat")
+
             if lon_p is None or lat_p is None:
                 continue
+
             lon_p = float(lon_p)
-            lat_p = float(
-            coords[1]
-        )
+            lat_p = float(lat_p)
 
-
-        dist = _haversine(
-            lat,
-            lon,
-            lat_p,
-            lon_p
-        )
-
-
-        telefone = (
-
-            prop.get(
-                "contact",
-                {}
-            )
-            or {}
-        ).get(
-            "phone"
-        )
-
+        dist = _haversine(lat, lon, lat_p, lon_p)
+        contato = _dados_contato_geoapify(prop)
 
         candidatos_geo.append({
-
-            "nome": prop.get(
-                "name",
-                "?"
-            ),
-
-            "telefone": telefone,
-
-            "endereco": prop.get(
-                "formatted"
-            ),
-
+            "nome": prop.get("name", "?"),
+            **contato,
+            "endereco": prop.get("formatted"),
             "distancia_metros": dist,
-
-            "fonte": "geoapify",
-
-            "place_id": prop.get(
-                "place_id"
-            ),
+            "fonte": "geoapify_places",
+            "place_id": prop.get("place_id"),
         })
 
-
     candidatos_geo.sort(
-        key=lambda x:
-        x["distancia_metros"]
+        key=lambda x: x["distancia_metros"]
     )
 
+    logger.info(
+        f"  [Ag4][Imobiliaria] Geoapify Places="
+        f"{len(candidatos_geo)}"
+    )
 
-    com_telefone = next(
+    # -----------------------------------------------------------------
+    # 2. SE O PLACES JA TROUXE CONTATO UTIL, NAO CHAMA DETAILS/GOOGLE
+    # -----------------------------------------------------------------
 
+    candidato_com_contato = next(
         (
             c
-            for c
-            in candidatos_geo
-            if c.get(
-                "telefone"
-            )
+            for c in candidatos_geo
+            if _tem_contato_util(c)
         ),
-
         None
     )
 
-
-    # -------------------------------------------------------------
-    # GEOAPIFY ENCONTROU TELEFONE
-    # -------------------------------------------------------------
-
-    if com_telefone:
-
-
+    if candidato_com_contato:
         retorno.update({
-
             "encontrada": True,
-
-            **com_telefone
+            **candidato_com_contato,
         })
 
-
-    # -------------------------------------------------------------
-    # GOOGLE FALLBACK PARA IMOBILIARIA
-    # -------------------------------------------------------------
+        logger.info(
+            f"  [Ag4][Imobiliaria] contato util no Geoapify Places "
+            f"| nome={candidato_com_contato.get('nome')} "
+            f"| telefone={'sim' if candidato_com_contato.get('telefone') else 'nao'} "
+            f"| website={'sim' if candidato_com_contato.get('website') else 'nao'} "
+            f"| email={'sim' if candidato_com_contato.get('email') else 'nao'}"
+        )
 
     else:
 
+        # -------------------------------------------------------------
+        # 3. PLACE DETAILS - SOMENTE NOS MAIS PROXIMOS
+        # -------------------------------------------------------------
+        # Evita consultar todos os resultados. Tenta, no maximo, os N
+        # candidatos mais proximos ate encontrar telefone/site/email.
 
-        retorno[
-            "fallback_google"
-        ] = True
+        escolhido_details = None
 
+        for candidato in candidatos_geo[:GEOAPIFY_DETAILS_IMOBILIARIA_MAX]:
 
-        fallback = _google_request(
-
-            lat,
-
-            lon,
-
-            _tipos_google_grupo(
-                "imobiliaria"
-            ),
-
-            RAIO_IMOBILIARIA,
-
-            20,
-
-            telefone=True
-        )
-
-
-        places = (
-
-            fallback.get(
-                "places",
-                []
-            )
-
-            if fallback.get(
-                "ok"
-            )
-
-            else []
-        )
-
-
-        retorno[
-            "google_resultados"
-        ] = len(
-            places
-        )
-
-
-        candidatos_google = []
-
-
-        for place in places:
-
-
-            loc = (
-                place.get(
-                    "location",
-                    {}
-                )
-                or {}
-            )
-
-
-            lat_p = loc.get(
-                "latitude"
-            )
-
-            lon_p = loc.get(
-                "longitude"
-            )
-
-
-            if (
-                lat_p is None
-                or lon_p is None
-            ):
+            place_id = candidato.get("place_id")
+            if not place_id:
                 continue
 
+            detalhes = _geoapify_place_details(place_id)
+            retorno["geoapify_details_chamadas"] += 1
 
-            dist = _haversine(
+            logger.info(
+                f"  [Ag4][Imobiliaria][Details] "
+                f"nome={candidato.get('nome')} "
+                f"| ok={detalhes.get('ok')} "
+                f"| http={detalhes.get('http_status')}"
+            )
 
+            if not detalhes.get("ok"):
+                continue
+
+            prop_det = detalhes.get("properties", {}) or {}
+            contato_det = _dados_contato_geoapify(prop_det)
+
+            enriquecido = {
+                **candidato,
+                **{
+                    chave: valor
+                    for chave, valor in contato_det.items()
+                    if valor not in (None, "", [], {})
+                },
+                "nome": prop_det.get("name") or candidato.get("nome"),
+                "endereco": prop_det.get("formatted") or candidato.get("endereco"),
+                "fonte": "geoapify_details",
+            }
+
+            if _tem_contato_util(enriquecido):
+                escolhido_details = enriquecido
+                retorno["geoapify_details_sucesso"] = True
+                break
+
+        if escolhido_details:
+            retorno.update({
+                "encontrada": True,
+                **escolhido_details,
+            })
+
+            logger.info(
+                f"  [Ag4][Imobiliaria] contato util no Place Details "
+                f"| nome={escolhido_details.get('nome')} "
+                f"| telefone={'sim' if escolhido_details.get('telefone') else 'nao'} "
+                f"| website={'sim' if escolhido_details.get('website') else 'nao'} "
+                f"| email={'sim' if escolhido_details.get('email') else 'nao'}"
+            )
+
+        else:
+
+            # ---------------------------------------------------------
+            # 4. GOOGLE COMO ULTIMO FALLBACK
+            # ---------------------------------------------------------
+
+            retorno["fallback_google"] = True
+
+            logger.info(
+                "  [Ag4][Imobiliaria] Geoapify sem contato util "
+                "-> Google fallback"
+            )
+
+            fallback = _google_request(
                 lat,
-
                 lon,
-
-                float(lat_p),
-
-                float(lon_p)
+                _tipos_google_grupo("imobiliaria"),
+                RAIO_IMOBILIARIA,
+                20,
+                telefone=True
             )
 
+            places = (
+                fallback.get("places", [])
+                if fallback.get("ok")
+                else []
+            )
 
-            candidatos_google.append({
+            retorno["google_resultados"] = len(places)
+            candidatos_google = []
 
-                "nome": place.get(
-                    "displayName",
-                    {}
-                ).get(
-                    "text",
-                    "?"
-                ),
+            for place in places:
 
-                "telefone": place.get(
-                    "nationalPhoneNumber"
-                ),
+                loc = place.get("location", {}) or {}
+                lat_p = loc.get("latitude")
+                lon_p = loc.get("longitude")
 
-                "endereco": place.get(
-                    "formattedAddress"
-                ),
+                if lat_p is None or lon_p is None:
+                    continue
 
-                "distancia_metros": dist,
-
-                "fonte": "google_fallback",
-
-                "place_id": place.get(
-                    "id"
-                ),
-            })
-
-
-        candidatos_google.sort(
-            key=lambda x:
-            x["distancia_metros"]
-        )
-
-
-        com_tel_google = next(
-
-            (
-                c
-                for c
-                in candidatos_google
-                if c.get(
-                    "telefone"
+                dist = _haversine(
+                    lat,
+                    lon,
+                    float(lat_p),
+                    float(lon_p)
                 )
-            ),
 
-            None
-        )
+                candidatos_google.append({
+                    "nome": (
+                        place.get("displayName", {})
+                        .get("text", "?")
+                    ),
+                    "telefone": place.get("nationalPhoneNumber"),
+                    "telefone_outros": [],
+                    "telefone_international": {},
+                    "email": None,
+                    "email_outros": [],
+                    "website": None,
+                    "website_outros": [],
+                    "website_international": {},
+                    "opening_hours": None,
+                    "endereco": place.get("formattedAddress"),
+                    "distancia_metros": dist,
+                    "fonte": "google_fallback",
+                    "place_id": place.get("id"),
+                })
 
-
-        escolhido = (
-
-            com_tel_google
-
-            or (
-
-                candidatos_google[0]
-
-                if candidatos_google
-
-                else None
+            candidatos_google.sort(
+                key=lambda x: x["distancia_metros"]
             )
-        )
 
+            com_tel_google = next(
+                (
+                    c
+                    for c in candidatos_google
+                    if c.get("telefone")
+                ),
+                None
+            )
 
-        if escolhido:
+            escolhido_google = (
+                com_tel_google
+                or (
+                    candidatos_google[0]
+                    if candidatos_google
+                    else None
+                )
+            )
 
+            if escolhido_google:
+                retorno.update({
+                    "encontrada": True,
+                    **escolhido_google,
+                })
 
-            retorno.update({
+            # Se Google tambem falhar, ainda devolve a imobiliaria mais
+            # proxima encontrada pela Geoapify, mesmo sem contato.
+            elif candidatos_geo:
+                retorno.update({
+                    "encontrada": True,
+                    **candidatos_geo[0],
+                })
 
-                "encontrada": True,
-
-                **escolhido
-            })
-
-
-        elif candidatos_geo:
-
-
-            retorno.update({
-
-                "encontrada": True,
-
-                **candidatos_geo[0]
-            })
-
-
-    retorno[
-        "tempo_s"
-    ] = round(
-
-        time.perf_counter()
-        - t0,
-
+    retorno["tempo_s"] = round(
+        time.perf_counter() - t0,
         3
     )
 
-
     logger.info(
-
         f"  Imobiliaria: "
-
         f"encontrada={retorno['encontrada']} "
-
-        f"| fonte={retorno['fonte']} "
-
-        f"| telefone="
-        f"{'sim' if retorno.get('telefone') else 'nao'} "
-
-        f"| fallback_google="
-        f"{retorno['fallback_google']} "
-
-        f"| tempo="
-        f"{retorno['tempo_s']:.3f}s"
+        f"| nome={retorno.get('nome')} "
+        f"| fonte={retorno.get('fonte')} "
+        f"| telefone={'sim' if retorno.get('telefone') else 'nao'} "
+        f"| website={'sim' if retorno.get('website') else 'nao'} "
+        f"| email={'sim' if retorno.get('email') else 'nao'} "
+        f"| details={retorno['geoapify_details_chamadas']} "
+        f"| fallback_google={retorno['fallback_google']} "
+        f"| tempo={retorno['tempo_s']:.3f}s"
     )
-
 
     return retorno
 
@@ -4134,6 +4179,25 @@ def avaliar_infraestrutura(
     diagnostico_busca[
         "geoapify_creditos_maximos"
     ] += 1
+
+
+    detalhes_imobiliaria = int(
+        imobiliaria_proxima.get(
+            "geoapify_details_chamadas",
+            0
+        )
+        or 0
+    )
+
+
+    diagnostico_busca[
+        "geoapify_chamadas"
+    ] += detalhes_imobiliaria
+
+
+    diagnostico_busca[
+        "geoapify_creditos_maximos"
+    ] += detalhes_imobiliaria
 
 
     if imobiliaria_proxima.get(
