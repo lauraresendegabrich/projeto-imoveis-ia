@@ -942,12 +942,24 @@ if "resultado" in st.session_state:
                     tel_imob = imob.get("telefone", "")
                     end_imob = imob.get("endereco", "")
                     dist_imob = imob.get("distancia_metros", "?")
+                    email_imob = imob.get("email", "")
+                    site_imob = imob.get("website", "")
+                    horario_imob = imob.get("opening_hours", "")
+
+                    st.write(f"**{nome_imob}**")
+                    infos_imob = []
                     if tel_imob:
-                        st.write(f"**{nome_imob}** — {tel_imob}")
-                    else:
-                        st.write(f"**{nome_imob}**")
+                        infos_imob.append(f"📱 {tel_imob}")
+                    if email_imob:
+                        infos_imob.append(f"✉️ {email_imob}")
+                    if site_imob:
+                        infos_imob.append(f"🌐 [{site_imob}]({site_imob})")
+                    if infos_imob:
+                        st.markdown(" | ".join(infos_imob))
                     if end_imob:
                         st.caption(f"📍 {end_imob} ({dist_imob}m)")
+                    if horario_imob:
+                        st.caption(f"🕐 {horario_imob}")
 
         # Ag.5
         m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
