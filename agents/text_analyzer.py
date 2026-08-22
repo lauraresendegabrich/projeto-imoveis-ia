@@ -239,7 +239,6 @@ SCHEMA_AGENTE3 = {
                 },
             },
             "required": ["conservacao", "acabamento"],
-            "additionalProperties": False,
         },
         "observacoes": {
             "type": "array",
@@ -259,7 +258,6 @@ SCHEMA_AGENTE3 = {
         "evidencias",
         "observacoes",
     ],
-    "additionalProperties": False,
 }
 
 
