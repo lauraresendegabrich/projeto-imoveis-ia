@@ -1670,3 +1670,4 @@ def analisar_zona_homogenea(
     logger.info(f"Salvo em: {caminho_saida}")
 
     return resultado
+    
