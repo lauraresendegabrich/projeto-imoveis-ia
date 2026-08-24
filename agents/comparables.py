@@ -487,95 +487,65 @@ def _formatar_caracteristicas_prompt(imovel: dict) -> str:
 
 def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
     """
-    Monta o prompt da LLM para o julgamento FINAL de comparabilidade.
+    Prompt compacto para caber no limite de 8000 tokens do Groq free tier.
 
-    Os candidatos recebidos aqui ja passaram pela pre-classificacao objetiva.
+    Os candidatos ja passaram pela pre-classificacao objetiva.
     O score numerico NAO e colocado no prompt para nao ancorar a LLM.
     """
+    # Alvo: formato de linha unica compacta
+    terreno_alvo = _obter_area_terreno(alvo)
     alvo_resumo = (
-        f"Tipo: {alvo.get('propertyType', '?')}\n"
-        f"Area: {alvo.get('area', '?')} m²\n"
-        f"Area terreno: {_obter_area_terreno(alvo) or '?'} m²\n"
-        f"Quartos: {alvo.get('bedrooms', '?')}\n"
-        f"Banheiros: {alvo.get('bathrooms', '?')}\n"
-        f"Vagas: {alvo.get('parkingSpaces', '?')}\n"
-        f"Preco: {alvo.get('priceFormatted', '?')}\n"
-        f"Preco/m²: R$ {alvo.get('pricePerSqm', '?')}\n"
-        f"Bairro: {alvo.get('neighborhood', '?')}\n"
-        f"Rua: {alvo.get('street', '?')}\n"
-        f"Caracteristicas: {_formatar_caracteristicas_prompt(alvo)}\n"
-        f"Descricao: {(alvo.get('description') or alvo.get('descricao') or '')[:200]}\n"
+        f"Tipo={alvo.get('propertyType','?')} | "
+        f"Area={alvo.get('area','?')}m² | "
+        f"Quartos={alvo.get('bedrooms','?')} | "
+        f"Banheiros={alvo.get('bathrooms','?')} | "
+        f"Vagas={alvo.get('parkingSpaces','?')} | "
+        f"Bairro={alvo.get('neighborhood','?')} | "
+        f"Rua={alvo.get('street','?')}"
     )
+    if terreno_alvo:
+        alvo_resumo += f" | Terreno={terreno_alvo:.0f}m²"
 
-    candidatos_texto = ""
+    # Candidatos: 1 linha por candidato (maximo ~80 chars cada)
+    linhas = []
     for idx, c in enumerate(candidatos, 1):
-        desc = (c.get("description") or c.get("descricao") or "")[:120]
-        area_terreno = _obter_area_terreno(c)
-        candidatos_texto += (
-            f"\n[{idx}]\n"
-            f"  Tipo: {c.get('propertyType', '?')} | Area: {c.get('area', '?')}m² | "
-            f"Quartos: {c.get('bedrooms', '?')} | Banheiros: {c.get('bathrooms', '?')} | "
-            f"Vagas: {c.get('parkingSpaces', '?')}\n"
-            f"  Preco: {c.get('priceFormatted', '?')} | Preco/m²: R$ {c.get('pricePerSqm', '?')}\n"
-            f"  Bairro: {c.get('neighborhood', '?')} | Rua: {c.get('street', '?')}"
+        area_t = _obter_area_terreno(c)
+        linha = (
+            f"[{idx}] {c.get('propertyType','?')} "
+            f"{c.get('area','?')}m² "
+            f"{c.get('bedrooms','?')}q "
+            f"{c.get('bathrooms','?')}b "
+            f"{c.get('parkingSpaces','?')}v "
+            f"R${c.get('pricePerSqm','?')}/m² "
+            f"{(c.get('neighborhood') or '?')[:15]} "
+            f"{(c.get('street') or '?')[:20]}"
         )
-        if area_terreno is not None:
-            candidatos_texto += f" | Terreno: {area_terreno:.1f}m²"
-        candidatos_texto += f"\n  Caracteristicas: {_formatar_caracteristicas_prompt(c)}\n"
-        if desc:
-            candidatos_texto += f"  Desc: {desc}\n"
+        if area_t:
+            linha += f" T={area_t:.0f}"
+        linhas.append(linha)
 
-    prompt = f"""Classifique os candidatos restantes quanto a comparabilidade FINAL com o imovel alvo.
+    candidatos_texto = "\n".join(linhas)
 
-IMPORTANTE SOBRE O FLUXO:
-Os candidatos recebidos ja passaram por uma PRE-CLASSIFICACAO deterministica em Python.
-Essa etapa anterior ja eliminou incompatibilidades objetivas de:
-- area construida com diferenca superior a 50% em relacao ao alvo;
-- area de terreno com diferenca superior a 50% para casas, quando o dado existe;
-- divergencias explicitas de piscina, churrasqueira, area gourmet, quintal/area externa,
-  varanda/sacada, elevador, portaria, academia, salao de festas, playground e planejados.
+    prompt = f"""Classifique candidatos como A (comparavel) ou B (nao comparavel) em relacao ao alvo.
+Candidatos ja passaram por filtro de area (±50%) e caracteristicas objetivas em Python.
 
-Dado ausente foi tratado como DESCONHECIDO e nao como ausencia.
-Portanto, NAO repita cortes automaticos por essas regras. Use os dados recebidos para avaliar
-se, no conjunto, cada candidato ainda e um comparavel adequado.
+ALVO: {alvo_resumo}
 
-IMOVEL ALVO:
-{alvo_resumo}
-
-CANDIDATOS ({len(candidatos)} imoveis):
+CANDIDATOS:
 {candidatos_texto}
 
-Para cada candidato, retorne:
-- id
-- cluster: A = comparavel, B = nao comparavel
-- score_similaridade: inteiro de 0 a 100
-- justificativa: uma frase curta
+REGRAS:
+- A: score>=60, B: score<60
+- Tipo/uso compativeis, localizacao e area sao prioritarios
+- Quartos e configuracao geral sao relevantes
+- Banheiros/vagas/diferenciais sao secundarios
+- Preco nunca elimina sozinho
+- Campo ausente = desconhecido, nao ausencia
+- Diferencas pequenas isoladas nao causam B
 
-CRITERIOS PARA O JULGAMENTO FINAL:
-1. Tipo e uso do imovel devem ser compativeis.
-2. Localizacao e contexto do bairro/rua sao muito importantes.
-3. Considere area e configuracao geral de forma comparativa, sem criar um novo corte automatico.
-4. Quartos e distribuicao geral sao relevantes.
-5. Padrao construtivo e conjunto das caracteristicas descritas podem diferenciar os candidatos.
-6. Banheiros, vagas, suites, condominio e diferenciais sao secundarios quando a diferenca for pequena.
-7. Preco e preco/m² sao informacoes auxiliares e NUNCA eliminam um imovel sozinhos.
-8. Campos ausentes significam informacao desconhecida, nao ausencia da caracteristica.
-9. Classifique como B quando o CONJUNTO das diferencas tornar o imovel inadequado como comparavel.
-10. Diferencas pequenas e isoladas nao devem, sozinhas, causar Cluster B.
-
-SCORE DA LLM:
-90-100 = extremamente semelhante
-80-89 = muito semelhante
-70-79 = bom comparavel
-60-69 = comparavel com diferencas
-40-59 = baixa comparabilidade
-0-39 = incompativel
-
-Regra geral da classificacao da LLM: score >= 60 -> A, score < 60 -> B.
-Compare cada candidato somente com o imovel alvo.
-Todos os IDs recebidos devem aparecer exatamente uma vez.
-A justificativa deve ser curta.
-Responda somente no formato solicitado."""
+RESPONDA JSON array:
+[{{"id":1,"cluster":"A","score_similaridade":85,"justificativa":"..."}},...]
+Todos os {len(candidatos)} IDs devem aparecer. Justificativa curta."""
 
     return prompt
 
