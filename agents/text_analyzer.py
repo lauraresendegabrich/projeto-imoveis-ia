@@ -297,6 +297,86 @@ def _parse_json_obj(texto: str) -> dict:
             return {}
 
 
+def _parse_markdown_nvidia(texto: str) -> dict:
+    """
+    Fallback: parseia resposta Markdown estruturada da NVIDIA NIM.
+
+    A NVIDIA llama-3.2-11b-vision frequentemente retorna Markdown com
+    headings em **bold** e bullets com *, em vez de JSON.
+    Extrai os campos conhecidos e monta o dict equivalente.
+    """
+    if not texto or "{" in texto:
+        return {}  # Se tem JSON, deixa o parser principal resolver
+
+    resultado = {}
+
+    # Estado de conservacao
+    m = re.search(r"\*\*Estado de Conserva[cç][aã]o:?\*\*[:\s]*([^\n*]+)", texto, re.IGNORECASE)
+    if m:
+        resultado["estado_conservacao"] = m.group(1).strip().lower()
+
+    # Padrao de acabamento
+    m = re.search(r"\*\*Padr[aã]o de Acabamento:?\*\*[:\s]*([^\n*]+)", texto, re.IGNORECASE)
+    if m:
+        resultado["padrao_acabamento"] = m.group(1).strip().lower()
+
+    # Qualidade das imagens
+    m = re.search(r"\*\*Qualidade (?:das )?Imagens?:?\*\*[:\s]*([^\n*]+)", texto, re.IGNORECASE)
+    if m:
+        resultado["qualidade_imagens"] = m.group(1).strip().lower()
+
+    # Confianca
+    m = re.search(r"\*\*Confian[cç]a[^:]*:?\*\*[:\s]*([^\n*]+)", texto, re.IGNORECASE)
+    if m:
+        resultado["confianca_extracao"] = m.group(1).strip().lower()
+
+    def _extrair_lista_bullets(header_pattern: str) -> list:
+        """Extrai bullets abaixo de um heading Markdown."""
+        m = re.search(header_pattern + r"(.*?)(?=\n\*\*|\Z)", texto, re.IGNORECASE | re.DOTALL)
+        if not m:
+            return []
+        bloco = m.group(1)
+        itens = re.findall(r"[*\-]\s+(.+)", bloco)
+        return [i.strip() for i in itens if i.strip()]
+
+    # Listas
+    resultado["pontos_positivos"] = _extrair_lista_bullets(
+        r"\*\*Pontos Positivos:?\*\*[:\s]*"
+    )
+    resultado["pontos_negativos"] = _extrair_lista_bullets(
+        r"\*\*Pontos (?:Negativos|de Aten[cç][aã]o):?\*\*[:\s]*"
+    )
+    resultado["caracteristicas_unidade"] = _extrair_lista_bullets(
+        r"\*\*Caracter[ií]sticas da Unidade:?\*\*[:\s]*"
+    )
+    resultado["caracteristicas_condominio"] = _extrair_lista_bullets(
+        r"\*\*Caracter[ií]sticas do Condom[ií]nio:?\*\*[:\s]*"
+    )
+    resultado["limitacoes_analise"] = _extrair_lista_bullets(
+        r"\*\*Limita[cç][oõ]es (?:da )?An[aá]lise:?\*\*[:\s]*"
+    )
+    resultado["observacoes"] = _extrair_lista_bullets(
+        r"\*\*Observa[cç][oõ]es:?\*\*[:\s]*"
+    )
+
+    # Evidencias
+    evidencias_cons = _extrair_lista_bullets(
+        r"\*\*Evid[eê]ncias?.*?conserva[cç][aã]o:?\*\*[:\s]*"
+    )
+    evidencias_acab = _extrair_lista_bullets(
+        r"\*\*Evid[eê]ncias?.*?acabamento:?\*\*[:\s]*"
+    )
+    resultado["evidencias"] = {
+        "conservacao": evidencias_cons,
+        "acabamento": evidencias_acab,
+    }
+
+    # So retorna se conseguiu extrair pelo menos estado ou padrao
+    if resultado.get("estado_conservacao") or resultado.get("padrao_acabamento"):
+        return resultado
+    return {}
+
+
 def _deduplicar_lista(valores) -> list:
     """Remove duplicatas textuais preservando a ordem."""
     if not isinstance(valores, list):
@@ -1308,7 +1388,12 @@ IMPORTANTE PARA A RESPOSTA NVIDIA:
         logger.info(f"[Ag3][NVIDIA] resposta bruta ({len(texto_resp)} chars): {texto_resp[:500]}")
         bruto = _parse_json_obj(texto_resp)
         if not bruto:
-            logger.warning(f"[Ag3][NVIDIA] nao retornou JSON utilizavel | resposta completa: {texto_resp[:1000]}")
+            # Fallback: tenta parsear Markdown estruturado
+            bruto = _parse_markdown_nvidia(texto_resp)
+            if bruto:
+                logger.info("[Ag3][NVIDIA] parseado via fallback Markdown")
+        if not bruto:
+            logger.warning(f"[Ag3][NVIDIA] nao retornou JSON nem Markdown utilizavel | resposta completa: {texto_resp[:1000]}")
             _provider_state["nvidia"]["erros"] += 1
             return {}
 
