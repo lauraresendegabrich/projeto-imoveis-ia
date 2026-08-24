@@ -1335,11 +1335,8 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
 
 def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
     """
-    NVIDIA NIM: 1 foto, JSON solicitado no prompt e normalizacao tolerante.
-
-    Mantem o comportamento que funcionava melhor anteriormente:
-    nao usa JSON Schema rigido na API. A resposta e parseada e validada
-    em Python, preservando observacoes livres.
+    NVIDIA NIM: 1 foto + prompt ultra-compacto para forcar JSON.
+    max_tokens=450 para evitar que o modelo divague em Markdown.
     """
     _provider_state["nvidia"]["chamadas"] += 1
 
@@ -1358,17 +1355,39 @@ def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
 
         images = imovel.get("images", []) or []
         fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_NVIDIA)
-        prompt_texto = _prompt_compacto(imovel, len(fotos_selecionadas))
 
-        prompt_texto += """
-IMPORTANTE PARA A RESPOSTA NVIDIA:
-- Retorne APENAS um objeto JSON valido.
-- Use exatamente as chaves solicitadas no prompt.
-- Se houver evidencia razoavel no conjunto foto + descricao + dados,
-  classifique estado e padrao; nao escolha "desconhecido" apenas por haver
-  uma unica foto.
-- Se observar algo relevante fora dos vocabularios controlados, preserve
-  essa informacao em observacoes. Nao a descarte.
+        descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
+        tipo = imovel.get("propertyType", "") or imovel.get("tipo", "") or ""
+        area = imovel.get("area", "")
+        quartos = imovel.get("bedrooms", "") or imovel.get("quartos", "")
+        banheiros = imovel.get("bathrooms", "") or imovel.get("banheiros", "")
+        vagas = imovel.get("parkingSpaces", "") or imovel.get("vagas", "")
+
+        prompt_texto = f"""Analise o imovel pela foto e pelos dados abaixo.
+Tipo: {tipo}
+Area: {area}
+Quartos: {quartos}
+Banheiros: {banheiros}
+Vagas: {vagas}
+Descricao: {descricao[:600]}
+
+Responda SOMENTE com este JSON:
+{{
+  "estado_conservacao": "bom",
+  "padrao_acabamento": "medio",
+  "diferenciais": [],
+  "negativos": [],
+  "garagem": "",
+  "observacoes": [],
+  "confianca_extracao": "media"
+}}
+
+Valores permitidos:
+estado_conservacao: novo, reformado, bom, regular, precisa_reforma, desconhecido
+padrao_acabamento: alto, medio, simples, desconhecido
+confianca_extracao: alta, media, baixa
+
+Nao escreva explicacoes fora do JSON.
 """
 
         content = [{"type": "text", "text": prompt_texto}]
@@ -1380,7 +1399,7 @@ IMPORTANTE PARA A RESPOSTA NVIDIA:
         response = client.chat.completions.create(
             model="meta/llama-3.2-11b-vision-instruct",
             messages=[{"role": "user", "content": content}],
-            max_tokens=1000,
+            max_tokens=450,
             temperature=0,
         )
 
@@ -1393,13 +1412,23 @@ IMPORTANTE PARA A RESPOSTA NVIDIA:
             if bruto:
                 logger.info("[Ag3][NVIDIA] parseado via fallback Markdown")
         if not bruto:
-            logger.warning(f"[Ag3][NVIDIA] nao retornou JSON nem Markdown utilizavel | resposta completa: {texto_resp[:1000]}")
+            logger.warning(f"[Ag3][NVIDIA] nao retornou JSON nem Markdown utilizavel | resposta: {texto_resp[:500]}")
             _provider_state["nvidia"]["erros"] += 1
             return {}
 
+        # Mapeia campos do prompt simplificado para o contrato padrao
+        if "diferenciais" in bruto and "pontos_positivos" not in bruto:
+            bruto["pontos_positivos"] = bruto.pop("diferenciais", [])
+        if "negativos" in bruto and "pontos_negativos" not in bruto:
+            bruto["pontos_negativos"] = bruto.pop("negativos", [])
+        # Normaliza padrao "alto" -> "alto_padrao"
+        padrao_raw = str(bruto.get("padrao_acabamento", "")).strip().lower()
+        if padrao_raw == "alto":
+            bruto["padrao_acabamento"] = "alto_padrao"
+
         resultado_nim = _validar_saida_llm(bruto)
         if not resultado_nim:
-            logger.warning("[Ag3][NVIDIA] resposta JSON nao passou na validacao")
+            logger.warning("[Ag3][NVIDIA] resposta nao passou na validacao")
             _provider_state["nvidia"]["erros"] += 1
             return {}
 
