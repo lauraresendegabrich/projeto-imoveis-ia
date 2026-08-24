@@ -6,8 +6,9 @@ RESPONSABILIDADE:
     Recebe os imoveis coletados pelo Agente 1 e identifica quais sao
     realmente comparaveis. Primeiro executa uma pre-classificacao
     deterministica em Python, depois calcula score numerico para ordenar
-    os sobreviventes e, por fim, usa LLM para o julgamento final dos
-    candidatos prioritarios. Depois valida geograficamente com imagem
+    os sobreviventes e, por fim, usa LLM para o julgamento final de TODOS
+    os candidatos que passaram pela pre-classificacao, processados em lotes.
+    Depois valida geograficamente com imagem
     de satelite.
 
 ENTRADA:
@@ -75,11 +76,11 @@ FLUXO COMPLETO:
     Somente candidatos que passaram pela pre-classificacao podem chegar
     a LLM. Sao priorizados pelo score numerico.
 
-    Limites:
-      - ate 30 candidatos para LLM
-      - lotes de ate 15 candidatos
-      - excedentes continuam no resultado como Cluster B (nao selecionados)
-        e NUNCA viram Cluster A apenas pelo score numerico
+    Processamento:
+      - TODOS os candidatos que passaram pela pre-classificacao vao para a LLM
+      - processamento em lotes de ate 15 candidatos
+      - nao existe limite total de candidatos para a LLM
+      - o score numerico serve apenas para ordenar a sequencia dos lotes
 
     Cadeia de fallback:
       1. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
@@ -551,9 +552,11 @@ CRITERIOS:
 - Preco nunca elimina sozinho
 - B somente quando CONJUNTO das diferencas for inadequado
 - score>=60 -> A, score<60 -> B
+- score_similaridade DEVE ser inteiro de 0 a 100; nunca escreva numeros por extenso
 
-Retorne JSON: [{{"id":1,"cluster":"A","score_similaridade":85,"justificativa":"frase curta"}},...]
-Todos os {len(candidatos)} IDs devem aparecer."""
+Retorne SOMENTE:
+{{"classificacao":[{{"id":1,"cluster":"A","score_similaridade":85,"justificativa":"frase curta"}}]}}
+Todos os {len(candidatos)} IDs devem aparecer exatamente uma vez."""
 
     return prompt
 
@@ -683,7 +686,7 @@ def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") 
                     }
                 }
             },
-            max_completion_tokens=6000,
+            max_completion_tokens=2500,
         )
 
         texto = response.choices[0].message.content or ""
@@ -721,7 +724,7 @@ def _chamar_gemini(prompt: str, api_key: str) -> str:
 def _marcar_sem_julgamento_llm(candidatos: list[dict], motivo: str, classificado_por: str) -> list[dict]:
     """
     Mantem candidatos no resultado, mas impede que o score numerico os transforme em Cluster A.
-    Usado para excedentes do top 30 e para lotes sem resposta LLM valida.
+    Usado apenas para lotes sem resposta LLM valida.
     """
     for c in candidatos:
         c["cluster"] = "B"
@@ -851,8 +854,8 @@ def identificar_comparaveis(
       3. calcula medias descritivas de area (terreno somente para casas);
       4. pre-classifica e elimina incompatibilidades objetivas;
       5. calcula score numerico apenas para ordenar/priorizar;
-      6. envia ate 30 sobreviventes para LLM em lotes de ate 15;
-      7. excedentes ficam como Cluster B (nao selecionados para LLM);
+      6. envia TODOS os sobreviventes para LLM em lotes de ate 15;
+      7. o score numerico apenas define a ordem de envio;
       8. somente a LLM pode promover candidatos a Cluster A quando usar_llm=True;
       9. junta Cluster A, Cluster B e terrenos sem perder candidatos.
     """
@@ -956,32 +959,18 @@ def identificar_comparaveis(
         )
 
     # ── 6. CLUSTERING VIA LLM ──────────────────────────────────────
-    MAX_PARA_LLM = 30
+    # Nao existe limite TOTAL de candidatos para a LLM.
+    # Todos os sobreviventes da pre-classificacao sao enviados.
+    # O score numerico apenas ordena a sequencia de processamento.
     TAMANHO_LOTE = 15
 
     if usar_llm:
         import time as t_ag2
 
-        candidatos_llm_enviar = elegiveis[:MAX_PARA_LLM]
-        candidatos_resto = elegiveis[MAX_PARA_LLM:]
+        candidatos_llm_enviar = elegiveis
 
         for im in candidatos_llm_enviar:
             im["pre_classificacao"]["enviado_llm"] = True
-        for im in candidatos_resto:
-            im["pre_classificacao"]["enviado_llm"] = False
-
-        # Os excedentes nao somem, mas tambem nao podem virar Cluster A pelo score.
-        # O score numerico serve SOMENTE para ordenar/priorizar quem chega a LLM.
-        if candidatos_resto:
-            logger.info(
-                f"[Ag2][Clustering] {len(candidatos_resto)} candidatos elegiveis fora do top "
-                f"{MAX_PARA_LLM}; mantidos como Cluster B (nao selecionados para LLM)"
-            )
-            candidatos_resto = _marcar_sem_julgamento_llm(
-                candidatos_resto,
-                f"Nao selecionado para LLM: fora do top {MAX_PARA_LLM} por score de priorizacao",
-                "fora_top_llm",
-            )
 
         todos_classificados = []
         lotes = [
@@ -990,8 +979,8 @@ def identificar_comparaveis(
         ]
 
         logger.info(
-            f"[Ag2][Clustering] Selecionados para LLM: {len(candidatos_llm_enviar)} "
-            f"em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}"
+            f"[Ag2][Clustering] TODOS os {len(candidatos_llm_enviar)} candidatos elegiveis "
+            f"serao enviados para LLM em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}"
         )
 
         t_inicio_clustering = t_ag2.time()
@@ -1008,7 +997,9 @@ def identificar_comparaveis(
                 )
                 lote = _parsear_resposta_llm(resposta, lote)
             else:
-                logger.warning(f"[Ag2][Clustering] Lote {num_lote}: LLM sem resposta — candidatos ficam como Cluster B")
+                logger.warning(
+                    f"[Ag2][Clustering] Lote {num_lote}: LLM sem resposta — candidatos ficam como Cluster B"
+                )
                 lote = _marcar_sem_julgamento_llm(
                     lote,
                     "Nenhum provedor LLM retornou classificacao; candidato mantido como nao comparavel",
@@ -1017,17 +1008,17 @@ def identificar_comparaveis(
 
             todos_classificados.extend(lote)
 
+            # Pausa curta entre lotes; a cadeia de fallback cuida de indisponibilidade/quota.
             if num_lote < len(lotes):
                 t_ag2.sleep(3)
 
         logger.info(f"[Ag2][Clustering] Tempo total: {t_ag2.time()-t_inicio_clustering:.1f}s")
-        classificados_elegiveis = todos_classificados + candidatos_resto
+        classificados_elegiveis = todos_classificados
     else:
         logger.info("[Ag2][Clustering] LLM desativada — usando apenas score numerico nos elegiveis")
         classificados_elegiveis = _fallback_numerico(elegiveis)
 
-    # Ranking LLM somente para quem foi efetivamente selecionado para julgamento da LLM.
-    # Candidatos fora do top 30 mantem ranking_llm=None e preservam ranking_pre_llm.
+    # Ranking LLM para todos que foram efetivamente enviados para julgamento.
     selecionados_julgados = [
         c for c in classificados_elegiveis
         if c.get("pre_classificacao", {}).get("enviado_llm")
@@ -1057,9 +1048,10 @@ def identificar_comparaveis(
         "total_construidos": len(filtrados),
         "elegiveis_apos_pre_classificacao": len(elegiveis),
         "incompativeis_pre_classificacao": len(incompativeis_pre),
-        "selecionados_para_llm": min(len(elegiveis), MAX_PARA_LLM) if usar_llm else 0,
-        "nao_selecionados_por_limite_llm": max(0, len(elegiveis) - MAX_PARA_LLM) if usar_llm else 0,
-        "limite_llm": MAX_PARA_LLM,
+        "selecionados_para_llm": len(elegiveis) if usar_llm else 0,
+        "nao_selecionados_por_limite_llm": 0,
+        "limite_llm": None,
+        "todos_elegiveis_enviados_llm": bool(usar_llm),
         "tamanho_lote_llm": TAMANHO_LOTE,
         "regra_area_percentual": 50,
         "caracteristicas_eliminatorias": list(CARACTERISTICAS_PRE_CLASSIFICACAO.keys()),
@@ -1093,10 +1085,9 @@ def identificar_comparaveis(
         f"[Ag2][PreClassificacao] eliminados antes da LLM: "
         f"{resumo_pre['incompativeis_pre_classificacao']}"
     )
-    logger.info(f"[Ag2][Clustering] enviados para LLM: {resumo_pre['selecionados_para_llm']}")
     logger.info(
-        f"[Ag2][Clustering] fora do top {MAX_PARA_LLM} (Cluster B, sem LLM): "
-        f"{resumo_pre['nao_selecionados_por_limite_llm']}"
+        f"[Ag2][Clustering] enviados para LLM: {resumo_pre['selecionados_para_llm']} "
+        f"(todos os elegiveis apos pre-classificacao)"
     )
     logger.info("=" * 60)
 
@@ -1670,4 +1661,3 @@ def analisar_zona_homogenea(
     logger.info(f"Salvo em: {caminho_saida}")
 
     return resultado
-    
