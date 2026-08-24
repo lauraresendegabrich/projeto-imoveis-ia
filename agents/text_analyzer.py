@@ -1305,9 +1305,10 @@ IMPORTANTE PARA A RESPOSTA NVIDIA:
         )
 
         texto_resp = response.choices[0].message.content or ""
+        logger.info(f"[Ag3][NVIDIA] resposta bruta ({len(texto_resp)} chars): {texto_resp[:500]}")
         bruto = _parse_json_obj(texto_resp)
         if not bruto:
-            logger.warning("[Ag3][NVIDIA] nao retornou JSON utilizavel")
+            logger.warning(f"[Ag3][NVIDIA] nao retornou JSON utilizavel | resposta completa: {texto_resp[:1000]}")
             _provider_state["nvidia"]["erros"] += 1
             return {}
 
