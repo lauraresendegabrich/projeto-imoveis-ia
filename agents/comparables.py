@@ -4,15 +4,18 @@ Agente 2 - Identificador de Imoveis Comparaveis
 
 RESPONSABILIDADE:
     Recebe os imoveis coletados pelo Agente 1 e identifica quais sao
-    realmente comparaveis usando score numerico + LLM. Depois valida
-    geograficamente com imagem de satelite.
+    realmente comparaveis. Primeiro executa uma pre-classificacao
+    deterministica em Python, depois calcula score numerico para ordenar
+    os sobreviventes e, por fim, usa LLM para o julgamento final dos
+    candidatos prioritarios. Depois valida geograficamente com imagem
+    de satelite.
 
 ENTRADA:
     - data/imoveis_completos_ag1.json (saida do Agente 1)
     - imovel_alvo (dict com area, bedrooms, bathrooms, parkingSpaces, etc.)
 
 SAIDA:
-    - data/imoveis_comparaveis_ag2.json (ranking + clusters)
+    - data/imoveis_comparaveis_ag2.json (pre-classificacao + ranking + clusters)
     - data/zona_homogenea_ag2.json (confirmados na zona + coordenadas alvo)
     - data/satelite_zona_homogenea_ag2.png (imagem com marcador)
 
@@ -21,12 +24,41 @@ FLUXO COMPLETO:
 
   ETAPA 1 — SEPARACAO DE TERRENOS
   ────────────────────────────────
-    Terrenos (propertyType == "Terrenos") → separados, nao entram no ranking/LLM.
-    Casas/Apartamentos → seguem para score + clustering.
-    Terrenos vao para zona homogenea (validacao geografica e relevante).
+    Terrenos (propertyType == "Terrenos") sao separados e nao entram
+    na pre-classificacao/ranking/LLM de imoveis construidos.
 
-  ETAPA 2 — SCORE NUMERICO (sem LLM, instantaneo)
-  ─────────────────────────────────────────────────
+  ETAPA 2 — ESTATISTICAS + PRE-CLASSIFICACAO (sem LLM)
+  ─────────────────────────────────────────────────────
+    Calcula, sobre os candidatos construidos:
+      - media da area construida
+      - media da area de terreno (quando informada)
+
+    A media e descritiva. O corte usa a area REAL do imovel alvo.
+
+    Regra eliminatoria de area:
+      - area construida: diferenca > 50% em relacao ao alvo -> incompatível
+      - area de terreno: diferenca > 50% em relacao ao alvo -> incompatível
+        (aplicada para casas quando alvo e candidato possuem o dado)
+
+    Caracteristicas objetivas comparadas:
+      - piscina
+      - churrasqueira
+      - area/espaco gourmet
+      - quintal/area externa
+      - varanda/sacada
+      - elevador
+      - portaria
+      - academia
+      - salao de festas
+      - playground
+      - armarios/moveis planejados
+
+    A caracteristica so elimina quando existe divergencia EXPLICITA:
+      alvo=sim e candidato=nao, ou alvo=nao e candidato=sim.
+    Campo nao informado = desconhecido e NAO elimina.
+
+  ETAPA 3 — SCORE NUMERICO (sem LLM)
+  ──────────────────────────────────
     Score 0.0-1.0 por distancia relativa:
       - area (m²):    30%
       - quartos:      25%
@@ -35,63 +67,47 @@ FLUXO COMPLETO:
       - vagas:        10%
 
     Formula: similaridade = 1 - |alvo - cand| / max(alvo, cand)
-    Score final = media ponderada. NAO e enviado pra LLM (evita vies).
+    O score serve para ordenar/priorizar os candidatos e NAO e enviado
+    no prompt da LLM, evitando vies de ancoragem.
 
-  ETAPA 3 — CLUSTERING VIA LLM (lotes de 40)
-  ────────────────────────────────────────────
+  ETAPA 4 — CLUSTERING VIA LLM
+  ─────────────────────────────
+    Somente candidatos que passaram pela pre-classificacao podem chegar
+    a LLM. Sao priorizados pelo score numerico.
+
+    Limites:
+      - ate 30 candidatos para LLM
+      - lotes de ate 15 candidatos
+      - excedentes continuam no resultado usando fallback numerico
+
     Cadeia de fallback:
-      1. NVIDIA NIM — meta/llama-3.3-70b-instruct (128k contexto)
-      2. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
-      3. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b (2a conta)
-      4. Gemini (GOOGLE_API_KEY) — gemini-3.5-flash-lite
-      5. Fallback numerico — score >= 0.60 → A
+      1. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
+      2. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b
+      3. Gemini — gemini-3.5-flash-lite
+      4. NVIDIA NIM — meta/llama-3.3-70b-instruct
+      5. Fallback numerico — score >= 0.60 -> A
 
-    Lotes de 40 candidatos (NVIDIA NIM suporta 128k tokens).
-    Pausa de 5s entre lotes.
-    LLM retorna: cluster (A/B), score_similaridade (0-100), justificativa.
+    A LLM recebe somente candidatos sem incompatibilidade objetiva detectada
+    e realiza o julgamento final de comparabilidade.
 
-    Criterios eliminatorios: tipo incompativel, area >2x ou <½, uso diferente.
-    Preco NAO e eliminatorio. Dados ausentes NAO eliminam.
-
-  ETAPA 4 — ZONA HOMOGENEA (Google Maps + NVIDIA NIM gemma-4-31b-it)
-  ──────────────────────────────────────────────────────────
-    1. Geocodifica endereco do alvo (Nominatim; fallback: Google Geocoding)
-    2. Google Maps Static API gera imagem hybrid 1280x1280 scale=2 com marcador
-      3. NVIDIA NIM (gemma-4-31b-it) analisa a imagem e sugere raio (300-1500m)
-    4. Usa lat/lon do Athena direto (sem geocodificar de novo)
-    5. Calcula distancia Haversine de cada imovel ao alvo
-    6. Classifica: na_zona (ate raio) ou fora_zona (acima)
-    7. So envia Cluster A + terrenos (Cluster B nao vai)
-    8. Sem localizacao verificavel = fora_zona
-
-    SAIDA: data/zona_homogenea_ag2.json + data/satelite_zona_homogenea_ag2.png
+  ETAPA 5 — ZONA HOMOGENEA
+  ─────────────────────────
+    Mantem a logica existente: geocodificacao do alvo, imagem hybrid,
+    analise visual da zona e classificacao por distancia.
 
 QUEM USA A SAIDA:
 ─────────────────
-    Agente 3 → zona_homogenea_ag2.json (Cluster A + na_zona → analisa fotos)
-    Agente 4 → zona_homogenea_ag2.json (coordenadas_alvo → busca POIs)
-    Agente 5 → zona_homogenea_ag2.json (comparaveis_confirmados + terrenos → preco)
-    Interface → satelite_zona_homogenea_ag2.png (exibe pro usuario)
-
-DEPENDENCIAS:
-─────────────
-    - NVIDIA NIM (meta/llama-3.3-70b-instruct) — clustering (primario, 128k)
-    - NVIDIA NIM (google/gemma-4-31b-it) — analise visual zona homogenea
-    - Groq (openai/gpt-oss-120b) — clustering (fallback)
-    - Gemini (gemini-3.5-flash-lite) — fallback clustering
-    - Google Maps Static API — imagem de satelite
-    - Nominatim / Google Geocoding — geocodificacao
-    - openai, langchain-groq, google-generativeai, requests
-
-COMO RODAR:
-───────────
-    .venv/Scripts/python.exe tests/test_ag2_isolado.py
+    Agente 3 -> zona_homogenea_ag2.json (Cluster A + na_zona -> analisa fotos)
+    Agente 4 -> zona_homogenea_ag2.json (coordenadas_alvo -> busca POIs)
+    Agente 5 -> zona_homogenea_ag2.json (comparaveis_confirmados + terrenos -> preco)
+    Interface -> satelite_zona_homogenea_ag2.png
 """
 
 import os
 import re
 import json
 import logging
+import unicodedata
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -105,7 +121,300 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 # =============================================================================
-# BLOCO 1 - SIMILARIDADE NUMERICA
+# BLOCO 1 - ESTATISTICAS E PRE-CLASSIFICACAO DETERMINISTICA
+# =============================================================================
+
+CARACTERISTICAS_PRE_CLASSIFICACAO = {
+    "piscina": {
+        "positivos": ["piscina"],
+        "negativos": ["sem piscina", "nao possui piscina", "nao tem piscina", "não possui piscina", "não tem piscina"],
+    },
+    "churrasqueira": {
+        "positivos": ["churrasqueira"],
+        "negativos": ["sem churrasqueira", "nao possui churrasqueira", "nao tem churrasqueira", "não possui churrasqueira", "não tem churrasqueira"],
+    },
+    "area_gourmet": {
+        "positivos": ["area gourmet", "espaco gourmet", "varanda gourmet", "área gourmet", "espaço gourmet"],
+        "negativos": [
+            "sem area gourmet", "sem espaco gourmet", "sem varanda gourmet",
+            "nao possui area gourmet", "nao possui espaco gourmet", "nao tem area gourmet", "nao tem espaco gourmet",
+            "não possui área gourmet", "não possui espaço gourmet", "não tem área gourmet", "não tem espaço gourmet",
+        ],
+    },
+    "quintal_area_externa": {
+        "positivos": ["quintal", "area externa", "área externa"],
+        "negativos": [
+            "sem quintal", "sem area externa", "nao possui quintal", "nao tem quintal",
+            "nao possui area externa", "nao tem area externa", "não possui quintal", "não tem quintal",
+            "não possui área externa", "não tem área externa",
+        ],
+    },
+    "varanda": {
+        "positivos": ["varanda", "sacada"],
+        "negativos": [
+            "sem varanda", "sem sacada", "nao possui varanda", "nao tem varanda",
+            "nao possui sacada", "nao tem sacada", "não possui varanda", "não tem varanda",
+            "não possui sacada", "não tem sacada",
+        ],
+    },
+    "elevador": {
+        "positivos": ["elevador"],
+        "negativos": ["sem elevador", "nao possui elevador", "nao tem elevador", "não possui elevador", "não tem elevador"],
+    },
+    "portaria": {
+        "positivos": ["portaria", "porteiro"],
+        "negativos": [
+            "sem portaria", "sem porteiro", "nao possui portaria", "nao tem portaria",
+            "nao possui porteiro", "nao tem porteiro", "não possui portaria", "não tem portaria",
+            "não possui porteiro", "não tem porteiro",
+        ],
+    },
+    "academia": {
+        "positivos": ["academia", "fitness"],
+        "negativos": ["sem academia", "nao possui academia", "nao tem academia", "não possui academia", "não tem academia"],
+    },
+    "salao_festas": {
+        "positivos": ["salao de festas", "salão de festas"],
+        "negativos": [
+            "sem salao de festas", "nao possui salao de festas", "nao tem salao de festas",
+            "sem salão de festas", "não possui salão de festas", "não tem salão de festas",
+        ],
+    },
+    "playground": {
+        "positivos": ["playground", "parquinho"],
+        "negativos": [
+            "sem playground", "sem parquinho", "nao possui playground", "nao tem playground",
+            "nao possui parquinho", "nao tem parquinho", "não possui playground", "não tem playground",
+        ],
+    },
+    "armarios_planejados": {
+        "positivos": [
+            "armarios planejados", "armário planejado", "armários planejados",
+            "moveis planejados", "móveis planejados", "cozinha planejada",
+        ],
+        "negativos": [
+            "sem armarios planejados", "sem moveis planejados", "sem móveis planejados",
+            "nao possui armarios planejados", "nao tem armarios planejados",
+            "não possui armários planejados", "não tem armários planejados",
+        ],
+    },
+}
+
+
+def _normalizar_texto(valor) -> str:
+    """Converte valor em texto minusculo, sem acentos e com espacos normalizados."""
+    if valor is None:
+        return ""
+    if isinstance(valor, (dict, list, tuple, set)):
+        try:
+            valor = json.dumps(valor, ensure_ascii=False)
+        except Exception:
+            valor = str(valor)
+    texto = str(valor).lower()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = re.sub(r"\s+", " ", texto)
+    return texto.strip()
+
+
+def _para_float(valor) -> float | None:
+    """Converte numeros ou strings numericas para float; retorna None para ausentes/invalidos."""
+    if valor is None or isinstance(valor, bool):
+        return None
+    if isinstance(valor, (int, float)):
+        numero = float(valor)
+        return numero if numero > 0 else None
+
+    texto = str(valor).strip()
+    if not texto:
+        return None
+
+    texto = re.sub(r"[^0-9,.-]", "", texto)
+    if not texto:
+        return None
+
+    # Formatos BR: 1.234,56 -> 1234.56; 123,45 -> 123.45
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    else:
+        # Se houver varios pontos, trata como separador de milhar.
+        if texto.count(".") > 1:
+            texto = texto.replace(".", "")
+
+    try:
+        numero = float(texto)
+        return numero if numero > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _obter_area_construida(imovel: dict) -> float | None:
+    """Busca a melhor chave disponivel para area construida/privativa."""
+    for chave in ("area", "area_construida", "usableArea", "usable_area", "builtArea", "built_area"):
+        numero = _para_float(imovel.get(chave))
+        if numero is not None:
+            return numero
+    return None
+
+
+def _obter_area_terreno(imovel: dict) -> float | None:
+    """Busca a melhor chave disponivel para area de terreno/lote."""
+    for chave in ("area_terreno", "lotArea", "lot_area", "landArea", "land_area"):
+        numero = _para_float(imovel.get(chave))
+        if numero is not None:
+            return numero
+    return None
+
+
+def _eh_casa(imovel: dict) -> bool:
+    """Detecta tipos residenciais do grupo casa/sobrado sem confundir com apartamento."""
+    tipo = _normalizar_texto(imovel.get("propertyType") or imovel.get("tipo") or "")
+    if any(x in tipo for x in ("apartamento", "apartment", "flat", "cobertura")):
+        return False
+    return any(x in tipo for x in ("casa", "house", "sobrado", "village"))
+
+
+def _montar_texto_caracteristicas(imovel: dict) -> str:
+    """Junta somente campos textuais/amenities usados na extracao objetiva."""
+    partes = []
+    for chave in ("title", "titulo", "description", "descricao", "amenities"):
+        valor = imovel.get(chave)
+        if valor not in (None, "", [], {}):
+            partes.append(_normalizar_texto(valor))
+    return " | ".join(p for p in partes if p)
+
+
+def _extrair_caracteristicas(imovel: dict) -> dict:
+    """
+    Retorna True/False/None para cada caracteristica.
+
+    True  = ha evidencia positiva.
+    False = ha evidencia explicita de ausencia.
+    None  = nao ha informacao suficiente.
+
+    A negacao e verificada antes do termo positivo para evitar que
+    "sem piscina" seja interpretado como piscina=True.
+    """
+    texto = _montar_texto_caracteristicas(imovel)
+    resultado = {}
+
+    for nome, regras in CARACTERISTICAS_PRE_CLASSIFICACAO.items():
+        negativos = [_normalizar_texto(x) for x in regras["negativos"]]
+        positivos = [_normalizar_texto(x) for x in regras["positivos"]]
+
+        if any(termo and termo in texto for termo in negativos):
+            resultado[nome] = False
+        elif any(termo and termo in texto for termo in positivos):
+            resultado[nome] = True
+        else:
+            resultado[nome] = None
+
+    return resultado
+
+
+def _calcular_estatisticas_areas(candidatos: list[dict]) -> dict:
+    """Calcula medias descritivas ignorando ausentes, zero e valores invalidos."""
+    areas = [a for a in (_obter_area_construida(i) for i in candidatos) if a is not None]
+    terrenos = [a for a in (_obter_area_terreno(i) for i in candidatos) if a is not None]
+
+    return {
+        "media_area_construida": round(sum(areas) / len(areas), 2) if areas else None,
+        "media_area_terreno": round(sum(terrenos) / len(terrenos), 2) if terrenos else None,
+        "amostras_area_construida": len(areas),
+        "amostras_area_terreno": len(terrenos),
+    }
+
+
+def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | None = None) -> dict:
+    """
+    Pre-classificacao objetiva e eliminatoria.
+
+    Regras finais combinadas:
+      - diferenca de area construida > 50% em relacao ao alvo -> incompatível;
+      - para casas, diferenca de area de terreno > 50% -> incompatível;
+      - divergencia explicita em qualquer caracteristica objetiva -> incompatível;
+      - dado ausente/desconhecido nunca elimina.
+    """
+    if caracteristicas_alvo is None:
+        caracteristicas_alvo = _extrair_caracteristicas(alvo)
+    caracteristicas_candidato = _extrair_caracteristicas(candidato)
+
+    motivos = []
+    comparacoes_realizadas = 0
+
+    area_alvo = _obter_area_construida(alvo)
+    area_cand = _obter_area_construida(candidato)
+    diferenca_area_pct = None
+
+    if area_alvo is not None and area_cand is not None:
+        comparacoes_realizadas += 1
+        diferenca_area_pct = abs(area_cand - area_alvo) / area_alvo
+        if diferenca_area_pct > 0.50:
+            motivos.append(
+                f"area construida difere {diferenca_area_pct*100:.1f}% do alvo "
+                f"({area_cand:.1f}m² vs {area_alvo:.1f}m²; limite 50%)"
+            )
+
+    area_terreno_alvo = _obter_area_terreno(alvo)
+    area_terreno_cand = _obter_area_terreno(candidato)
+    diferenca_terreno_pct = None
+
+    # Area de terreno so e comparada para alvo do grupo casa/sobrado.
+    if _eh_casa(alvo) and area_terreno_alvo is not None and area_terreno_cand is not None:
+        comparacoes_realizadas += 1
+        diferenca_terreno_pct = abs(area_terreno_cand - area_terreno_alvo) / area_terreno_alvo
+        if diferenca_terreno_pct > 0.50:
+            motivos.append(
+                f"area de terreno difere {diferenca_terreno_pct*100:.1f}% do alvo "
+                f"({area_terreno_cand:.1f}m² vs {area_terreno_alvo:.1f}m²; limite 50%)"
+            )
+
+    divergencias_caracteristicas = []
+    for nome in CARACTERISTICAS_PRE_CLASSIFICACAO:
+        valor_alvo = caracteristicas_alvo.get(nome)
+        valor_cand = caracteristicas_candidato.get(nome)
+        if valor_alvo is not None and valor_cand is not None:
+            comparacoes_realizadas += 1
+            if valor_alvo != valor_cand:
+                divergencias_caracteristicas.append(nome)
+                alvo_txt = "sim" if valor_alvo else "nao"
+                cand_txt = "sim" if valor_cand else "nao"
+                motivos.append(f"{nome} divergente (alvo={alvo_txt}, candidato={cand_txt})")
+
+    incompativel = bool(motivos)
+    if incompativel:
+        classe = "incompativel"
+    elif comparacoes_realizadas == 0:
+        classe = "dados_insuficientes"
+    else:
+        classe = "compativel"
+
+    return {
+        "classe": classe,
+        "elegivel_llm": not incompativel,
+        "enviado_llm": False,
+        "motivos_incompatibilidade": motivos,
+        "area_construida": {
+            "alvo": area_alvo,
+            "candidato": area_cand,
+            "diferenca_percentual": round(diferenca_area_pct * 100, 2) if diferenca_area_pct is not None else None,
+            "limite_percentual": 50,
+        },
+        "area_terreno": {
+            "alvo": area_terreno_alvo,
+            "candidato": area_terreno_cand,
+            "diferenca_percentual": round(diferenca_terreno_pct * 100, 2) if diferenca_terreno_pct is not None else None,
+            "limite_percentual": 50,
+            "aplicavel": bool(_eh_casa(alvo)),
+        },
+        "caracteristicas_alvo": caracteristicas_alvo,
+        "caracteristicas_candidato": caracteristicas_candidato,
+        "divergencias_caracteristicas": divergencias_caracteristicas,
+    }
+
+
+# =============================================================================
+# BLOCO 2 - SIMILARIDADE NUMERICA
 # =============================================================================
 
 def _calcular_score_similaridade(alvo: dict, candidato: dict) -> float:
@@ -159,49 +468,76 @@ def _calcular_score_similaridade(alvo: dict, candidato: dict) -> float:
 
 
 # =============================================================================
-# BLOCO 2 - CLUSTERING VIA LLM
+# BLOCO 3 - CLUSTERING VIA LLM
 # =============================================================================
+
+def _formatar_caracteristicas_prompt(imovel: dict) -> str:
+    """Formata caracteristicas objetivas sem incluir score numerico."""
+    car = _extrair_caracteristicas(imovel)
+    partes = []
+    for nome, valor in car.items():
+        if valor is True:
+            partes.append(f"{nome}=sim")
+        elif valor is False:
+            partes.append(f"{nome}=nao")
+        else:
+            partes.append(f"{nome}=nao_informado")
+    return ", ".join(partes)
+
 
 def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
     """
-    Monta o prompt para a LLM clusterizar os imoveis.
-    Envia caracteristicas resumidas (sem URLs/imagens) pra economizar tokens.
+    Monta o prompt da LLM para o julgamento FINAL de comparabilidade.
+
+    Os candidatos recebidos aqui ja passaram pela pre-classificacao objetiva.
+    O score numerico NAO e colocado no prompt para nao ancorar a LLM.
     """
-    # Resumo do imovel alvo
     alvo_resumo = (
-        f"IMOVEL ALVO:\n"
-        f"  Tipo: {alvo.get('propertyType', '?')}\n"
-        f"  Area: {alvo.get('area', '?')} m²\n"
-        f"  Quartos: {alvo.get('bedrooms', '?')}\n"
-        f"  Banheiros: {alvo.get('bathrooms', '?')}\n"
-        f"  Vagas: {alvo.get('parkingSpaces', '?')}\n"
-        f"  Preco: {alvo.get('priceFormatted', '?')}\n"
-        f"  Preco/m²: R$ {alvo.get('pricePerSqm', '?')}\n"
-        f"  Bairro: {alvo.get('neighborhood', '?')}\n"
-        f"  Rua: {alvo.get('street', '?')}\n"
-        f"  Descricao: {(alvo.get('description') or '')[:200]}\n"
+        f"Tipo: {alvo.get('propertyType', '?')}\n"
+        f"Area: {alvo.get('area', '?')} m²\n"
+        f"Area terreno: {_obter_area_terreno(alvo) or '?'} m²\n"
+        f"Quartos: {alvo.get('bedrooms', '?')}\n"
+        f"Banheiros: {alvo.get('bathrooms', '?')}\n"
+        f"Vagas: {alvo.get('parkingSpaces', '?')}\n"
+        f"Preco: {alvo.get('priceFormatted', '?')}\n"
+        f"Preco/m²: R$ {alvo.get('pricePerSqm', '?')}\n"
+        f"Bairro: {alvo.get('neighborhood', '?')}\n"
+        f"Rua: {alvo.get('street', '?')}\n"
+        f"Caracteristicas: {_formatar_caracteristicas_prompt(alvo)}\n"
+        f"Descricao: {(alvo.get('description') or alvo.get('descricao') or '')[:200]}\n"
     )
 
-    # Lista de candidatos (resumida pra caber no limite de 8k tokens do Groq)
     candidatos_texto = ""
     for idx, c in enumerate(candidatos, 1):
-        desc = (c.get("description") or "")[:100]
-        area_terreno = c.get("area_terreno") or c.get("lotArea") or ""
+        desc = (c.get("description") or c.get("descricao") or "")[:120]
+        area_terreno = _obter_area_terreno(c)
         candidatos_texto += (
             f"\n[{idx}]\n"
             f"  Tipo: {c.get('propertyType', '?')} | Area: {c.get('area', '?')}m² | "
-            f"Quartos: {c.get('bedrooms', '?')} | "
-            f"Banheiros: {c.get('bathrooms', '?')} | Vagas: {c.get('parkingSpaces', '?')}\n"
+            f"Quartos: {c.get('bedrooms', '?')} | Banheiros: {c.get('bathrooms', '?')} | "
+            f"Vagas: {c.get('parkingSpaces', '?')}\n"
             f"  Preco: {c.get('priceFormatted', '?')} | Preco/m²: R$ {c.get('pricePerSqm', '?')}\n"
             f"  Bairro: {c.get('neighborhood', '?')} | Rua: {c.get('street', '?')}"
         )
-        if area_terreno:
-            candidatos_texto += f" | Terreno: {area_terreno}m²"
-        candidatos_texto += "\n"
+        if area_terreno is not None:
+            candidatos_texto += f" | Terreno: {area_terreno:.1f}m²"
+        candidatos_texto += f"\n  Caracteristicas: {_formatar_caracteristicas_prompt(c)}\n"
         if desc:
             candidatos_texto += f"  Desc: {desc}\n"
 
-    prompt = f"""Classifique imóveis candidatos quanto à comparabilidade com um imóvel alvo.
+    prompt = f"""Classifique os candidatos restantes quanto a comparabilidade FINAL com o imovel alvo.
+
+IMPORTANTE SOBRE O FLUXO:
+Os candidatos recebidos ja passaram por uma PRE-CLASSIFICACAO deterministica em Python.
+Essa etapa anterior ja eliminou incompatibilidades objetivas de:
+- area construida com diferenca superior a 50% em relacao ao alvo;
+- area de terreno com diferenca superior a 50% para casas, quando o dado existe;
+- divergencias explicitas de piscina, churrasqueira, area gourmet, quintal/area externa,
+  varanda/sacada, elevador, portaria, academia, salao de festas, playground e planejados.
+
+Dado ausente foi tratado como DESCONHECIDO e nao como ausencia.
+Portanto, NAO repita cortes automaticos por essas regras. Use os dados recebidos para avaliar
+se, no conjunto, cada candidato ainda e um comparavel adequado.
 
 IMOVEL ALVO:
 {alvo_resumo}
@@ -211,47 +547,37 @@ CANDIDATOS ({len(candidatos)} imoveis):
 
 Para cada candidato, retorne:
 - id
-- cluster: A = comparável, B = não comparável
+- cluster: A = comparavel, B = nao comparavel
 - score_similaridade: inteiro de 0 a 100
 - justificativa: uma frase curta
 
-REGRAS:
+CRITERIOS PARA O JULGAMENTO FINAL:
+1. Tipo e uso do imovel devem ser compativeis.
+2. Localizacao e contexto do bairro/rua sao muito importantes.
+3. Considere area e configuracao geral de forma comparativa, sem criar um novo corte automatico.
+4. Quartos e distribuicao geral sao relevantes.
+5. Padrao construtivo e conjunto das caracteristicas descritas podem diferenciar os candidatos.
+6. Banheiros, vagas, suites, condominio e diferenciais sao secundarios quando a diferenca for pequena.
+7. Preco e preco/m² sao informacoes auxiliares e NUNCA eliminam um imovel sozinhos.
+8. Campos ausentes significam informacao desconhecida, nao ausencia da caracteristica.
+9. Classifique como B quando o CONJUNTO das diferencas tornar o imovel inadequado como comparavel.
+10. Diferencas pequenas e isoladas nao devem, sozinhas, causar Cluster B.
 
-Classifique como B se houver incompatibilidade estrutural relevante:
-- tipo incompatível;
-- uso residencial/comercial incompatível;
-- área menor que 50% ou maior que 200% da área do alvo;
-- padrão claramente incompatível.
-
-Para os demais, avalie principalmente:
-1. tipo do imóvel;
-2. localização;
-3. área;
-4. quartos.
-
-Banheiros, vagas, suítes, condomínio e diferenciais são secundários.
-Diferença pequena nesses campos não deve, isoladamente, causar Cluster B.
-
-Preço e preço/m² são apenas informações secundárias e nunca eliminam um imóvel sozinhos.
-
-Campos ausentes não significam zero ou ausência da característica.
-
-SCORE:
+SCORE DA LLM:
 90-100 = extremamente semelhante
 80-89 = muito semelhante
-70-79 = bom comparável
-60-69 = comparável com diferenças
+70-79 = bom comparavel
+60-69 = comparavel com diferencas
 40-59 = baixa comparabilidade
-0-39 = incompatível
+0-39 = incompativel
 
-Regra geral: score >= 60 → A, score < 60 → B
-
-Compare cada candidato somente com o imóvel alvo.
+Regra geral da classificacao da LLM: score >= 60 -> A, score < 60 -> B.
+Compare cada candidato somente com o imovel alvo.
 Todos os IDs recebidos devem aparecer exatamente uma vez.
-A justificativa deve ser curta."""
+A justificativa deve ser curta.
+Responda somente no formato solicitado."""
 
     return prompt
-
 
 def _chamar_llm(prompt: str) -> str:
     """
@@ -457,6 +783,7 @@ def _parsear_resposta_llm(resposta: str, candidatos: list[dict]) -> list[dict]:
         if 0 <= idx < len(candidatos):
             candidatos[idx]["cluster"] = item.get("cluster", "B")
             candidatos[idx]["justificativa"] = item.get("justificativa", "")
+            candidatos[idx]["classificado_por"] = "llm"
             # Score da LLM (0-100) sobrescreve o numérico se disponivel
             llm_score = item.get("score_similaridade")
             if llm_score is not None:
@@ -492,15 +819,17 @@ def _fallback_numerico(candidatos: list[dict]) -> list[dict]:
         if score >= THRESHOLD:
             c["cluster"] = "A"
             c["justificativa"] = f"Score numerico {score:.2f} >= {THRESHOLD} (threshold)"
+            c["classificado_por"] = "fallback_numerico"
         else:
             c["cluster"] = "B"
             c["justificativa"] = f"Score numerico {score:.2f} < {THRESHOLD} (threshold)"
+            c["classificado_por"] = "fallback_numerico"
 
     return ordenados
 
 
 # =============================================================================
-# BLOCO 3 - FUNCAO PUBLICA
+# BLOCO 4 - FUNCAO PUBLICA
 # =============================================================================
 
 def identificar_comparaveis(
@@ -511,47 +840,26 @@ def identificar_comparaveis(
     usar_llm: bool = True,
 ) -> dict:
     """
-    Identifica imoveis comparaveis ao alvo usando similaridade numerica + LLM.
+    Identifica comparaveis com pre-classificacao objetiva + score numerico + LLM.
 
-    Fluxo:
-        1. Carrega todos os imoveis do Agente 1 (imoveis_completos.json)
-        2. Calcula score numerico de similaridade pra cada um
-        3. Envia TODOS pra LLM (Groq, llama-3.3-70b) clusterizar e ranquear
-        4. LLM classifica em Cluster A (similar) ou B (nao similar)
-        5. LLM ranqueia todos de 1 a N (1 = mais similar)
-        6. Salva resultado em data/imoveis_comparaveis.json
-
-    Parametros
-    ----------
-    imovel_alvo : dict
-        Caracteristicas do imovel alvo. Campos usados:
-        area, bedrooms, bathrooms, parkingSpaces, pricePerSqm,
-        propertyType, neighborhood, street, description
-    imoveis_coletados : list[dict], optional
-        Lista de imoveis. Se None, carrega do arquivo.
-    arquivo_entrada : str
-        Arquivo JSON com imoveis do Agente 1 (default: imoveis_completos.json).
-    arquivo_saida : str
-        Arquivo JSON de saida com ranking e clusters.
-    usar_llm : bool
-        Se True, usa LLM para clustering. Se False, usa so score numerico.
-
-    Retorna
-    -------
-    dict com:
-      - imovel_alvo: caracteristicas do alvo
-      - comparaveis: lista ranqueada com score, cluster, ranking, justificativa
-      - resumo: totais e metodo usado
+    Ordem:
+      1. carrega dados;
+      2. separa terrenos;
+      3. calcula medias descritivas de area;
+      4. pre-classifica e elimina incompatibilidades objetivas;
+      5. calcula score numerico para ordenar/priorizar;
+      6. envia ate 30 sobreviventes para LLM em lotes de ate 15;
+      7. excedentes usam fallback numerico;
+      8. junta Cluster A, Cluster B e terrenos sem perder candidatos.
     """
-    logger.info("=" * 55)
+    logger.info("=" * 60)
     logger.info("AGENTE 2: IDENTIFICADOR DE COMPARAVEIS")
-    logger.info("=" * 55)
+    logger.info("=" * 60)
 
-    # ── CARREGA DADOS ─────────────────────────────────────────────
+    # ── 1. CARREGA DADOS ───────────────────────────────────────────
     if imoveis_coletados is None:
         caminho = os.path.join(DATA_DIR, arquivo_entrada)
         if not os.path.exists(caminho):
-            # Fallback: tenta agent1_imoveis_coletados.json
             caminho = os.path.join(DATA_DIR, "imoveis_coletados_ag1.json")
         if not os.path.exists(caminho):
             logger.error("Nenhum arquivo de imoveis encontrado")
@@ -561,51 +869,115 @@ def identificar_comparaveis(
             imoveis_coletados = json.load(f)
         logger.info(f"Carregados: {len(imoveis_coletados)} imoveis de {caminho}")
 
-    # ── FILTRA POR TIPO ───────────────────────────────────────────
-    # Terrenos sao separados antes do ranking/clustering:
-    #   - Nao faz sentido comparar terreno vazio com casa construida
-    #   - Score numerico seria distorcido (sem quartos, banheiros, vagas)
-    #   - LLM nao precisa gastar tokens avaliando algo que nao e comparavel
-    # Terrenos ficam no resultado final com cluster="terreno" (sem ranking)
+    # Trabalha sobre uma lista concreta.
+    imoveis_coletados = list(imoveis_coletados or [])
+
+    # ── 2. SEPARA TERRENOS ─────────────────────────────────────────
     terrenos = [i for i in imoveis_coletados if (i.get("propertyType") or "").lower() == "terrenos"]
     filtrados = [i for i in imoveis_coletados if (i.get("propertyType") or "").lower() != "terrenos"]
-    logger.info(f"Total para analise: {len(filtrados)} imoveis (terrenos excluidos do ranking: {len(terrenos)})")
+    logger.info(
+        f"[Ag2][PreClassificacao] Recebidos construidos: {len(filtrados)} | "
+        f"terrenos separados: {len(terrenos)}"
+    )
 
-    # ── CALCULA SCORE NUMERICO ────────────────────────────────────
+    # ── 3. MEDIAS DESCRITIVAS ──────────────────────────────────────
+    estatisticas_areas = _calcular_estatisticas_areas(filtrados)
+    area_alvo = _obter_area_construida(imovel_alvo)
+    terreno_alvo = _obter_area_terreno(imovel_alvo)
+    caracteristicas_alvo = _extrair_caracteristicas(imovel_alvo)
+
+    logger.info(
+        f"[Ag2][PreClassificacao] Media area construida: "
+        f"{estatisticas_areas['media_area_construida']} "
+        f"(n={estatisticas_areas['amostras_area_construida']})"
+    )
+    logger.info(
+        f"[Ag2][PreClassificacao] Media area terreno: "
+        f"{estatisticas_areas['media_area_terreno']} "
+        f"(n={estatisticas_areas['amostras_area_terreno']})"
+    )
+    logger.info(
+        f"[Ag2][PreClassificacao] Referencia REAL do alvo: "
+        f"area={area_alvo}m² | terreno={terreno_alvo}m²"
+    )
+    logger.info(
+        "[Ag2][PreClassificacao] Caracteristicas alvo: "
+        + json.dumps(caracteristicas_alvo, ensure_ascii=False)
+    )
+
+    # ── 4. PRE-CLASSIFICACAO ELIMINATORIA ──────────────────────────
+    elegiveis = []
+    incompativeis_pre = []
+
+    for im in filtrados:
+        pre = _pre_classificar(imovel_alvo, im, caracteristicas_alvo=caracteristicas_alvo)
+        im["pre_classificacao"] = pre
+
+        if pre["elegivel_llm"]:
+            elegiveis.append(im)
+        else:
+            # Mantem no resultado, mas nao gasta LLM.
+            im["cluster"] = "B"
+            im["ranking_llm"] = None
+            im["classificado_por"] = "python_pre_classificacao"
+            motivos = pre.get("motivos_incompatibilidade") or []
+            im["justificativa"] = "Pre-classificacao: " + "; ".join(motivos)
+            incompativeis_pre.append(im)
+
+    logger.info(
+        f"[Ag2][PreClassificacao] compativeis/dados_insuficientes={len(elegiveis)} | "
+        f"incompativeis={len(incompativeis_pre)}"
+    )
+
+    # ── 5. SCORE NUMERICO ──────────────────────────────────────────
+    # Calcula para todos os construidos por compatibilidade de saida/auditoria,
+    # mas APENAS os elegiveis podem seguir para LLM.
     for im in filtrados:
         im["score_similaridade"] = _calcular_score_similaridade(imovel_alvo, im)
 
-    # Ordena por score (mais similar primeiro)
-    filtrados.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
-    logger.info(f"Scores calculados. Top 5:")
-    for i, im in enumerate(filtrados[:5]):
-        logger.info(f"  [{i+1}] score={im['score_similaridade']:.3f} | "
-                    f"{im.get('area','?')}m² | {im.get('bedrooms','?')}q | "
-                    f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}")
+    elegiveis.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
 
-    # ── CLUSTERING VIA LLM ────────────────────────────────────────
-    # Seleciona apenas os top 60 por score numerico para julgamento da LLM.
-    # Candidatos abaixo do top 60 ficam com classificacao pelo score numerico.
-    # Envia em lotes de 20 (cabe nos limites do Groq free tier ~8k TPM).
-    MAX_PARA_LLM = 60
-    TAMANHO_LOTE = 20
+    logger.info("[Ag2][Score] Top 5 entre os sobreviventes da pre-classificacao:")
+    for i, im in enumerate(elegiveis[:5]):
+        logger.info(
+            f"  [{i+1}] score={im.get('score_similaridade', 0):.3f} | "
+            f"{im.get('area','?')}m² | {im.get('bedrooms','?')}q | "
+            f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}"
+        )
+
+    # ── 6. CLUSTERING VIA LLM ──────────────────────────────────────
+    MAX_PARA_LLM = 30
+    TAMANHO_LOTE = 15
 
     if usar_llm:
         import time as t_ag2
 
-        # Separa: top 60 vao pra LLM, resto usa fallback numerico
-        candidatos_llm_enviar = filtrados[:MAX_PARA_LLM]
-        candidatos_resto = filtrados[MAX_PARA_LLM:]
+        candidatos_llm_enviar = elegiveis[:MAX_PARA_LLM]
+        candidatos_resto = elegiveis[MAX_PARA_LLM:]
 
-        # Resto recebe classificacao pelo score numerico direto
+        for im in candidatos_llm_enviar:
+            im["pre_classificacao"]["enviado_llm"] = True
+        for im in candidatos_resto:
+            im["pre_classificacao"]["enviado_llm"] = False
+
+        # Os excedentes nao somem: continuam pelo fallback numerico.
         if candidatos_resto:
-            logger.info(f"  {len(candidatos_resto)} candidatos abaixo do top {MAX_PARA_LLM} classificados por score numerico")
+            logger.info(
+                f"[Ag2][Clustering] {len(candidatos_resto)} candidatos elegiveis fora do top "
+                f"{MAX_PARA_LLM}; classificacao por score numerico"
+            )
             candidatos_resto = _fallback_numerico(candidatos_resto)
 
-        # Envia top 60 em lotes de 20
         todos_classificados = []
-        lotes = [candidatos_llm_enviar[i:i+TAMANHO_LOTE] for i in range(0, len(candidatos_llm_enviar), TAMANHO_LOTE)]
-        logger.info(f"Enviando {len(candidatos_llm_enviar)} candidatos para LLM em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}...")
+        lotes = [
+            candidatos_llm_enviar[i:i + TAMANHO_LOTE]
+            for i in range(0, len(candidatos_llm_enviar), TAMANHO_LOTE)
+        ]
+
+        logger.info(
+            f"[Ag2][Clustering] Selecionados para LLM: {len(candidatos_llm_enviar)} "
+            f"em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}"
+        )
 
         t_inicio_clustering = t_ag2.time()
         for num_lote, lote in enumerate(lotes, 1):
@@ -615,7 +987,10 @@ def identificar_comparaveis(
             resposta = _chamar_llm(prompt)
 
             if resposta:
-                logger.info(f"[Ag2][Clustering] Lote {num_lote}: resposta OK ({len(resposta)} chars) em {t_ag2.time()-t_lote:.1f}s")
+                logger.info(
+                    f"[Ag2][Clustering] Lote {num_lote}: resposta OK "
+                    f"({len(resposta)} chars) em {t_ag2.time()-t_lote:.1f}s"
+                )
                 lote = _parsear_resposta_llm(resposta, lote)
             else:
                 logger.warning(f"[Ag2][Clustering] Lote {num_lote}: LLM sem resposta — fallback numerico")
@@ -623,75 +998,99 @@ def identificar_comparaveis(
 
             todos_classificados.extend(lote)
 
-            # Pausa entre lotes para nao estourar o rate limit
             if num_lote < len(lotes):
                 t_ag2.sleep(3)
 
         logger.info(f"[Ag2][Clustering] Tempo total: {t_ag2.time()-t_inicio_clustering:.1f}s")
-
-        # Combina: candidatos analisados pela LLM + resto (fallback numerico)
-        candidatos_llm = todos_classificados + candidatos_resto
-
-        # Ranking global: ordena por score_similaridade (maior primeiro) e atribui ranking 1-N
-        candidatos_llm.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
-        for ranking, c in enumerate(candidatos_llm, 1):
-            c["ranking_llm"] = ranking
+        classificados_elegiveis = todos_classificados + candidatos_resto
     else:
-        logger.info("LLM desativada — usando apenas score numerico")
-        candidatos_llm = _fallback_numerico(filtrados)
+        logger.info("[Ag2][Clustering] LLM desativada — usando apenas score numerico nos elegiveis")
+        classificados_elegiveis = _fallback_numerico(elegiveis)
 
-    excluidos_llm = []  # todos foram processados (por lote ou fallback)
+    # Ranking global somente entre os elegiveis que chegaram ao julgamento final.
+    classificados_elegiveis.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
+    for ranking, c in enumerate(classificados_elegiveis, 1):
+        c["ranking_llm"] = ranking
 
-    # ── ORDENA RESULTADO FINAL ────────────────────────────────────
-    # Cluster A primeiro (ordenado por ranking_llm), depois Cluster B, terrenos por ultimo
-    todos = candidatos_llm + excluidos_llm
+    # ── 7. RESULTADO FINAL ──────────────────────────────────────────
+    todos_construidos = classificados_elegiveis + incompativeis_pre
+
     cluster_a = sorted(
-        [c for c in todos if c.get("cluster") == "A"],
-        key=lambda x: x.get("ranking_llm") or 999
+        [c for c in todos_construidos if c.get("cluster") == "A"],
+        key=lambda x: x.get("ranking_llm") or 999999,
     )
-    cluster_b = [c for c in todos if c.get("cluster") != "A"]
+    cluster_b = [c for c in todos_construidos if c.get("cluster") != "A"]
 
-    # Terrenos nao passaram pelo ranking/clustering — marcados separadamente
     for t in terrenos:
         t["cluster"] = "terreno"
         t["ranking_llm"] = None
-        t["justificativa"] = "Terreno excluido do ranking — tipo incomparavel com imovel construido"
+        t["classificado_por"] = "separacao_tipo"
+        t["justificativa"] = "Terreno separado do ranking — tipo incomparavel com imovel construido"
 
     resultado_final = cluster_a + cluster_b + terrenos
 
-    # ── RESUMO ────────────────────────────────────────────────────
+    resumo_pre = {
+        "total_construidos": len(filtrados),
+        "elegiveis_apos_pre_classificacao": len(elegiveis),
+        "incompativeis_pre_classificacao": len(incompativeis_pre),
+        "selecionados_para_llm": min(len(elegiveis), MAX_PARA_LLM) if usar_llm else 0,
+        "limite_llm": MAX_PARA_LLM,
+        "tamanho_lote_llm": TAMANHO_LOTE,
+        "regra_area_percentual": 50,
+        "caracteristicas_eliminatorias": list(CARACTERISTICAS_PRE_CLASSIFICACAO.keys()),
+        "estatisticas_areas": estatisticas_areas,
+        "referencia_alvo": {
+            "area_construida": area_alvo,
+            "area_terreno": terreno_alvo,
+        },
+        "caracteristicas_alvo": caracteristicas_alvo,
+    }
+
     resumo = {
-        "total_analisados": len(candidatos_llm),
+        "total_analisados": len(filtrados),
         "cluster_a": len(cluster_a),
         "cluster_b": len(cluster_b),
         "terrenos_excluidos": len(terrenos),
-        "metodo": "similaridade_numerica + clustering_llm" if usar_llm else "similaridade_numerica",
+        "metodo": (
+            "pre_classificacao_python + similaridade_numerica + clustering_llm"
+            if usar_llm
+            else "pre_classificacao_python + similaridade_numerica"
+        ),
+        "pre_classificacao": resumo_pre,
     }
 
-    logger.info("=" * 55)
-    logger.info(f"RESULTADO: {resumo['cluster_a']} similares | {resumo['cluster_b']} nao similares | {resumo['terrenos_excluidos']} terrenos excluidos")
-    logger.info(f"  Total analisados: {resumo['total_analisados']}")
-    logger.info(f"  Metodo: {resumo['metodo']}")
-    logger.info("=" * 55)
+    logger.info("=" * 60)
+    logger.info(
+        f"RESULTADO: {resumo['cluster_a']} similares | {resumo['cluster_b']} nao similares | "
+        f"{resumo['terrenos_excluidos']} terrenos separados"
+    )
+    logger.info(
+        f"[Ag2][PreClassificacao] eliminados antes da LLM: "
+        f"{resumo_pre['incompativeis_pre_classificacao']}"
+    )
+    logger.info(f"[Ag2][Clustering] enviados para LLM: {resumo_pre['selecionados_para_llm']}")
+    logger.info("=" * 60)
 
-    # ── SALVA ─────────────────────────────────────────────────────
+    # ── 8. SALVA ────────────────────────────────────────────────────
     saida = {
         "imovel_alvo": imovel_alvo,
         "comparaveis": resultado_final,
-        "terrenos": terrenos,   # separados — nao passaram pelo ranking, mas vao para zona homogenea
+        "terrenos": terrenos,
+        "estatisticas_areas": estatisticas_areas,
+        "pre_classificacao": resumo_pre,
         "resumo": resumo,
     }
 
     caminho_saida = os.path.join(DATA_DIR, arquivo_saida)
     with open(caminho_saida, "w", encoding="utf-8") as f:
-        json.dump(saida, f, ensure_ascii=False, indent=2)
+        json.dump(saida, f, ensure_ascii=False, indent=2, default=str)
     logger.info(f"Salvo em: {caminho_saida}")
 
     return saida
 
 
 # =============================================================================
-# BLOCO 4 - ZONA HOMOGENEA (Google Maps + Groq Vision)
+# BLOCO 5 - ZONA HOMOGENEA (Google Maps + Vision)
 # =============================================================================
 
 def _obter_imagem_satelite(endereco: str, lat: float = None, lon: float = None, zoom: int = 16) -> bytes:
