@@ -560,54 +560,357 @@ Todos os {len(candidatos)} IDs devem aparecer exatamente uma vez."""
 
     return prompt
 
+
+# =============================================================================
+# QWEN3-VL-8B — GOOGLE COLAB
+# =============================================================================
+
+def _obter_secret(nome: str) -> str:
+    """
+    Busca primeiro nas variaveis de ambiente.
+    Se estiver no Streamlit Cloud, tenta st.secrets.
+    """
+    valor = os.getenv(nome, "")
+
+    if valor:
+        return valor
+
+    try:
+        import streamlit as st
+
+        if nome in st.secrets:
+            return str(st.secrets[nome])
+
+    except Exception:
+        pass
+
+    return ""
+
+def _log_resposta_llm(provider: str, resposta: str):
+    """Mostra a resposta completa da LLM nos logs."""
+
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info(f"[DEBUG LLM] PROVIDER: {provider}")
+    logger.info(f"[DEBUG LLM] TAMANHO: {len(resposta or '')} caracteres")
+    logger.info("-" * 80)
+    logger.info(resposta or "<RESPOSTA VAZIA>")
+    logger.info("=" * 80)
+    logger.info("")
+
+def _chamar_qwen_colab(
+    prompt: str,
+    imagem_bytes: bytes | None = None,
+    max_new_tokens: int = 1600,
+) -> str:
+    """
+    Chama o Qwen3-VL-8B hospedado no Google Colab.
+
+    Se o Colab estiver offline, houver timeout ou qualquer erro,
+    retorna "" para permitir o fallback para os outros providers.
+    """
+    import base64
+    import requests
+
+    url = _obter_secret("QWEN_API_URL").rstrip("/")
+    api_key = _obter_secret("QWEN_API_KEY")
+
+    if not url or not api_key:
+        logger.info("[QWEN] URL/key nao configuradas")
+        return ""
+
+    payload = {
+        "prompt": prompt,
+        "max_new_tokens": max_new_tokens,
+    }
+
+    if imagem_bytes:
+        payload["imagem_base64"] = base64.b64encode(
+            imagem_bytes
+        ).decode("utf-8")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    try:
+        response = requests.post(
+            f"{url}/gerar",
+            json=payload,
+            headers=headers,
+
+            # 5s para conectar.
+            # Ate 180s para a inferencia.
+            timeout=(5, 180),
+        )
+
+        if response.status_code != 200:
+            logger.warning(
+                f"[QWEN] HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+            return ""
+
+        dados = response.json()
+
+        resposta = str(
+            dados.get("resposta") or ""
+        ).strip()
+
+        if not resposta:
+            logger.warning("[QWEN] Resposta vazia")
+            return ""
+
+        logger.info(
+            f"[QWEN] resposta OK | "
+            f"tempo={dados.get('tempo_segundos', '?')}s | "
+            f"imagem={dados.get('usou_imagem', False)}"
+        )
+
+        return resposta
+
+    except requests.Timeout:
+        logger.warning(
+            "[QWEN] Timeout — seguindo para fallback"
+        )
+        return ""
+
+    except requests.ConnectionError:
+        logger.warning(
+            "[QWEN] Colab offline — seguindo para fallback"
+        )
+        return ""
+
+    except Exception as e:
+        logger.warning(
+            f"[QWEN] Falhou: {type(e).__name__}: {e}"
+        )
+        return ""
+
+
+def _resposta_clustering_json_valida(texto: str) -> bool:
+    """
+    Valida somente a estrutura minima da resposta do clustering.
+
+    Isso impede uma resposta textual do Qwen de bloquear
+    os fallbacks Groq/Gemini/NVIDIA.
+    """
+    if not texto:
+        return False
+
+    texto = re.sub(r"```json\s*", "", texto)
+    texto = re.sub(r"```\s*", "", texto)
+    texto = texto.strip()
+
+    if "</think>" in texto:
+        texto = texto.split("</think>", 1)[1].strip()
+
+    # Formato principal:
+    # {"classificacao": [...]}
+    try:
+        inicio = texto.find("{")
+        fim = texto.rfind("}")
+
+        if inicio >= 0 and fim > inicio:
+            data = json.loads(
+                texto[inicio:fim + 1]
+            )
+
+            classificacao = data.get("classificacao")
+
+            if isinstance(classificacao, list) and classificacao:
+                return True
+
+    except Exception:
+        pass
+
+    # Formato alternativo: array direto
+    try:
+        inicio = texto.find("[")
+        fim = texto.rfind("]")
+
+        if inicio >= 0 and fim > inicio:
+            data = json.loads(
+                texto[inicio:fim + 1]
+            )
+
+            if isinstance(data, list) and data:
+                return True
+
+    except Exception:
+        pass
+
+    return False
+
+
+
+
 def _chamar_llm(prompt: str) -> str:
     """
-    Chama a LLM com cadeia de fallback:
-      1. Groq (GROQ_API_KEY) — openai/gpt-oss-120b (principal)
-      2. Gemini — gemini-3.5-flash-lite (primeiro fallback)
-      3. NVIDIA NIM — meta/llama-3.3-70b-instruct (ultimo fallback, timeout 30s)
-      4. Se tudo falhar → retorna ""; o lote nao e promovido a Cluster A por score
+    Cadeia de fallback do clustering:
+
+      1. Qwen3-VL-8B — Google Colab
+      2. Groq GROQ_API_KEY
+      3. Groq GROQ_API_KEY_2
+      4. Gemini
+      5. NVIDIA NIM
+      6. Se tudo falhar -> retorna ""
     """
     import time as t_mod
 
-    # Tentativa 1: Groq (principal)
+    # ============================================================
+    # TENTATIVA 1 — QWEN NO COLAB
+    # ============================================================
+
+    qwen_url = _obter_secret("QWEN_API_URL")
+
+    if qwen_url:
+        logger.info(
+            "[Ag2][Clustering] Tentando Qwen3-VL-8B no Colab..."
+        )
+
+        t0 = t_mod.time()
+
+        resposta = _chamar_qwen_colab(
+            prompt,
+            max_new_tokens=1600,
+        )
+
+        if resposta:
+
+            # Mostra exatamente o que o Qwen respondeu
+            _log_resposta_llm(
+                "Qwen3-VL-8B Colab",
+                resposta )
+
+            
+            if _resposta_clustering_json_valida(resposta):
+
+                logger.info(
+                    f"[Ag2][Clustering] LLM respondeu: "
+                    f"Qwen3-VL-8B Colab em "
+                    f"{t_mod.time()-t0:.1f}s"
+                )
+
+                return resposta
+
+            logger.warning(
+                "[Ag2][Clustering] Qwen respondeu, "
+                "mas o JSON nao e valido — tentando fallback..."
+            )
+
+        else:
+            logger.info(
+                "[Ag2][Clustering] Qwen indisponivel — "
+                "tentando Groq..."
+            )
+
+    # ============================================================
+    # TENTATIVA 2 — GROQ PRINCIPAL
+    # ============================================================
+
     t0 = t_mod.time()
-    resposta = _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b")
+
+    resposta = _chamar_groq(
+        prompt,
+        os.getenv("GROQ_API_KEY", ""),
+        model="openai/gpt-oss-120b",
+    )
+
     if resposta:
-        logger.info(f"[Ag2][Clustering] LLM respondeu: Groq openai/gpt-oss-120b em {t_mod.time()-t0:.1f}s")
+        logger.info(
+            f"[Ag2][Clustering] LLM respondeu: "
+            f"Groq openai/gpt-oss-120b em "
+            f"{t_mod.time()-t0:.1f}s"
+        )
         return resposta
 
-    # Tentativa 1b: Groq conta 2
+    # ============================================================
+    # TENTATIVA 3 — GROQ CONTA 2
+    # ============================================================
+
     groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
+
     if groq_key_2:
-        logger.info("[Ag2][Clustering] Groq 1 falhou — tentando GROQ_API_KEY_2...")
+        logger.info(
+            "[Ag2][Clustering] Groq 1 falhou — "
+            "tentando GROQ_API_KEY_2..."
+        )
+
         t0 = t_mod.time()
-        resposta = _chamar_groq(prompt, groq_key_2, model="openai/gpt-oss-120b")
+
+        resposta = _chamar_groq(
+            prompt,
+            groq_key_2,
+            model="openai/gpt-oss-120b",
+        )
+
         if resposta:
-            logger.info(f"[Ag2][Clustering] LLM respondeu: Groq KEY2 em {t_mod.time()-t0:.1f}s")
+            logger.info(
+                f"[Ag2][Clustering] LLM respondeu: "
+                f"Groq KEY2 em {t_mod.time()-t0:.1f}s"
+            )
             return resposta
 
-    # Tentativa 2: Gemini (primeiro fallback)
-    google_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
+    # ============================================================
+    # TENTATIVA 4 — GEMINI
+    # ============================================================
+
+    google_key = (
+        os.getenv("GOOGLE_API_KEY_2", "")
+        or os.getenv("GOOGLE_API_KEY", "")
+    )
+
     if google_key:
-        logger.info("[Ag2][Clustering] Groq falhou — tentando Gemini...")
+        logger.info(
+            "[Ag2][Clustering] Groq falhou — tentando Gemini..."
+        )
+
         t0 = t_mod.time()
-        resposta = _chamar_gemini(prompt, google_key)
+
+        resposta = _chamar_gemini(
+            prompt,
+            google_key,
+        )
+
         if resposta:
-            logger.info(f"[Ag2][Clustering] LLM respondeu: Gemini em {t_mod.time()-t0:.1f}s")
+            logger.info(
+                f"[Ag2][Clustering] LLM respondeu: "
+                f"Gemini em {t_mod.time()-t0:.1f}s"
+            )
             return resposta
 
-    # Tentativa 3: NVIDIA NIM (ultimo fallback — timeout 30s, sem retries longos)
+    # ============================================================
+    # TENTATIVA 5 — NVIDIA
+    # ============================================================
+
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
+
     if nvidia_key:
-        logger.info("[Ag2][Clustering] Gemini falhou — tentando NVIDIA NIM (timeout 30s)...")
+        logger.info(
+            "[Ag2][Clustering] Gemini falhou — "
+            "tentando NVIDIA NIM..."
+        )
+
         t0 = t_mod.time()
-        resposta = _chamar_nvidia(prompt, nvidia_key)
+
+        resposta = _chamar_nvidia(
+            prompt,
+            nvidia_key,
+        )
+
         if resposta:
-            logger.info(f"[Ag2][Clustering] LLM respondeu: NVIDIA NIM em {t_mod.time()-t0:.1f}s")
+            logger.info(
+                f"[Ag2][Clustering] LLM respondeu: "
+                f"NVIDIA NIM em {t_mod.time()-t0:.1f}s"
+            )
             return resposta
 
-    logger.warning("[Ag2][Clustering] Todas as LLMs falharam — lote ficara como Cluster B sem julgamento LLM")
+    logger.warning(
+        "[Ag2][Clustering] Todas as LLMs falharam — "
+        "lote ficara como Cluster B sem julgamento LLM"
+    )
+
     return ""
 
 
