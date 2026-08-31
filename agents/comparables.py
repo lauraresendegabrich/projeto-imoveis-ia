@@ -625,9 +625,11 @@ def _chamar_qwen_colab(
     }
 
     if imagem_bytes:
-        payload["imagem_base64"] = base64.b64encode(
-            imagem_bytes
-        ).decode("utf-8")
+        # A API nova aceita uma lista. Na zona homogenea o Agente 2 envia
+        # somente uma imagem de satelite.
+        payload["imagens_base64"] = [
+            base64.b64encode(imagem_bytes).decode("utf-8")
+        ]
 
     headers = {
         "Authorization": f"Bearer {api_key}"
@@ -661,10 +663,14 @@ def _chamar_qwen_colab(
             logger.warning("[QWEN] Resposta vazia")
             return ""
 
+        num_imagens = dados.get("num_imagens")
+        if num_imagens is None:
+            num_imagens = 1 if dados.get("usou_imagem", False) else 0
+
         logger.info(
             f"[QWEN] resposta OK | "
             f"tempo={dados.get('tempo_segundos', '?')}s | "
-            f"imagem={dados.get('usou_imagem', False)}"
+            f"num_imagens={num_imagens}"
         )
 
         return resposta

@@ -28,7 +28,7 @@ FLUXO:
 CADEIA DE FALLBACK (LLMs):
     ALVO: Qwen3-VL-8B Colab -> Gemini (ate 2 tentativas em 429 curto) -> Groq -> NVIDIA
     COMPARAVEIS: Qwen3-VL-8B Colab -> Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
-    Qwen3-VL-8B Colab: ate 4 fotos + JSON solicitado no prompt
+    Qwen3-VL-8B Colab: ate 4 fotos por URL + JSON solicitado no prompt
     Gemini: ate 4 fotos + JSON
     Groq qwen3.6-27b: ate 2 fotos + JSON Object Mode
     NVIDIA NIM llama-3.2-11b-vision: 1 foto + JSON solicitado no prompt
@@ -891,45 +891,14 @@ def _log_resposta_llm(provider: str, resposta: str):
     logger.info("")
 
 
-def _baixar_imagem_qwen(url: str) -> bytes | None:
-    """Baixa uma foto do anuncio para enviar ao Qwen hospedado no Colab."""
-    if not url:
-        return None
-
-    try:
-        import requests
-
-        response = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 ProjetoImoveisIA/1.0"},
-            timeout=(5, 20),
-        )
-
-        if response.status_code != 200:
-            logger.warning(
-                f"[Ag3][Qwen] nao foi possivel baixar foto | HTTP {response.status_code}"
-            )
-            return None
-
-        if not response.content:
-            return None
-
-        return response.content
-
-    except Exception as e:
-        logger.warning(
-            f"[Ag3][Qwen] falha ao baixar foto: {type(e).__name__}: {e}"
-        )
-        return None
-
-
 def _tentar_qwen_colab(imovel: dict) -> dict:
     """
     Qwen3-VL-8B hospedado no Google Colab.
 
-    Envia ate 4 fotos por imovel no campo `imagens_base64`, conforme o
-    contrato atual do endpoint /gerar do Colab. As fotos sao selecionadas
-    de forma espacada e somente downloads bem-sucedidos entram na chamada.
+    Envia ate 4 URLs de fotos por imovel no campo `imagens_urls`.
+    O proprio servidor do Colab baixa as imagens e entrega os objetos PIL
+    ao Qwen. Isso evita converter as fotos dos anuncios para Base64 no
+    Streamlit e reduz o tamanho do POST.
 
     Se o Colab estiver offline, houver timeout, erro HTTP ou a resposta nao
     for utilizavel, devolve {} para o roteador seguir aos provedores de
@@ -954,18 +923,12 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
 
     _provider_state["qwen"]["chamadas"] += 1
 
-    # Seleciona ate 4 URLs espacadas entre todas as fotos disponiveis.
     images = imovel.get("images", []) or []
-    fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_QWEN)
-
-    # Baixa cada foto. Fotos que falharem nao bloqueiam as demais.
-    imagens_bytes = []
-    for url_foto in fotos_selecionadas:
-        dados_foto = _baixar_imagem_qwen(url_foto)
-        if dados_foto:
-            imagens_bytes.append(dados_foto)
-
-    qtd_fotos = len(imagens_bytes)
+    fotos_selecionadas = [
+        u.strip() for u in _selecionar_fotos(images, MAX_FOTOS_QWEN)
+        if isinstance(u, str) and u.strip()
+    ]
+    qtd_fotos = len(fotos_selecionadas)
     prompt_texto = _prompt_compacto(imovel, qtd_fotos)
 
     payload = {
@@ -973,12 +936,8 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
         "max_new_tokens": 1600,
     }
 
-    if imagens_bytes:
-        import base64
-        payload["imagens_base64"] = [
-            base64.b64encode(img).decode("utf-8")
-            for img in imagens_bytes[:MAX_FOTOS_QWEN]
-        ]
+    if fotos_selecionadas:
+        payload["imagens_urls"] = fotos_selecionadas[:MAX_FOTOS_QWEN]
 
     headers = {
         "Authorization": f"Bearer {api_key}"
@@ -986,8 +945,7 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
 
     logger.info(
         f"[Ag3][Qwen] tentando Qwen3-VL-8B Colab | "
-        f"fotos_selecionadas={len(fotos_selecionadas)} | "
-        f"fotos_enviadas={qtd_fotos} | "
+        f"fotos_enviadas={qtd_fotos} | transporte=url | "
         f"desc_chars={min(len(imovel.get('description', '') or imovel.get('descricao', '') or ''), MAX_DESC_CHARS)}"
     )
 
@@ -1000,7 +958,7 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
             f"{url}/gerar",
             json=payload,
             headers=headers,
-            # 4 fotos podem exigir mais tempo de inferencia na T4.
+            # O Colab ainda precisa baixar ate 4 imagens e executar a inferencia.
             timeout=(5, 300),
         )
 
@@ -1011,7 +969,6 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
                 f"{response.text[:300]}"
             )
 
-            # Evita repetir varias esperas quando o Colab/tunel esta fora do ar.
             if response.status_code in {401, 403, 404, 502, 503, 504}:
                 _provider_state["qwen"]["available"] = False
                 _provider_state["qwen"]["reason"] = f"http_{response.status_code}"
@@ -1026,8 +983,6 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
             logger.warning("[Ag3][Qwen] resposta vazia")
             return {}
 
-        # O servidor novo devolve num_imagens. Mantemos fallback de log para
-        # compatibilidade caso uma sessao antiga ainda esteja ativa.
         num_imagens_api = dados_api.get("num_imagens")
         if num_imagens_api is None:
             num_imagens_api = 1 if dados_api.get("usou_imagem", False) else 0
@@ -1035,7 +990,6 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
         logger.info(
             f"[Ag3][Qwen] resposta OK | "
             f"tempo_api={dados_api.get('tempo_segundos', '?')}s | "
-            f"tempo_total={time.time()-t0:.1f}s | "
             f"imagens_api={num_imagens_api}"
         )
 
@@ -1054,7 +1008,13 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
             )
             return {}
 
-        resultado["fotos_analisadas"] = qtd_fotos
+        # Usa o numero realmente processado pelo servidor quando disponivel.
+        try:
+            fotos_processadas = int(num_imagens_api)
+        except (TypeError, ValueError):
+            fotos_processadas = qtd_fotos
+
+        resultado["fotos_analisadas"] = fotos_processadas
         resultado["llm_usada"] = "qwen3-vl-8b-colab"
 
         _provider_state["qwen"]["sucessos"] += 1
@@ -1063,7 +1023,7 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
 
         logger.info(
             "[Ag3][Qwen] resposta validada | "
-            f"fotos={qtd_fotos} | "
+            f"fotos={fotos_processadas} | "
             f"estado={resultado.get('estado_conservacao')} | "
             f"padrao={resultado.get('padrao_acabamento')} | "
             f"confianca={resultado.get('confianca_extracao')}"
@@ -1091,6 +1051,7 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
             f"[Ag3][Qwen] falhou: {type(e).__name__}: {e}"
         )
         return {}
+
 
 def _resultado_conclusivo(resultado: dict) -> bool:
     """
