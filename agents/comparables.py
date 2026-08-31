@@ -37,8 +37,8 @@ FLUXO COMPLETO:
     A media e descritiva. O corte usa a area REAL do imovel alvo.
 
     Regra eliminatoria de area:
-      - area construida: diferenca > 50% em relacao ao alvo -> incompatível
-      - area de terreno: diferenca > 50% em relacao ao alvo -> incompatível
+      - area construida: diferenca > 30% em relacao ao alvo -> incompatível
+      - area de terreno: diferenca > 30% em relacao ao alvo -> incompatível
         (aplicada para casas quando alvo e candidato possuem o dado)
 
     Caracteristicas objetivas comparadas:
@@ -344,8 +344,8 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
     Pre-classificacao objetiva e eliminatoria.
 
     Regras finais combinadas:
-      - diferenca de area construida > 50% em relacao ao alvo -> incompatível;
-      - para casas, diferenca de area de terreno > 50% -> incompatível;
+      - diferenca de area construida > 30% em relacao ao alvo -> incompatível;
+      - para casas, diferenca de area de terreno > 30% -> incompatível;
       - divergencia explicita em qualquer caracteristica objetiva -> incompatível;
       - dado ausente/desconhecido nunca elimina.
     """
@@ -363,10 +363,10 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
     if area_alvo is not None and area_cand is not None:
         comparacoes_realizadas += 1
         diferenca_area_pct = abs(area_cand - area_alvo) / area_alvo
-        if diferenca_area_pct > 0.50:
+        if diferenca_area_pct > 0.30:
             motivos.append(
                 f"area construida difere {diferenca_area_pct*100:.1f}% do alvo "
-                f"({area_cand:.1f}m² vs {area_alvo:.1f}m²; limite 50%)"
+                f"({area_cand:.1f}m² vs {area_alvo:.1f}m²; limite 30%)"
             )
 
     terreno_aplicavel = _eh_casa(alvo)
@@ -378,10 +378,10 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
     if terreno_aplicavel and area_terreno_alvo is not None and area_terreno_cand is not None:
         comparacoes_realizadas += 1
         diferenca_terreno_pct = abs(area_terreno_cand - area_terreno_alvo) / area_terreno_alvo
-        if diferenca_terreno_pct > 0.50:
+        if diferenca_terreno_pct > 0.30:
             motivos.append(
                 f"area de terreno difere {diferenca_terreno_pct*100:.1f}% do alvo "
-                f"({area_terreno_cand:.1f}m² vs {area_terreno_alvo:.1f}m²; limite 50%)"
+                f"({area_terreno_cand:.1f}m² vs {area_terreno_alvo:.1f}m²; limite 30%)"
             )
 
     divergencias_caracteristicas = []
@@ -413,13 +413,13 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
             "alvo": area_alvo,
             "candidato": area_cand,
             "diferenca_percentual": round(diferenca_area_pct * 100, 2) if diferenca_area_pct is not None else None,
-            "limite_percentual": 50,
+            "limite_percentual": 30,
         },
         "area_terreno": {
             "alvo": area_terreno_alvo,
             "candidato": area_terreno_cand,
             "diferenca_percentual": round(diferenca_terreno_pct * 100, 2) if diferenca_terreno_pct is not None else None,
-            "limite_percentual": 50,
+            "limite_percentual": 30,
             "aplicavel": terreno_aplicavel,
         },
         "caracteristicas_alvo": caracteristicas_alvo,
@@ -537,7 +537,7 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
     candidatos_texto = "\n".join(linhas)
 
     prompt = f"""Classifique candidatos como A (comparavel) ou B (nao comparavel) vs o alvo.
-Ja passaram por filtro Python de area (±50%) e caracteristicas objetivas.
+Ja passaram por filtro Python de area (±30%) e caracteristicas objetivas.
 Campo ausente = desconhecido, NAO ausencia. Nao repita cortes ja feitos.
 
 ALVO: {alvo_resumo}
@@ -1362,7 +1362,7 @@ def identificar_comparaveis(
         "limite_llm": None,
         "todos_elegiveis_enviados_llm": bool(usar_llm),
         "tamanho_lote_llm": TAMANHO_LOTE,
-        "regra_area_percentual": 50,
+        "regra_area_percentual": 30,
         "caracteristicas_eliminatorias": list(CARACTERISTICAS_PRE_CLASSIFICACAO.keys()),
         "estatisticas_areas": estatisticas_areas,
         "referencia_alvo": {
