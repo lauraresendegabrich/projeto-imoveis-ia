@@ -18,7 +18,7 @@ FLUXO:
     1. Carrega zona_homogenea_ag2.json (Agente 2 - Etapa 4)
     2. Filtra: cluster="A" E classificacao_zona="na_zona"
     3. Para cada imovel:
-         a. Seleciona fotos espacadas conforme o provedor (Gemini 4, Groq 2, NVIDIA 1)
+         a. Seleciona fotos espacadas conforme o provedor (Qwen Colab 4, Gemini 4, Groq 2, NVIDIA 1)
          b. Monta prompt com titulo, descricao, campos estruturados e fotos
          c. LLM multimodal analisa texto + fotos juntos e retorna JSON
          d. Python valida, normaliza vocabulario e calcula score deterministico
@@ -26,15 +26,17 @@ FLUXO:
     5. Salva em data/imoveis_analisados_ag3.json
 
 CADEIA DE FALLBACK (LLMs):
-    ALVO: Gemini (ate 2 tentativas em 429 curto) -> Groq -> NVIDIA
-    COMPARAVEIS: Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
+    ALVO: Qwen3-VL-8B Colab -> Gemini (ate 2 tentativas em 429 curto) -> Groq -> NVIDIA
+    COMPARAVEIS: Qwen3-VL-8B Colab -> Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
+    Qwen3-VL-8B Colab: ate 4 fotos + JSON solicitado no prompt
     Gemini: ate 4 fotos + JSON
     Groq qwen3.6-27b: ate 2 fotos + JSON Object Mode
     NVIDIA NIM llama-3.2-11b-vision: 1 foto + JSON solicitado no prompt
 
 SAIDA ESTRUTURADA:
+    - Qwen3-VL-8B Colab: JSON solicitado no prompt; validacao final em Python
     - Gemini: response_mime_type=application/json; validacao final em Python
-    - Groq/Qwen: response_format={"type": "json_object"}; validacao final em Python
+    - Groq API: response_format={"type": "json_object"}; validacao final em Python
     - NVIDIA NIM: JSON solicitado no prompt, sem JSON Schema rigido; validacao tolerante em Python
 
 CALCULO DO SCORE (deterministico, Python):
@@ -74,6 +76,7 @@ QUEM USA A SAIDA:
     Interface → exibe estado, padrao, score pro usuario
 
 DEPENDENCIAS:
+    - requests (Qwen3-VL-8B no Google Colab)
     - google-genai (Gemini 3.5 Flash Lite)
     - groq (qwen3.6-27b)
     - openai (NVIDIA NIM)
@@ -108,6 +111,7 @@ LIMITACOES_PADRAO = [
 # A interface pode continuar aceitando ate 8 URLs, mas cada provedor recebe
 # somente a quantidade adequada ao seu perfil de uso.
 MAX_FOTOS_INTERFACE = 8
+MAX_FOTOS_QWEN = 4
 MAX_FOTOS_GEMINI = 4
 MAX_FOTOS_GROQ = 2
 MAX_FOTOS_NVIDIA = 1
@@ -174,8 +178,8 @@ CARACTERISTICAS_CONDOMINIO_CONTROLADAS = [
 # O mesmo contrato logico e usado nos tres provedores.
 # O schema abaixo documenta o contrato esperado. A validacao final e feita
 # em Python para nao perder informacao util por pequenas variacoes textuais.
-# Groq/Qwen usa JSON Object Mode. Gemini usa application/json. NVIDIA recebe
-# o formato esperado no prompt, sem JSON Schema rigido na API.
+# Groq usa JSON Object Mode. Gemini usa application/json. Qwen Colab e NVIDIA
+# recebem o formato esperado no prompt, com validacao final tolerante em Python.
 #
 SCHEMA_AGENTE3 = {
     "type": "object",
@@ -828,6 +832,7 @@ def _normalizar_acabamento(v: str) -> str:
 # =============================================================================
 
 _provider_state = {
+    "qwen": {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0, "puladas": 0},
     "gemini": {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros_429": 0, "puladas": 0},
     "groq": {"available": True, "reason": None, "last_request": 0.0, "chamadas": 0, "sucessos": 0, "erros_429": 0},
     "nvidia": {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0},
@@ -835,8 +840,9 @@ _provider_state = {
 
 GROQ_INTERVALO_PREVENTIVO = 8.0  # segundos entre chamadas ao Groq Vision
 
-# Gemini é priorizado para o imóvel alvo.
-# Faz no máximo 2 tentativas no alvo quando o 429 pedir uma espera curta.
+# Qwen do Colab e priorizado para alvo e comparaveis.
+# Gemini continua com no maximo 2 tentativas no alvo quando for usado como fallback
+# e o 429 pedir uma espera curta.
 GEMINI_MAX_TENTATIVAS_ALVO = 2
 GEMINI_RETRY_CURTO_MAX_SEGUNDOS = 15.0
 GEMINI_RETRY_PADRAO_SEGUNDOS = 5.0
@@ -844,6 +850,7 @@ GEMINI_RETRY_PADRAO_SEGUNDOS = 5.0
 
 def _reset_provider_state():
     """Reseta o estado dos provedores (chamado no inicio de cada execucao)."""
+    _provider_state["qwen"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0, "puladas": 0}
     _provider_state["gemini"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros_429": 0, "puladas": 0}
     _provider_state["groq"] = {"available": True, "reason": None, "last_request": 0.0, "chamadas": 0, "sucessos": 0, "erros_429": 0}
     _provider_state["nvidia"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0}
@@ -852,6 +859,238 @@ def _reset_provider_state():
 # =============================================================================
 # CHAMADA AO LLM VISION (texto + fotos juntos)
 # =============================================================================
+
+def _obter_secret(nome: str) -> str:
+    """
+    Busca primeiro nas variaveis de ambiente.
+    No Streamlit Cloud, tenta tambem st.secrets.
+    """
+    valor = os.getenv(nome, "")
+    if valor:
+        return valor
+
+    try:
+        import streamlit as st
+        if nome in st.secrets:
+            return str(st.secrets[nome])
+    except Exception:
+        pass
+
+    return ""
+
+
+def _log_resposta_llm(provider: str, resposta: str):
+    """Mostra a resposta completa da LLM nos logs durante os testes."""
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info(f"[DEBUG LLM] PROVIDER: {provider}")
+    logger.info(f"[DEBUG LLM] TAMANHO: {len(resposta or '')} caracteres")
+    logger.info("-" * 80)
+    logger.info(resposta or "<RESPOSTA VAZIA>")
+    logger.info("=" * 80)
+    logger.info("")
+
+
+def _baixar_imagem_qwen(url: str) -> bytes | None:
+    """Baixa uma foto do anuncio para enviar ao Qwen hospedado no Colab."""
+    if not url:
+        return None
+
+    try:
+        import requests
+
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 ProjetoImoveisIA/1.0"},
+            timeout=(5, 20),
+        )
+
+        if response.status_code != 200:
+            logger.warning(
+                f"[Ag3][Qwen] nao foi possivel baixar foto | HTTP {response.status_code}"
+            )
+            return None
+
+        if not response.content:
+            return None
+
+        return response.content
+
+    except Exception as e:
+        logger.warning(
+            f"[Ag3][Qwen] falha ao baixar foto: {type(e).__name__}: {e}"
+        )
+        return None
+
+
+def _tentar_qwen_colab(imovel: dict) -> dict:
+    """
+    Qwen3-VL-8B hospedado no Google Colab.
+
+    Envia ate 4 fotos por imovel no campo `imagens_base64`, conforme o
+    contrato atual do endpoint /gerar do Colab. As fotos sao selecionadas
+    de forma espacada e somente downloads bem-sucedidos entram na chamada.
+
+    Se o Colab estiver offline, houver timeout, erro HTTP ou a resposta nao
+    for utilizavel, devolve {} para o roteador seguir aos provedores de
+    fallback sem interromper a execucao do Agente 3.
+    """
+    if not _provider_state["qwen"]["available"]:
+        _provider_state["qwen"]["puladas"] += 1
+        logger.info(
+            "[Ag3][Qwen] pulado nesta execucao | "
+            f"motivo={_provider_state['qwen'].get('reason')}"
+        )
+        return {}
+
+    url = _obter_secret("QWEN_API_URL").rstrip("/")
+    api_key = _obter_secret("QWEN_API_KEY")
+
+    if not url or not api_key:
+        _provider_state["qwen"]["available"] = False
+        _provider_state["qwen"]["reason"] = "url_ou_key_nao_configurada"
+        logger.warning("[Ag3][Qwen] QWEN_API_URL/QWEN_API_KEY nao configuradas")
+        return {}
+
+    _provider_state["qwen"]["chamadas"] += 1
+
+    # Seleciona ate 4 URLs espacadas entre todas as fotos disponiveis.
+    images = imovel.get("images", []) or []
+    fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_QWEN)
+
+    # Baixa cada foto. Fotos que falharem nao bloqueiam as demais.
+    imagens_bytes = []
+    for url_foto in fotos_selecionadas:
+        dados_foto = _baixar_imagem_qwen(url_foto)
+        if dados_foto:
+            imagens_bytes.append(dados_foto)
+
+    qtd_fotos = len(imagens_bytes)
+    prompt_texto = _prompt_compacto(imovel, qtd_fotos)
+
+    payload = {
+        "prompt": prompt_texto,
+        "max_new_tokens": 1600,
+    }
+
+    if imagens_bytes:
+        import base64
+        payload["imagens_base64"] = [
+            base64.b64encode(img).decode("utf-8")
+            for img in imagens_bytes[:MAX_FOTOS_QWEN]
+        ]
+
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    logger.info(
+        f"[Ag3][Qwen] tentando Qwen3-VL-8B Colab | "
+        f"fotos_selecionadas={len(fotos_selecionadas)} | "
+        f"fotos_enviadas={qtd_fotos} | "
+        f"desc_chars={min(len(imovel.get('description', '') or imovel.get('descricao', '') or ''), MAX_DESC_CHARS)}"
+    )
+
+    t0 = time.time()
+
+    try:
+        import requests
+
+        response = requests.post(
+            f"{url}/gerar",
+            json=payload,
+            headers=headers,
+            # 4 fotos podem exigir mais tempo de inferencia na T4.
+            timeout=(5, 300),
+        )
+
+        if response.status_code != 200:
+            _provider_state["qwen"]["erros"] += 1
+            logger.warning(
+                f"[Ag3][Qwen] HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+
+            # Evita repetir varias esperas quando o Colab/tunel esta fora do ar.
+            if response.status_code in {401, 403, 404, 502, 503, 504}:
+                _provider_state["qwen"]["available"] = False
+                _provider_state["qwen"]["reason"] = f"http_{response.status_code}"
+
+            return {}
+
+        dados_api = response.json()
+        texto_resp = str(dados_api.get("resposta") or "").strip()
+
+        if not texto_resp:
+            _provider_state["qwen"]["erros"] += 1
+            logger.warning("[Ag3][Qwen] resposta vazia")
+            return {}
+
+        # O servidor novo devolve num_imagens. Mantemos fallback de log para
+        # compatibilidade caso uma sessao antiga ainda esteja ativa.
+        num_imagens_api = dados_api.get("num_imagens")
+        if num_imagens_api is None:
+            num_imagens_api = 1 if dados_api.get("usou_imagem", False) else 0
+
+        logger.info(
+            f"[Ag3][Qwen] resposta OK | "
+            f"tempo_api={dados_api.get('tempo_segundos', '?')}s | "
+            f"tempo_total={time.time()-t0:.1f}s | "
+            f"imagens_api={num_imagens_api}"
+        )
+
+        _log_resposta_llm(
+            "Qwen3-VL-8B Colab - Agente 3",
+            texto_resp
+        )
+
+        bruto = _parse_json_obj(texto_resp)
+        resultado = _validar_saida_llm(bruto)
+
+        if not resultado:
+            _provider_state["qwen"]["erros"] += 1
+            logger.warning(
+                "[Ag3][Qwen] resposta nao retornou JSON utilizavel — seguindo para fallback"
+            )
+            return {}
+
+        resultado["fotos_analisadas"] = qtd_fotos
+        resultado["llm_usada"] = "qwen3-vl-8b-colab"
+
+        _provider_state["qwen"]["sucessos"] += 1
+        _provider_state["qwen"]["available"] = True
+        _provider_state["qwen"]["reason"] = None
+
+        logger.info(
+            "[Ag3][Qwen] resposta validada | "
+            f"fotos={qtd_fotos} | "
+            f"estado={resultado.get('estado_conservacao')} | "
+            f"padrao={resultado.get('padrao_acabamento')} | "
+            f"confianca={resultado.get('confianca_extracao')}"
+        )
+
+        return resultado
+
+    except requests.Timeout:
+        _provider_state["qwen"]["erros"] += 1
+        _provider_state["qwen"]["available"] = False
+        _provider_state["qwen"]["reason"] = "timeout"
+        logger.warning("[Ag3][Qwen] timeout — seguindo para fallback")
+        return {}
+
+    except requests.ConnectionError:
+        _provider_state["qwen"]["erros"] += 1
+        _provider_state["qwen"]["available"] = False
+        _provider_state["qwen"]["reason"] = "colab_offline"
+        logger.warning("[Ag3][Qwen] Colab offline — seguindo para fallback")
+        return {}
+
+    except Exception as e:
+        _provider_state["qwen"]["erros"] += 1
+        logger.warning(
+            f"[Ag3][Qwen] falhou: {type(e).__name__}: {e}"
+        )
+        return {}
 
 def _resultado_conclusivo(resultado: dict) -> bool:
     """
@@ -912,16 +1151,31 @@ def _analisar_imovel_vision(imovel: dict, is_alvo: bool = False) -> dict:
     Roteamento centralizado dos provedores.
 
     ALVO:
-        Gemini -> Groq -> NVIDIA
+        Qwen Colab -> Gemini -> Groq -> NVIDIA
 
     COMPARAVEIS:
-        Groq -> NVIDIA -> Gemini
+        Qwen Colab -> Groq -> NVIDIA -> Gemini
 
     Resposta "desconhecido/desconhecido" com confianca baixa nao encerra
     prematuramente o fluxo: o proximo provedor ainda e tentado.
     """
     if is_alvo:
-        logger.info("[Ag3][Roteamento][Alvo] prioridade: Gemini -> Groq -> NVIDIA")
+        logger.info(
+            "[Ag3][Roteamento][Alvo] prioridade: "
+            "Qwen Colab -> Gemini -> Groq -> NVIDIA"
+        )
+
+        qwen = _tentar_qwen_colab(imovel)
+        if _resultado_conclusivo(qwen):
+            return qwen
+        if qwen:
+            logger.info(
+                "[Ag3][Roteamento][Alvo] Qwen respondeu, mas foi inconclusivo"
+            )
+        else:
+            logger.info(
+                "[Ag3][Roteamento][Alvo] Qwen falhou/indisponivel -> tentando Gemini"
+            )
 
         gemini = _tentar_gemini(
             imovel,
@@ -945,9 +1199,25 @@ def _analisar_imovel_vision(imovel: dict, is_alvo: bool = False) -> dict:
         if nvidia:
             return nvidia
 
-        return _melhor_resultado(gemini, groq)
+        return _melhor_resultado(qwen, gemini, groq)
 
-    logger.info("[Ag3][Roteamento][Comparavel] prioridade: Groq -> NVIDIA -> Gemini")
+    logger.info(
+        "[Ag3][Roteamento][Comparavel] prioridade: "
+        "Qwen Colab -> Groq -> NVIDIA -> Gemini"
+    )
+
+    qwen = _tentar_qwen_colab(imovel)
+    if _resultado_conclusivo(qwen):
+        return qwen
+
+    if qwen:
+        logger.info(
+            "[Ag3][Roteamento][Comparavel] Qwen inconclusivo -> tentando Groq"
+        )
+    else:
+        logger.info(
+            "[Ag3][Roteamento][Comparavel] Qwen falhou/indisponivel -> tentando Groq"
+        )
 
     groq = _tentar_groq(imovel)
     if _resultado_conclusivo(groq):
@@ -975,8 +1245,7 @@ def _analisar_imovel_vision(imovel: dict, is_alvo: bool = False) -> dict:
     if _resultado_conclusivo(gemini):
         return gemini
 
-    return _melhor_resultado(gemini, nvidia, groq)
-
+    return _melhor_resultado(qwen, gemini, nvidia, groq)
 
 def _extrair_retry_after_segundos(erro: str):
     """
@@ -1842,6 +2111,7 @@ def analisar_comparaveis(
 
     # Reset provider state pra esta execucao
     _reset_provider_state()
+    logger.info(f"[Ag3][Provider] Qwen Colab disponivel={_provider_state['qwen']['available']}")
     logger.info(f"[Ag3][Provider] Gemini disponivel={_provider_state['gemini']['available']}")
     logger.info(f"[Ag3][Provider] Groq disponivel={_provider_state['groq']['available']}")
 
@@ -1947,10 +2217,16 @@ def analisar_comparaveis(
     logger.info(f"Salvo em: {caminho_saida}")
 
     # Resumo LLM da execucao
+    qw = _provider_state["qwen"]
     g = _provider_state["gemini"]
     gr = _provider_state["groq"]
     tempo_espera = gr.get("tempo_espera_total", 0.0)
     nv = _provider_state["nvidia"]
+    logger.info(
+        f"[Ag3][Resumo LLM] Qwen Colab chamadas={qw['chamadas']} | "
+        f"sucessos={qw['sucessos']} | erros={qw['erros']} | "
+        f"puladas={qw['puladas']} | motivo={qw.get('reason')}"
+    )
     logger.info(f"[Ag3][Resumo LLM] Gemini chamadas={g['chamadas']} | sucessos={g['sucessos']} | 429={g['erros_429']} | puladas={g['puladas']}")
     logger.info(f"[Ag3][Resumo LLM] Groq chamadas={gr['chamadas']} | sucessos={gr['sucessos']} | 429={gr['erros_429']} | tempo_espera_quota={tempo_espera:.0f}s")
     logger.info(f"[Ag3][Resumo LLM] NVIDIA chamadas={nv['chamadas']} | sucessos={nv['sucessos']} | erros={nv['erros']}")
