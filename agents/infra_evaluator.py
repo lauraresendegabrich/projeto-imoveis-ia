@@ -24,6 +24,7 @@ FLUXO:
     5. Haversine, faixas, pesos, normalizadores e score continuam determinísticos.
     6. Se Geoapify + Google falharem tecnicamente, usa score neutro 0.5.
     7. LLM apenas interpreta o resultado.
+       Cadeia: Qwen3-VL-8B no Google Colab -> Gemini -> Groq -> NVIDIA.
 
 GEOAPIFY:
     - 20 resultados por consulta.
@@ -3303,6 +3304,155 @@ def _calcular_impacto(
 # LLM
 # =============================================================================
 
+def _obter_secret(nome: str) -> str:
+    """Busca segredo no ambiente e, no Streamlit Cloud, em st.secrets."""
+    valor = os.getenv(nome, "")
+    if valor:
+        return valor
+
+    try:
+        import streamlit as st
+        if nome in st.secrets:
+            return str(st.secrets[nome])
+    except Exception:
+        pass
+
+    return ""
+
+
+def _parsear_json_interpretacao_qwen(texto: str) -> dict:
+    """Extrai e valida minimamente o JSON da interpretacao do Agente 4."""
+    import re
+
+    if not texto:
+        return {}
+
+    texto = str(texto).strip()
+
+    if "</think>" in texto:
+        texto = texto.split("</think>", 1)[1].strip()
+
+    texto = re.sub(r"```json\s*", "", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"```\s*", "", texto).strip()
+
+    try:
+        obj = json.loads(texto)
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]*\}", texto)
+        if not m:
+            return {}
+        try:
+            obj = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return {}
+
+    if not isinstance(obj, dict):
+        return {}
+
+    campos_esperados = {
+        "pontos_fortes",
+        "pontos_de_atencao",
+        "descricao_infraestrutura",
+        "conclusao",
+    }
+
+    if not campos_esperados.intersection(obj.keys()):
+        return {}
+
+    return obj
+
+
+def _chamar_qwen_colab_infra(prompt: str) -> dict:
+    """
+    Chama o Qwen3-VL-8B hospedado no Google Colab para a interpretacao
+    textual do Agente 4. Nao envia imagens nesta etapa.
+
+    Se o Colab estiver offline, houver timeout, resposta invalida ou erro,
+    retorna {} para permitir os fallbacks Gemini -> Groq -> NVIDIA.
+    """
+    import time as t_qwen
+
+    url = _obter_secret("QWEN_API_URL").rstrip("/")
+    api_key = _obter_secret("QWEN_API_KEY")
+
+    if not url or not api_key:
+        logger.info("[Ag4][Qwen] URL/key nao configuradas")
+        return {}
+
+    payload = {
+        "prompt": prompt,
+        "max_new_tokens": 1000,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    logger.info("[Ag4][LLM] Tentando Qwen3-VL-8B no Colab...")
+    t0 = t_qwen.time()
+
+    try:
+        response = requests.post(
+            f"{url}/gerar",
+            json=payload,
+            headers=headers,
+            timeout=(5, 180),
+        )
+
+        if response.status_code != 200:
+            logger.warning(
+                f"[Ag4][Qwen] HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+            return {}
+
+        dados = response.json()
+        conteudo = str(dados.get("resposta") or "").strip()
+
+        if not conteudo:
+            logger.warning("[Ag4][Qwen] resposta vazia")
+            return {}
+
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("[DEBUG LLM] PROVIDER: Qwen3-VL-8B Colab - Agente 4")
+        logger.info(f"[DEBUG LLM] TAMANHO: {len(conteudo)} caracteres")
+        logger.info("-" * 80)
+        logger.info(conteudo)
+        logger.info("=" * 80)
+        logger.info("")
+
+        resultado = _parsear_json_interpretacao_qwen(conteudo)
+
+        if not resultado:
+            logger.warning(
+                "[Ag4][Qwen] resposta nao trouxe JSON utilizavel — "
+                "seguindo para Gemini"
+            )
+            return {}
+
+        logger.info(
+            f"LLM interpretou (Qwen3-VL-8B Colab) em "
+            f"{t_qwen.time()-t0:.1f}s"
+        )
+
+        return resultado
+
+    except requests.Timeout:
+        logger.warning("[Ag4][Qwen] timeout — seguindo para Gemini")
+        return {}
+
+    except requests.ConnectionError:
+        logger.warning("[Ag4][Qwen] Colab offline — seguindo para Gemini")
+        return {}
+
+    except Exception as e:
+        logger.warning(
+            f"[Ag4][Qwen] falhou: {type(e).__name__}: {e}"
+        )
+        return {}
+
+
 def _analisar_infra_llm(
     pois_por_faixa: dict,
     scores: dict,
@@ -3474,7 +3624,16 @@ Retorne JSON:
 
 
     # ----------------------------------------------------------------
-    # GEMINI
+    # QWEN3-VL-8B — GOOGLE COLAB (PRIMEIRA OPCAO)
+    # ----------------------------------------------------------------
+
+    resultado_qwen = _chamar_qwen_colab_infra(prompt)
+
+    if resultado_qwen:
+        return resultado_qwen
+
+    # ----------------------------------------------------------------
+    # GEMINI — FALLBACK 1
     # ----------------------------------------------------------------
 
     import time as t_infra
@@ -3579,7 +3738,7 @@ Retorne JSON:
 
 
     # ----------------------------------------------------------------
-    # GROQ
+    # GROQ — FALLBACK 2
     # ----------------------------------------------------------------
 
     t0 = t_infra.time()
@@ -3669,7 +3828,7 @@ Retorne JSON:
 
 
     # ----------------------------------------------------------------
-    # NVIDIA
+    # NVIDIA — FALLBACK 3
     # ----------------------------------------------------------------
 
     t0 = t_infra.time()
