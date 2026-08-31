@@ -1464,9 +1464,11 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     Envia imagem de satelite para analise visual e identificacao da zona homogenea.
 
     Cadeia de fallback:
-      1. NVIDIA NIM (google/gemma-4-31b-it) — VLM com 128k contexto
+      1. Qwen3-VL-8B — Google Colab
       2. Gemini (gemini-3.5-flash-lite) — com response_mime_type JSON
-      3. Fallback: raio padrao 500m
+      3. Groq Vision (qwen3.6-27b)
+      4. NVIDIA NIM (google/gemma-4-31b-it)
+      5. Fallback: raio padrao 500m
 
     Foca nos tres fatores prioritarios para definir a zona:
       - Padrao construtivo aparente (casas, sobrados, predios, misto)
@@ -1483,11 +1485,17 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
       - confianca: str
     """
     import base64
+    import time as t_zona
 
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
     google_key = os.getenv("GOOGLE_API_KEY", "")
-    if not nvidia_key and not google_key:
-        logger.warning("Nenhuma API key de visao configurada — usando raio padrao")
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    qwen_url = _obter_secret("QWEN_API_URL")
+    qwen_key = _obter_secret("QWEN_API_KEY")
+    qwen_disponivel = bool(qwen_url and qwen_key)
+
+    if not qwen_disponivel and not google_key and not groq_key and not nvidia_key:
+        logger.warning("Nenhum provedor de visao configurado — usando raio padrao")
         return {"raio_metros": 500}
 
     # Converte pra JPEG com qualidade 85 (mantém resolução original 1280x1280)
@@ -1500,7 +1508,11 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
         imagem_comprimida = buffer.getvalue()
         img_b64 = base64.b64encode(imagem_comprimida).decode("utf-8")
         img_mime = "image/jpeg"
-        logger.info(f"Imagem: {img.width}x{img.height} | {len(imagem_bytes)//1024}KB -> {len(imagem_comprimida)//1024}KB (JPEG 85%)")
+        logger.info(
+            f"Imagem: {img.width}x{img.height} | "
+            f"{len(imagem_bytes)//1024}KB -> "
+            f"{len(imagem_comprimida)//1024}KB (JPEG 85%)"
+        )
     except Exception:
         img_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
         img_mime = "image/png"
@@ -1532,36 +1544,89 @@ RESPONDA SOMENTE JSON:
   "confianca": "alta | media | baixa"
 }}"""
 
-    # Tentativa 1: Gemini (principal — rapido e confiavel)
-    import time as t_zona
+    # ============================================================
+    # TENTATIVA 1 — QWEN3-VL-8B NO GOOGLE COLAB
+    # ============================================================
+    if qwen_disponivel:
+        logger.info("[Ag2][Zona] Tentando Qwen3-VL-8B no Colab...")
+        t0 = t_zona.time()
+
+        resposta_qwen = _chamar_qwen_colab(
+            prompt=prompt,
+            imagem_bytes=imagem_bytes,
+            max_new_tokens=1024,
+        )
+
+        if resposta_qwen:
+            _log_resposta_llm(
+                "Qwen3-VL-8B Colab - Zona Homogenea",
+                resposta_qwen,
+            )
+
+            resultado = _parsear_json_zona(resposta_qwen)
+
+            if resultado:
+                logger.info(
+                    f"[Ag2][Zona] provedor=Qwen3-VL-8B Colab | "
+                    f"tempo={t_zona.time()-t0:.1f}s"
+                )
+                return resultado
+
+            logger.warning(
+                "[Ag2][Zona] Qwen respondeu, mas o JSON da zona nao foi valido — "
+                "tentando Gemini..."
+            )
+        else:
+            logger.info("[Ag2][Zona] Qwen indisponivel — tentando Gemini...")
+
+    # ============================================================
+    # TENTATIVA 2 — GEMINI
+    # ============================================================
     if google_key:
         t0 = t_zona.time()
         resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
         if resultado:
-            logger.info(f"[Ag2][Zona] provedor=Gemini | tempo={t_zona.time()-t0:.1f}s")
+            logger.info(
+                f"[Ag2][Zona] provedor=Gemini | "
+                f"tempo={t_zona.time()-t0:.1f}s"
+            )
             return resultado
         logger.info("[Ag2][Zona] Gemini visao falhou — tentando Groq Vision...")
 
-    # Tentativa 2: Groq Vision (qwen3.6-27b)
-    groq_key = os.getenv("GROQ_API_KEY", "")
+    # ============================================================
+    # TENTATIVA 3 — GROQ VISION
+    # ============================================================
     if groq_key:
         t0 = t_zona.time()
         resultado = _chamar_groq_visao(prompt, img_b64, img_mime, groq_key)
         if resultado:
-            logger.info(f"[Ag2][Zona] provedor=Groq | tempo={t_zona.time()-t0:.1f}s")
+            logger.info(
+                f"[Ag2][Zona] provedor=Groq | "
+                f"tempo={t_zona.time()-t0:.1f}s"
+            )
             return resultado
-        logger.info("[Ag2][Zona] Groq Vision falhou — tentando NVIDIA NIM (timeout 30s)...")
+        logger.info(
+            "[Ag2][Zona] Groq Vision falhou — "
+            "tentando NVIDIA NIM (timeout 30s)..."
+        )
 
-    # Tentativa 3: NVIDIA NIM (ultimo fallback — timeout 30s)
+    # ============================================================
+    # TENTATIVA 4 — NVIDIA NIM
+    # ============================================================
     if nvidia_key:
         t0 = t_zona.time()
         resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
         if resultado:
-            logger.info(f"[Ag2][Zona] provedor=NVIDIA | tempo={t_zona.time()-t0:.1f}s")
+            logger.info(
+                f"[Ag2][Zona] provedor=NVIDIA | "
+                f"tempo={t_zona.time()-t0:.1f}s"
+            )
             return resultado
 
-    return {"raio_metros": 500, "descricao_zona_homogenea": "Analise visual nao disponivel"}
-
+    return {
+        "raio_metros": 500,
+        "descricao_zona_homogenea": "Analise visual nao disponivel",
+    }
 
 def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
     """Chama NVIDIA NIM (google/gemma-4-31b-it) para analise visual. Timeout 30s, sem retries."""

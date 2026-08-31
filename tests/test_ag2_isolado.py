@@ -1,6 +1,9 @@
-"""Teste isolado do Agente 2 — Identificador de Comparáveis."""
+"""Teste isolado do Agente 2 — Identificação de Comparáveis."""
 import sys
+import os
+import json
 import logging
+import time
 
 sys.path.insert(0, ".")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -14,49 +17,98 @@ print("=" * 60)
 print("TESTE ISOLADO — AGENTE 2: IDENTIFICADOR DE COMPARÁVEIS")
 print("=" * 60)
 
-# Imóvel alvo: Apartamento 89m², 2q, Cambuí, Campinas
+# ── IMÓVEL ALVO (ajuste conforme seu teste) ────────────────────────
 imovel_alvo = {
-    "rua": "Rua Doutor Liraucio Gomes",
-    "numero": "119",
-    "bairro": "Cambuí",
-    "cidade": "Campinas",
-    "estado": "SP",
-    "propertyType": "Apartamentos",
-    "area": 89,
+    "endereco": "Rua Codajás, 14, São Gabriel, Belo Horizonte, MG, Brasil",
+    "localizacao": "Belo Horizonte, MG",
+    "bairro": "São Gabriel",
+    "rua": "Rua Codajás",
+    "tipo_imovel": "apartment",
+    "propertyType": "apartment",
+    "area": 120,
     "area_terreno": 0,
-    "bedrooms": 2,
-    "bathrooms": 3,
+    "bedrooms": 3,
+    "bathrooms": 2,
+    "suites": 1,
     "parkingSpaces": 2,
-    "neighborhood": "Cambuí",
-    "street": "Rua Doutor Liraucio Gomes",
-    "description": "Apartamento com 2 quartos, 3 banheiros, 2 vagas, 89m². Cambuí, Campinas/SP.",
+    "price": 450000,
 }
 
-# Usa os dados já coletados pelo Agente 1 (imoveis_completos_ag1.json)
-resultado = identificar_comparaveis(imovel_alvo=imovel_alvo)
+# ── VERIFICA SE TEM DADOS DO AG1 ──────────────────────────────────
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+arquivo_ag1 = os.path.join(DATA_DIR, "imoveis_completos_ag1.json")
 
+if not os.path.exists(arquivo_ag1):
+    print(f"\n⚠️  Arquivo não encontrado: {arquivo_ag1}")
+    print("   Rode o Agente 1 primeiro ou ajuste o caminho.")
+    sys.exit(1)
+
+with open(arquivo_ag1, "r", encoding="utf-8") as f:
+    imoveis_ag1 = json.load(f)
+
+print(f"\n📂 Dados do Ag1: {len(imoveis_ag1)} imóveis carregados")
+print(f"📍 Imóvel alvo: {imovel_alvo['endereco']}")
+print(f"   Área: {imovel_alvo['area']}m² | Quartos: {imovel_alvo['bedrooms']} | Vagas: {imovel_alvo['parkingSpaces']}")
+print()
+
+# ── EXECUTA O AGENTE 2 ─────────────────────────────────────────────
+t0 = time.time()
+
+resultado = identificar_comparaveis(
+    imovel_alvo=imovel_alvo,
+    imoveis_coletados=imoveis_ag1,
+    usar_llm=True,
+)
+
+tempo = time.time() - t0
+
+# ── RESULTADOS ─────────────────────────────────────────────────────
 print(f"\n{'=' * 60}")
-print("RESULTADO DO AGENTE 2")
+print(f"RESULTADO — Tempo: {tempo:.1f}s")
 print(f"{'=' * 60}")
 
-resumo = resultado.get("resumo", {})
-print(f"Total analisados: {resumo.get('total_analisados', '?')}")
-print(f"Cluster A (similares): {resumo.get('cluster_a', '?')}")
-print(f"Cluster B (não similares): {resumo.get('cluster_b', '?')}")
-print(f"Terrenos excluídos: {resumo.get('terrenos_excluidos', '?')}")
-print(f"Método: {resumo.get('metodo', '?')}")
-
 comparaveis = resultado.get("comparaveis", [])
+resumo = resultado.get("resumo", {})
+
+print(f"\n📊 Resumo:")
+print(f"   Total comparáveis: {len(comparaveis)}")
+print(f"   Cluster A: {sum(1 for c in comparaveis if c.get('cluster') == 'A')}")
+print(f"   Cluster B: {sum(1 for c in comparaveis if c.get('cluster') == 'B')}")
+
+terrenos = resultado.get("terrenos", [])
+if terrenos:
+    print(f"   Terrenos identificados: {len(terrenos)}")
+
+# Top 10 do Cluster A
 cluster_a = [c for c in comparaveis if c.get("cluster") == "A"]
-print(f"\nTop 10 do Cluster A:")
-for i, c in enumerate(cluster_a[:10]):
-    area = c.get("area", "?")
-    quartos = c.get("bedrooms", "?")
-    preco = c.get("price", 0)
-    score = c.get("score_similaridade", 0)
-    ranking = c.get("ranking_llm", "?")
-    rua = c.get("street", "?")
-    just = (c.get("justificativa", "") or "")[:60]
-    print(f"  [{i+1}] {area}m² | {quartos}q | R$ {preco:,.0f} | score={score:.2f} | rank={ranking} | {rua}")
-    if just:
-        print(f"       → {just}")
+cluster_a.sort(key=lambda x: x.get("ranking_llm") or x.get("score_numerico") or 999)
+
+print(f"\n🏆 Top 10 Cluster A (mais similares):")
+for i, c in enumerate(cluster_a[:10], 1):
+    area = c.get("area") or c.get("area_construida") or "?"
+    quartos = c.get("bedrooms") or c.get("quartos") or "?"
+    preco = c.get("price") or c.get("preco") or 0
+    rua = c.get("street") or c.get("rua") or "?"
+    bairro = c.get("neighborhood") or c.get("bairro") or "?"
+    ranking = c.get("ranking_llm") or "-"
+    score = c.get("score_numerico") or 0
+    try:
+        preco = float(preco)
+    except (ValueError, TypeError):
+        preco = 0
+    print(f"  [{i:>2}] {area:>5}m² | {quartos}q | R$ {preco:>12,.0f} | rank={ranking} | score={score:.2f} | {rua[:30]} | {bairro}")
+
+# Zona homogênea
+zona_path = os.path.join(DATA_DIR, "zona_homogenea_ag2.json")
+if os.path.exists(zona_path):
+    with open(zona_path, "r", encoding="utf-8") as f:
+        zona = json.load(f)
+    confirmados = zona.get("comparaveis_confirmados", [])
+    na_zona = [c for c in confirmados if c.get("classificacao_zona") == "na_zona"]
+    fora = [c for c in confirmados if c.get("classificacao_zona") == "fora_zona"]
+    print(f"\n🗺️  Zona Homogênea:")
+    print(f"   Na zona: {len(na_zona)}")
+    print(f"   Fora da zona: {len(fora)}")
+    print(f"   Total confirmados: {len(confirmados)}")
+
+print(f"\n✅ Teste finalizado em {tempo:.1f}s")
