@@ -702,10 +702,16 @@ CANDIDATOS ({len(candidatos)}):
 
 CRITERIOS DE JULGAMENTO:
 1. Tipo/uso e contexto de localizacao sao prioritarios.
-2. Area e numero de quartos sao muito relevantes.
+2. Area e numero de quartos sao relevantes, mas uma diferenca de ATE 1 QUARTO
+   (ex.: alvo com 4 quartos vs candidato com 3 ou 5) NAO e motivo para rejeitar.
+   Trate ate 1 quarto de diferenca como equivalente quando area e localizacao
+   forem compativeis. So considere os quartos um problema se a diferenca for de
+   2 ou mais, ou se vier acompanhada de outras divergencias relevantes.
 3. Banheiros, vagas, terreno e caracteristicas estruturais ajudam a diferenciar o padrao.
 4. Use a descricao somente para entender tipologia, padrao e caracteristicas; nao invente dados ausentes.
-5. Nao rejeite por uma unica diferenca secundaria. Classifique B quando o CONJUNTO das diferencas tornar o candidato inadequado como referencia de mercado.
+5. Nao rejeite por uma unica diferenca secundaria (incluindo 1 quarto a mais ou a menos).
+   Classifique B apenas quando o CONJUNTO das diferencas tornar o candidato inadequado
+   como referencia de mercado.
 6. A = referencia suficientemente semelhante para compor a amostra de comparaveis.
 7. B = referencia inadequada para a amostra.
 8. score_similaridade deve ser INTEIRO de 0 a 100 e refletir sua propria avaliacao, nao um preco.
@@ -2182,6 +2188,21 @@ def analisar_zona_homogenea(
                 logger.warning(f"Nao foi possivel recuperar terrenos da saida do Agente 2: {e}")
     else:
         terrenos = list(terrenos or [])
+
+    # Defesa contra dupla contagem: se algum terreno tiver sido misturado na lista
+    # `imoveis` (ex.: chamador passando cluster_a + terrenos), remove-o daqui. Os
+    # terrenos sao processados apenas na etapa dedicada, evitando conta-los duas vezes.
+    terrenos_em_imoveis = [im for im in imoveis if im.get("cluster") == "terreno" or _eh_terreno(im)]
+    if terrenos_em_imoveis:
+        imoveis = [im for im in imoveis if not (im.get("cluster") == "terreno" or _eh_terreno(im))]
+        ids_terrenos = {id(t) for t in terrenos}
+        adicionados = [t for t in terrenos_em_imoveis if id(t) not in ids_terrenos]
+        if adicionados:
+            terrenos = terrenos + adicionados
+        logger.info(
+            f"[Ag2][Zona] {len(terrenos_em_imoveis)} terreno(s) removido(s) da lista de "
+            f"comparaveis para evitar dupla contagem (processados apenas como terreno)"
+        )
 
     # 1. Geocodificacao do alvo
     nivel_geo_alvo = "coordenadas_precomputadas" if lat_alvo_precomp is not None and lon_alvo_precomp is not None else None

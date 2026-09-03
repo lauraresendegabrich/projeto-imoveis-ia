@@ -204,11 +204,15 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
                 f"{imovel_alvo.get('cidade', '')}, "
                 f"{imovel_alvo.get('estado', '')}"
             )
-            # Só envia Cluster A + terrenos (Cluster B já foi descartado pela LLM)
+            # Só envia Cluster A (Cluster B já foi descartado pela LLM). Os terrenos
+            # vão no parâmetro dedicado `terrenos=` — NÃO podem ser misturados em
+            # `imoveis`, senão a zona os processa como comparáveis construídos E
+            # os recarrega do disco, contando-os duas vezes.
             cluster_a = [c for c in comparaveis if c.get("cluster") == "A"]
             zona_resultado = analisar_zona_homogenea(
                 endereco_alvo=endereco,
-                imoveis=cluster_a + terrenos,
+                imoveis=cluster_a,
+                terrenos=terrenos,
                 cidade=imovel_alvo.get("cidade", ""),
                 estado=imovel_alvo.get("estado", ""),
             )
