@@ -709,12 +709,19 @@ CRITERIOS DE JULGAMENTO:
    2 ou mais, ou se vier acompanhada de outras divergencias relevantes.
 3. Banheiros, vagas, terreno e caracteristicas estruturais ajudam a diferenciar o padrao.
 4. Use a descricao somente para entender tipologia, padrao e caracteristicas; nao invente dados ausentes.
-5. Nao rejeite por uma unica diferenca secundaria (incluindo 1 quarto a mais ou a menos).
+5. PADRAO POR AMENIDADES: um CONJUNTO EXPRESSIVO de amenidades de lazer/conforto no
+   candidato (por exemplo piscina + area gourmet + churrasqueira + sauna + varanda, varias
+   ao mesmo tempo) que o alvo NAO possui sugere padrao de acabamento superior e PODE
+   justificar B. Porem, aplique isto SOMENTE quando o alvo tiver descricao informativa.
+   Se a descricao do alvo for vazia ou muito curta, NAO rebaixe por isso: a ausencia de
+   mencao no alvo e DESCONHECIDO, nao evidencia de padrao inferior. Uma ou duas amenidades
+   isoladas permanecem diferenca secundaria e NAO eliminam.
+6. Nao rejeite por uma unica diferenca secundaria (incluindo 1 quarto a mais ou a menos).
    Classifique B apenas quando o CONJUNTO das diferencas tornar o candidato inadequado
    como referencia de mercado.
-6. A = referencia suficientemente semelhante para compor a amostra de comparaveis.
-7. B = referencia inadequada para a amostra.
-8. score_similaridade deve ser INTEIRO de 0 a 100 e refletir sua propria avaliacao, nao um preco.
+7. A = referencia suficientemente semelhante para compor a amostra de comparaveis.
+8. B = referencia inadequada para a amostra.
+9. score_similaridade deve ser INTEIRO de 0 a 100 e refletir sua propria avaliacao, nao um preco.
 
 RETORNE SOMENTE JSON VALIDO, sem markdown e sem texto externo:
 {{"classificacao":[{{"id":1,"cluster":"A","score_similaridade":85,"justificativa":"frase objetiva"}}]}}
