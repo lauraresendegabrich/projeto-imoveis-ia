@@ -2190,18 +2190,16 @@ def analisar_zona_homogenea(
         terrenos = list(terrenos or [])
 
     # Defesa contra dupla contagem: se algum terreno tiver sido misturado na lista
-    # `imoveis` (ex.: chamador passando cluster_a + terrenos), remove-o daqui. Os
-    # terrenos sao processados apenas na etapa dedicada, evitando conta-los duas vezes.
+    # `imoveis` (ex.: chamador passando cluster_a + terrenos), APENAS o remove daqui.
+    # NAO reanexa em `terrenos`: a lista `terrenos` ja e a fonte canonica (vem do
+    # parametro dedicado ou do disco). Reanexar duplicaria os terrenos, pois o mesmo
+    # imovel costuma existir como objetos distintos em `comparaveis` e em `terrenos`.
     terrenos_em_imoveis = [im for im in imoveis if im.get("cluster") == "terreno" or _eh_terreno(im)]
     if terrenos_em_imoveis:
         imoveis = [im for im in imoveis if not (im.get("cluster") == "terreno" or _eh_terreno(im))]
-        ids_terrenos = {id(t) for t in terrenos}
-        adicionados = [t for t in terrenos_em_imoveis if id(t) not in ids_terrenos]
-        if adicionados:
-            terrenos = terrenos + adicionados
         logger.info(
             f"[Ag2][Zona] {len(terrenos_em_imoveis)} terreno(s) removido(s) da lista de "
-            f"comparaveis para evitar dupla contagem (processados apenas como terreno)"
+            f"comparaveis (ja processados na lista dedicada de terrenos)"
         )
 
     # 1. Geocodificacao do alvo

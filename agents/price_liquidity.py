@@ -287,18 +287,29 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
             todos_comparaveis = [c for c in ag2.get("comparaveis", []) if c.get("cluster") == "A"]
             logger_local.info(f"Fallback zona: usando {len(todos_comparaveis)} comparaveis do Cluster A")
 
-    # Separar terrenos dos construidos (sem duplicatas por url)
+    # Separar terrenos dos construidos (sem duplicatas).
+    # Deduplica por chave de negocio estavel: url -> id/listing_id -> composicao
+    # de campos. Cobrir o caso sem url evita contar 2x um imovel que tenha vazado
+    # duplicado da etapa anterior.
     terrenos_zona = []
     comparaveis_zona = []
-    urls_vistos = set()
+    chaves_vistas = set()
+
+    def _chave_dedup(im: Dict[str, Any]) -> str:
+        for campo in ("url", "id", "listing_id"):
+            val = im.get(campo)
+            if val:
+                return f"{campo}:{val}"
+        # Sem identificador proprio: usa composicao de atributos como chave.
+        return "comp:" + "|".join(str(im.get(c, "")) for c in (
+            "propertyType", "price", "area", "bedrooms", "bathrooms", "street", "neighborhood"
+        ))
 
     for imovel in todos_comparaveis:
-        # Deduplicação por URL (mais confiável que id)
-        url = imovel.get("url", "")
-        if url and url in urls_vistos:
+        chave = _chave_dedup(imovel)
+        if chave in chaves_vistas:
             continue
-        if url:
-            urls_vistos.add(url)
+        chaves_vistas.add(chave)
 
         tipo = normalizar_tipo(imovel.get("propertyType", ""))
         if tipo in TIPOS_TERRENO:
