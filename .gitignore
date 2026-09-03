@@ -30,3 +30,6 @@ data/satelite_zona_homogenea_ag2.png
 data/imoveis_analisados_ag3.json
 data/infra_avaliada_ag4.json
 data/preco_liquidez_ag5.json
+
+# metadados de cache gerados em runtime
+data/*.meta.json

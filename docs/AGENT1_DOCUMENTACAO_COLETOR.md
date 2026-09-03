@@ -22,7 +22,7 @@ ETAPA 1 — ATHENA (fonte principal)
 ETAPA 2 — APIFY (fallback se Athena < 10)
 ETAPA 3 — NORMALIZAÇÃO DE CAMPOS
 ETAPA 4 — COMBINAÇÃO (athena + apify)
-ETAPA 5 — FILTROS (leilão, campos, duplicatas)
+ETAPA 5 — FILTROS + DEDUP COM MERGE (leilão, campos, duplicatas)
 ETAPA 6 — ESCOPO (mantém só rua/bairro)
 ETAPA 7 — ENRIQUECIMENTO (fotos)
 ETAPA 8 — ORDENAÇÃO (rua > bairro > cidade)
@@ -54,85 +54,73 @@ Queries SQL na tabela `vivareal` (S3/Parquet).
 | flat | 50 |
 | cobertura | 50 |
 
-### Lógica de busca (para cada tipo)
+### Lógica de busca — UMA query unificada por tipo
 
-Para cada tipo na lista acima, faz:
+Para cada tipo, é feita **uma única query** que busca RUA **OU** BAIRRO ao mesmo
+tempo. A mesma rua recebe prioridade 0, o restante do bairro recebe prioridade 1.
+Isso substitui o modelo antigo de duas queries separadas (rua + bairro), reduzindo
+consultas sobrepostas.
 
-1. **Busca na RUA** (prioridade)
 ```sql
-SELECT * FROM vivareal 
-WHERE cidade='Campinas' AND bairro='Jardim Guanabara' 
-  AND rua LIKE '%Conego Nery%' AND tipo='casa' 
-  AND finalidade='venda' 
+WITH candidatos AS (
+    SELECT *,
+           CASE WHEN <cond_rua> THEN 0
+                WHEN <cond_bairro> THEN 1
+                ELSE 2 END AS prioridade
+    FROM vivareal
+    WHERE cidade = 'Campinas'          -- comparado sem acento (translate)
+      AND finalidade = 'venda'
+      AND (<cond_rua> OR <cond_bairro>)
+      AND estado = 'SP'
+      AND tipo = 'casa'
+), dedup AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY <chave_dedup>
+               ORDER BY prioridade ASC, data_publicacao DESC NULLS LAST
+           ) AS rn
+    FROM candidatos
+)
+SELECT *
+FROM dedup
+WHERE rn = 1
+ORDER BY prioridade ASC, data_publicacao DESC NULLS LAST
 LIMIT 200
 ```
 
-2. **Se rua < limite, complementa com BAIRRO**
-```sql
--- restante = limite - qtd_rua
-SELECT * FROM vivareal 
-WHERE cidade='Campinas' AND bairro='Jardim Guanabara' 
-  AND tipo='casa' AND finalidade='venda' 
-LIMIT restante
-```
-Remove duplicatas que já vieram na rua.
+Pontos-chave:
+- **`ROW_NUMBER() PARTITION BY <chave_dedup>`** deduplica já no SQL. A `<chave_dedup>`
+  é: `url` → senão `__listing__<listing_id>` → senão um fingerprint amplo
+  (cidade+bairro+rua+tipo+preço+área+quartos+título+data+fotos). Isso evita que
+  URLs NULL caiam todas na mesma partição.
+- **`ROW_NUMBER` também é aplicado em `buscar_cidade`** (fallback por cidade),
+  então nenhuma consulta retorna URLs duplicadas.
+- Quando não há rua, a prioridade é fixada em 1 (só bairro).
 
-3. **Se TODOS os tipos retornaram 0 → expande pra CIDADE**
-```sql
-SELECT * FROM vivareal 
-WHERE cidade='Campinas' AND tipo='casa' AND finalidade='venda' 
-LIMIT 200
-```
+### Comparação tolerante a acento/caixa/prefixo (no próprio SQL)
+
+A normalização acontece **dentro da query**, não em tentativas sequenciais. Cada
+campo comparado passa por `lower()` + `translate()` (remove os acentos mais comuns)
++ `regexp_replace` (normaliza pontuação/espaços). As condições usam variantes com
+`=` e `LIKE` combinadas por `OR`:
+
+- **Bairro**: compara a forma canônica (ex.: "jardim guanabara"), a forma abreviada
+  do prefixo ("jd guanabara") e a forma sem prefixo ("guanabara", só como igualdade
+  para não confundir "Jardim Guanabara" com "Vila Guanabara").
+- **Rua**: compara o nome completo, a chave sem prefixo (sem "rua"/"av"/etc.) e a
+  última palavra (≥4 chars) como `LIKE`, cobrindo abreviações
+  ("R. Dr. Liraucio Gomes" ≈ "Rua Doutor Liraucio Gomes").
+
+Como o `translate()` remove acentos dos dois lados da comparação, o problema antigo
+de "Cambui" ≠ "Cambuí" **deixou de existir**: a busca funciona com ou sem acento no
+input e no banco.
 
 ### Quando o fallback cidade ativa
 
-Só quando **nenhum tipo** encontrou nada (rua + bairro = 0 para TODOS). Exemplo: bairro digitado errado ou não existe no banco.
-
-Se pelo menos 1 tipo trouxe resultados, o fallback cidade NÃO ativa.
-
-### Normalização de acentos
-
-As funções `buscar_rua` e `buscar_bairro` tentam múltiplas variações para lidar com diferenças de acentuação entre o input do usuário e o banco:
-
-**buscar_bairro** (3 tentativas sequenciais):
-1. Nome exato como informado → `bairro = 'Cambuí'`
-2. Sem acento → `bairro = 'Cambui'`
-3. LIKE com parte final (sem prefixos "Jardim", "Vila", "Parque") → `bairro LIKE '%Guanabara%'`
-
-**buscar_rua** (3 tentativas sequenciais):
-1. Nome completo → `rua LIKE '%Rua Doutor Liraucio Gomes%'`
-2. Sem acento → `rua LIKE '%Rua Doutor Liraucio Gomes%'` (se diferente)
-3. Só a parte final (última palavra, ≥4 chars) → `rua LIKE '%Gomes%'`
-
-**Cobertura:**
-- ✅ Input com acento + banco com acento → match direto
-- ✅ Input com acento + banco sem acento → fallback sem acento
-- ✅ Input sem acento + banco sem acento → match direto
-- ✅ Rua com acento diferente → fallback parte final (ex: "Liraucio" → busca "Gomes")
-- ⚠️ Bairro sem acento + banco com acento → pode falhar, expande pra cidade
-
-**Limitação:** Athena/Presto não ignora acentos no LIKE. Se "Cambui" ≠ "Cambuí", a busca falha. Solução: a interface deve preservar acentos.
-
-### Exemplo real (Jardim Eulina, Campinas — house)
-
-```
-casa:                        96 rua + 92 bairro = 188 (limite 200)
-two_story_house:             0
-village_house:               0
-residential_allotment_land:  0 rua + 60 bairro = 60 (limite 60)
-allotment_land:              0 rua + 8 bairro = 8 (limite 60)
-Total: 177 (após dedup)
-Ordenação: 48 na rua | 129 no bairro
-```
-### Exemplo real (Cambuí, Campinas — apartment)
-
-```
-apartamento: 25 rua + 169 bairro = 194 (limite 200)
-flat:        0 rua + 1 bairro = 1 (limite 50)
-cobertura:   0 rua + 10 bairro = 10 (limite 50)
-Total: 199 (após dedup)
-Ordenação: 23 na rua | 176 no bairro
-```
+Só quando **nenhum tipo** encontrou nada localmente (rua + bairro = 0 para TODOS os
+subtipos). Nesse caso, todos os subtipos são reconsultados por cidade inteira
+(também com `ROW_NUMBER` para não duplicar). Se pelo menos 1 subtipo trouxe
+resultado local, o fallback cidade NÃO ativa.
 
 ---
 
@@ -140,10 +128,12 @@ Ordenação: 23 na rua | 176 no bairro
 
 Só roda se o total do Athena ficou **< 10 imóveis**.
 
-| Portal | URL | Max itens |
-|--------|-----|-----------|
-| VivaReal | `/venda/{estado}/{cidade}/bairros/{bairro}/{tipo}/` | 30 |
-| LugarCerto | `/busca/compra-e-venda/{estado}/{cidade}/{bairro}/{tipo}` | 30 |
+| Portal | URL |
+|--------|-----|
+| VivaReal | `/venda/{estado}/{cidade}/bairros/{bairro}/{tipo}/` |
+| LugarCerto | `/busca/compra-e-venda/{estado}/{cidade}/{bairro}/{tipo}` |
+
+**Máximo de itens por URL (por tipo):** casa = 20 · terreno = 10 · apartamento = 30.
 
 Usa o actor `ocrad/brazil-real-estate-scraper` no Apify:
 - Envia URLs de listagem
@@ -152,9 +142,17 @@ Usa o actor `ocrad/brazil-real-estate-scraper` no Apify:
 
 Depois acessa cada URL individual com `requests.get` para extrair:
 - `publishedAt` (data publicação) do JSON embutido no HTML do VivaReal
-- `description`, `bathrooms`, `parkingSpaces`
+- `description`, `bathrooms`, `parkingSpaces`, `street`/`streetNumber`
+- `images` (hashes das fotos do VivaReal → URLs canônicas 870x653)
 
-**Portais desativados:** OLX (Cloudflare), ImovelWeb (não retorna), MercadoLivre (não retorna), ZAP (95% duplicata do VivaReal).
+Cada imóvel do Apify é registrado individualmente no log, com resumo ao final:
+
+```
+[Ag1][Apify][Fotos] id=... | portal=VivaReal | fotos_retornadas=X | fotos_validas=X
+[Ag1][Apify][Resumo Fotos] imoveis=X | com_fotos=X | sem_fotos=X | total_fotos=X
+```
+
+**Portais desativados:** OLX (Cloudflare), ImovelWeb (não retorna), MercadoLivre (não retorna), ZAP (95% duplicata do VivaReal). Só VivaReal e LugarCerto estão ativos.
 
 ---
 
@@ -199,13 +197,34 @@ Athena primeiro na lista.
 
 ---
 
-## ETAPA 5 — Filtros
+## ETAPA 5 — Filtros e Deduplicação com Merge
 
 | Filtro | O que remove |
 |--------|-------------|
-| **Leilão** | Título contém: "leilão", "hasta publica", "judicial", "caixa economica", "lance inicial", etc. |
-| **Campos obrigatórios** | Não tem `price` OU não tem `city`/`neighborhood` |
-| **Duplicatas URL** | Mesma URL aparece mais de 1 vez → fica só 1 |
+| **Leilão** | Título, tipo **ou descrição** contêm: "leilão", "hasta publica", "judicial", "arrematação", "caixa economica", "lance inicial", etc. (muitos leilões só se revelam na descrição) |
+| **Campos obrigatórios** | Não tem `price` (> 0) OU não tem `city`/`neighborhood` |
+
+### Deduplicação com merge (não descarta — combina)
+
+Quando dois registros são o mesmo imóvel, eles são **fundidos** em vez de descartados.
+O merge preserva o registro mais completo: une as fotos (até 30, sem repetir), mantém
+a descrição/título mais longos e preenche campos vazios (lat/lon, publishedAt,
+banheiros, vagas etc.). São 3 passos, nesta ordem:
+
+1. **ID com namespace da fonte** — `<fonte>::<listing_id>`. O namespace evita colisão
+   de IDs entre portais; Athena/S3 e VivaReal compartilham o namespace `vivareal`,
+   permitindo casar os dois. IDs que na verdade são URLs ficam para o passo 2.
+2. **URL normalizada** — remove parâmetros de tracking (`utm_*`, `gclid`, `fbclid`,
+   `ref` etc.), barra final e normaliza domínio/protocolo antes de comparar.
+3. **Fingerprint conservadora** — só para registros sem ID e sem URL. Exige
+   título + fonte + localização + preço + área para não gerar falso positivo.
+
+Essa deduplicação roda logo após combinar rua + bairro no Athena, novamente após
+combinar Athena + Apify, e um diagnóstico é emitido antes do merge com o Apify:
+
+```
+[Ag1][Athena][Dedup-Diag] total=X | ids=Y | ids_duplicados=Z
+```
 
 ---
 
@@ -318,9 +337,9 @@ Imóveis sem fotos: `requests.get` na URL do VivaReal para extrair imagens do HT
 
 | Pacote/Serviço | Uso | Configuração |
 |---|---|---|
-| `boto3` | Consultas Athena | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` no `.env` |
+| `boto3` | Consultas Athena | Cadeia padrão de credenciais (env `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, perfil `~/.aws`, SSO ou IAM Role). Região via `AWS_REGION` (default `us-east-2`). Opcionais: `ATHENA_DATABASE`, `ATHENA_OUTPUT_LOCATION`, `ATHENA_WORKGROUP` |
 | `requests` | Enriquecimento HTML + API Apify | Nenhuma |
-| Apify (ocrad) | Scraping portais (fallback) | `APIFY_TOKEN_2` no `.env` |
+| Apify (ocrad) | Scraping portais (fallback) | `APIFY_TOKEN_2` (ou `APIFY_TOKEN`) no `.env` |
 
 ---
 
