@@ -8,8 +8,10 @@ Analisa fotos e descrição dos imóveis comparáveis para determinar estado de 
 
 ## Entrada
 
-- `data/zona_homogenea_ag2.json` — pega imóveis com `cluster="A"` E `classificacao_zona="na_zona"`
+- `data/zona_homogenea_ag2.json` — pega imóveis com `cluster="A"` E (`classificacao_zona="na_zona"` OU `incluido_por_fallback_zona`)
 - Fallback: `data/imoveis_comparaveis_ag2.json` — pega Cluster A sem filtro de zona
+
+> O `incluido_por_fallback_zona` cobre imóveis `zona_nao_verificada` que o Agente 2 anexa aos confirmados quando a amostra na zona fica escassa (Opção B), com `confianca_zona="baixa"`.
 
 ---
 
@@ -17,7 +19,7 @@ Analisa fotos e descrição dos imóveis comparáveis para determinar estado de 
 
 ```
 1. Carrega zona_homogenea_ag2.json
-2. Filtra: cluster="A" E classificacao_zona="na_zona"
+2. Filtra: cluster="A" E (classificacao_zona="na_zona" OU incluido_por_fallback_zona)
 3. Para cada imóvel:
      a. Seleciona até 8 fotos espaçadas uniformemente
      b. Monta prompt (título + descrição + campos + fotos)

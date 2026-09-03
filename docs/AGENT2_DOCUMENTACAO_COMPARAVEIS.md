@@ -37,6 +37,23 @@ Os terrenos ficam no resultado final com `cluster="terreno"` e **passam pela mes
 
 ---
 
+## Pré-classificação objetiva (antes do score/LLM)
+
+Cada imóvel construído passa por um filtro Python **eliminatório e objetivo** que reprova candidatos claramente incompatíveis antes de gastar tempo/quota de LLM. Regras:
+
+- **Área construída** difere mais que o limite (padrão **30%**) da área do alvo → incompatível.
+- **Área de terreno** (só quando o alvo é casa/sobrado) difere mais que o limite → incompatível.
+- **Divergência explícita** em característica objetiva (piscina, churrasqueira, área gourmet, quintal, varanda, elevador, portaria, academia, salão de festas, playground, armários planejados) → incompatível. Só elimina quando há evidência contrária (alvo tem, candidato explicitamente não tem, ou vice-versa).
+- **Dado ausente nunca elimina** — ausência é tratada como "desconhecido".
+
+Os reprovados vão direto para o Cluster B com `status_julgamento="REPROVADO_PRE_CLASSIFICACAO"` e não são enviados à LLM.
+
+### Relaxamento adaptativo do limite de área
+
+Um corte fixo de 30% pode estrangular a amostra em bairros com poucos anúncios. Por isso, se a pré-classificação com 30% deixar **menos de 8 elegíveis** (`MIN_ELEGIVEIS_PRE_CLASSIFICACAO`), ela é refeita com um limite mais generoso de **45%** (`LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO`). As características eliminatórias continuam valendo nos dois casos. O limite realmente usado e se houve relaxamento ficam registrados no resumo (`regra_area_percentual`, `regra_area_percentual_padrao`, `relaxamento_area_acionado`).
+
+---
+
 ## ETAPA 2 — Score Numérico (instantâneo, sem LLM)
 
 Para cada imóvel construído, calcula score 0.0 a 1.0:
@@ -142,13 +159,25 @@ Valida geograficamente quais imóveis estão na mesma vizinhança.
    - **raio sugerido** livre em metros + justificativa
    - descrição da zona e confiança
    - A resposta só é aceita se trouxer **todos os 8 campos** obrigatórios preenchidos; caso contrário, tenta o próximo provider (mesmo rigor do clustering). O Groq usa JSON Schema Mode.
-4. **Usa lat/lon do Athena** direto para cada imóvel (não geocodifica de novo)
+4. **Geocodifica cada imóvel** do mais preciso ao menos preciso: usa lat/lon do Athena quando existem; senão tenta rua+número, depois rua, depois **bairro** (centróide do bairro). Sem nenhuma opção → `zona_nao_verificada`.
 5. **Calcula distância** (Haversine) de cada imóvel ao alvo
 6. **Classifica:**
    - `na_zona` = distância ≤ raio sugerido
-   - `fora_zona` = distância > raio
-   - `zona_nao_verificada` = sem coordenadas nem geocodificação (não assume na_zona)
+   - `fora_zona` = distância > raio, **quando a posição do imóvel é conhecida** (nível rua/número ou lat/lon próprios)
+   - `zona_nao_verificada` = sem geocodificação **ou** geocodificado só no nível bairro e fora do raio (ver regra abaixo)
 7. **Cluster A + terrenos** vão para validação geográfica (Cluster B não vai)
+
+### Geocodificação por bairro e o `zona_nao_verificada`
+
+Muitos imóveis não têm rua nem coordenada própria (é comum a coleta trazer só o bairro). Nesses casos a geocodificação cai no **centróide do bairro**, que é uma aproximação — todos os imóveis do mesmo bairro caem no mesmo ponto. A regra evita afirmar coisas que não sabemos:
+
+- **Bairro dentro do raio** → `na_zona`. Se o próprio bairro pertence à zona homogênea do alvo, é razoável presumir que o imóvel também está.
+- **Bairro fora do raio** → `zona_nao_verificada` (nunca `fora_zona`). A posição real é desconhecida; não afirmamos que está fora, apenas que não foi possível confirmar.
+- `fora_zona` fica reservado para imóveis cuja posição **é conhecida** (rua/número ou lat/lon próprios) e está de fato além do raio.
+
+### Fallback de amostra escassa (Opção B)
+
+Quando a validação geográfica confirma **menos de 3** comparáveis na zona (`MIN_CONFIRMADOS_ZONA`), os imóveis `zona_nao_verificada` são anexados a `comparaveis_confirmados` para que os Agentes 3 e 5 não fiquem sem amostra. Esses imóveis recebem `incluido_por_fallback_zona=true` e `confianca_zona="baixa"`, e o acionamento é registrado em `resumo_zona.fallback_zona_acionado`. A mesma política vale para terrenos: se nenhum terreno é confirmado na zona, os terrenos não verificados entram como fallback. Havendo confirmados suficientes, o fallback **não** é acionado e nada de baixa confiança é misturado.
 
 ### Raio livre com barreira de sanidade
 
@@ -215,19 +244,35 @@ A LLM escolhe o raio livremente (437, 615, 882, 1340...). Não há lista fixa. S
       "classificacao_zona": "na_zona",
       "distancia_metros": 250,
       // + todos os campos do imóvel
+    },
+    {
+      "cluster": "A",
+      "classificacao_zona": "zona_nao_verificada",
+      "incluido_por_fallback_zona": true,   // entrou via Opção B (amostra escassa)
+      "confianca_zona": "baixa",
+      // + todos os campos do imóvel
     }
   ],
   "fora_zona": [ ... ],
-  "coordenadas_alvo": { "lat": -22.884, "lon": -47.059 }
+  "comparaveis_nao_verificados": [ ... ],
+  "coordenadas_alvo": { "lat": -22.884, "lon": -47.059 },
+  "resumo_zona": {
+    "raio_usado_metros": 700,
+    "confirmados": 1,
+    "fora_zona": 5,
+    "nao_verificados": 3,
+    "fallback_zona_acionado": true,
+    "min_confirmados_desejado": 3
+  }
 }
 ```
 
-O JSON também traz `terrenos_confirmados`, `terrenos_fora_zona` e `terrenos_nao_verificados`. Os terrenos confirmados são incluídos em `comparaveis_confirmados` (o Agente 5 separa por tipo ao ler).
+O JSON também traz `terrenos_confirmados`, `terrenos_fora_zona` e `terrenos_nao_verificados`. Os terrenos confirmados são incluídos em `comparaveis_confirmados` (o Agente 5 separa por tipo ao ler). Quando nenhum terreno é confirmado na zona, os não verificados entram por fallback (mesma flag `incluido_por_fallback_zona`).
 
 **Usado por:**
-- **Agente 3** → pega `comparaveis_confirmados` com cluster=A + na_zona → analisa fotos/descrição
+- **Agente 3** → pega `comparaveis_confirmados` com cluster=A e (`na_zona` **ou** `incluido_por_fallback_zona`) → analisa fotos/descrição
 - **Agente 4** → pega `coordenadas_alvo` (lat/lon) → busca POIs no entorno
-- **Agente 5** → pega `comparaveis_confirmados` (construídos + terrenos validados na zona) → calcula preço
+- **Agente 5** → pega `comparaveis_confirmados` (construídos + terrenos validados na zona, incluindo os de fallback) → calcula preço
 
 > Isolamento por `run_id`: quando uma avaliação usa `run_id`, o Agente 2 lê a entrada **apenas** da pasta daquela execução. Nunca cai no arquivo global, evitando misturar dados de avaliações diferentes.
 

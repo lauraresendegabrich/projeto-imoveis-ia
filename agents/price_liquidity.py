@@ -267,8 +267,9 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
     """
     Le os JSONs dos agentes anteriores e retorna:
     - imovel_alvo (dict)
-    - terrenos_zona (list) — terrenos com classificacao_zona='na_zona'
-    - comparaveis_zona (list) — imoveis construidos na zona
+    - terrenos_zona (list) — terrenos confirmados na zona (ou anexados por fallback
+      quando nenhum foi confirmado — ver Opcao B no Agente 2)
+    - comparaveis_zona (list) — imoveis construidos na zona (inclui os de fallback)
     - dados_ag3 (dict) — resultado completo do agente 3
     - dados_ag4 (dict) — resultado completo do agente 4
     """

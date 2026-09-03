@@ -103,7 +103,7 @@ FLUXO COMPLETO:
 
 QUEM USA A SAIDA:
 ─────────────────
-    Agente 3 -> zona_homogenea_ag2.json (Cluster A + na_zona -> analisa fotos)
+    Agente 3 -> zona_homogenea_ag2.json (Cluster A na_zona/fallback -> analisa fotos)
     Agente 4 -> zona_homogenea_ag2.json (coordenadas_alvo -> busca POIs)
     Agente 5 -> zona_homogenea_ag2.json (comparaveis_confirmados + terrenos -> preco)
     Interface -> satelite_zona_homogenea_ag2.png
@@ -128,6 +128,21 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 RAIO_FALLBACK_METROS = 500
 TOP_N_FALLBACK_PYTHON = 20
+
+# Pre-classificacao de area (Agente 2).
+# Limite padrao: candidato incompativel quando a area difere mais que isto do alvo.
+LIMITE_AREA_PRE_CLASSIFICACAO = 0.30
+# Relaxamento adaptativo: se o limite padrao deixar menos elegiveis que este minimo,
+# a pre-classificacao e refeita com um limite mais generoso (abaixo) para nao
+# estrangular a amostra em bairros com poucos anuncios comparaveis.
+MIN_ELEGIVEIS_PRE_CLASSIFICACAO = 8
+LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO = 0.45
+
+# Zona homogenea: minimo de comparaveis confirmados (na_zona) desejado.
+# Se a validacao geografica confirmar menos que isto, os imoveis "zona_nao_verificada"
+# (geocodificados por bairro fora do raio, sem posicao propria) sao anexados como
+# fallback de baixa confianca, para nao deixar o Agente 3/5 sem amostra (Opcao B).
+MIN_CONFIRMADOS_ZONA = 3
 
 # Barreira de sanidade para o raio livre escolhido pela LLM de visao.
 # A LLM continua livre para escolher qualquer valor (437, 615, 882, 1340...),
@@ -435,19 +450,29 @@ def _calcular_estatisticas_areas(candidatos: list[dict], imovel_alvo: dict) -> d
     }
 
 
-def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | None = None) -> dict:
+def _pre_classificar(
+    alvo: dict,
+    candidato: dict,
+    caracteristicas_alvo: dict | None = None,
+    limite_area_pct: float = LIMITE_AREA_PRE_CLASSIFICACAO,
+) -> dict:
     """
     Pre-classificacao objetiva e eliminatoria.
 
     Regras finais combinadas:
-      - diferenca de area construida > 30% em relacao ao alvo -> incompatível;
-      - para casas, diferenca de area de terreno > 30% -> incompatível;
+      - diferenca de area construida > limite_area_pct em relacao ao alvo -> incompatível;
+      - para casas, diferenca de area de terreno > limite_area_pct -> incompatível;
       - divergencia explicita em qualquer caracteristica objetiva -> incompatível;
       - dado ausente/desconhecido nunca elimina.
+
+    O limite de area e parametrizavel para permitir um relaxamento adaptativo
+    quando a pre-classificacao rigida deixa poucos elegiveis (ver identificar_comparaveis).
     """
     if caracteristicas_alvo is None:
         caracteristicas_alvo = _extrair_caracteristicas(alvo)
     caracteristicas_candidato = _extrair_caracteristicas(candidato)
+
+    limite_pct_int = round(limite_area_pct * 100)
 
     motivos = []
     comparacoes_realizadas = 0
@@ -459,10 +484,10 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
     if area_alvo is not None and area_cand is not None:
         comparacoes_realizadas += 1
         diferenca_area_pct = abs(area_cand - area_alvo) / area_alvo
-        if diferenca_area_pct > 0.30:
+        if diferenca_area_pct > limite_area_pct:
             motivos.append(
                 f"area construida difere {diferenca_area_pct*100:.1f}% do alvo "
-                f"({area_cand:.1f}m² vs {area_alvo:.1f}m²; limite 30%)"
+                f"({area_cand:.1f}m² vs {area_alvo:.1f}m²; limite {limite_pct_int}%)"
             )
 
     terreno_aplicavel = _eh_casa(alvo)
@@ -474,10 +499,10 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
     if terreno_aplicavel and area_terreno_alvo is not None and area_terreno_cand is not None:
         comparacoes_realizadas += 1
         diferenca_terreno_pct = abs(area_terreno_cand - area_terreno_alvo) / area_terreno_alvo
-        if diferenca_terreno_pct > 0.30:
+        if diferenca_terreno_pct > limite_area_pct:
             motivos.append(
                 f"area de terreno difere {diferenca_terreno_pct*100:.1f}% do alvo "
-                f"({area_terreno_cand:.1f}m² vs {area_terreno_alvo:.1f}m²; limite 30%)"
+                f"({area_terreno_cand:.1f}m² vs {area_terreno_alvo:.1f}m²; limite {limite_pct_int}%)"
             )
 
     divergencias_caracteristicas = []
@@ -509,13 +534,13 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
             "alvo": area_alvo,
             "candidato": area_cand,
             "diferenca_percentual": round(diferenca_area_pct * 100, 2) if diferenca_area_pct is not None else None,
-            "limite_percentual": 30,
+            "limite_percentual": limite_pct_int,
         },
         "area_terreno": {
             "alvo": area_terreno_alvo,
             "candidato": area_terreno_cand,
             "diferenca_percentual": round(diferenca_terreno_pct * 100, 2) if diferenca_terreno_pct is not None else None,
-            "limite_percentual": 30,
+            "limite_percentual": limite_pct_int,
             "aplicavel": terreno_aplicavel,
         },
         "caracteristicas_alvo": caracteristicas_alvo,
@@ -1275,25 +1300,100 @@ def identificar_comparaveis(
     terreno_alvo = _obter_area_terreno(imovel_alvo) if _eh_casa(imovel_alvo) else None
     caracteristicas_alvo = _extrair_caracteristicas(imovel_alvo)
 
-    # 4. Pre-classificacao
-    elegiveis = []
-    incompativeis_pre = []
-    for im in filtrados:
-        pre = _pre_classificar(imovel_alvo, im, caracteristicas_alvo=caracteristicas_alvo)
-        im["pre_classificacao"] = pre
-        if pre["elegivel_llm"]:
-            elegiveis.append(im)
-        else:
-            im["cluster"] = "B"
-            im["status_julgamento"] = "REPROVADO_PRE_CLASSIFICACAO"
-            im["ranking_llm"] = None
-            im["score_llm"] = None
-            im["classificado_por"] = "python_pre_classificacao"
-            im["provider_llm"] = None
-            im["modelo_llm"] = None
-            motivos = pre.get("motivos_incompatibilidade") or []
-            im["justificativa"] = "Pre-classificacao: " + "; ".join(motivos)
-            incompativeis_pre.append(im)
+    # 4. Pre-classificacao (com relaxamento adaptativo do limite de area).
+    #
+    # Primeiro roda com o limite padrao (30%). Se sobrarem poucos elegiveis, um
+    # corte rigido pode estar estrangulando a amostra em bairros com poucos
+    # anuncios; nesse caso refaz a pre-classificacao com um limite mais generoso
+    # (45%). As caracteristicas eliminatorias continuam valendo em ambos os casos.
+    def _rodar_pre_classificacao(limite_area_pct: float):
+        aprovados = []
+        reprovados = []
+        for im in filtrados:
+            pre = _pre_classificar(
+                imovel_alvo, im,
+                caracteristicas_alvo=caracteristicas_alvo,
+                limite_area_pct=limite_area_pct,
+            )
+            im["pre_classificacao"] = pre
+            if pre["elegivel_llm"]:
+                aprovados.append(im)
+            else:
+                reprovados.append(im)
+        return aprovados, reprovados
+
+    limite_area_usado = LIMITE_AREA_PRE_CLASSIFICACAO
+    elegiveis, incompativeis_pre = _rodar_pre_classificacao(limite_area_usado)
+
+    if len(elegiveis) < MIN_ELEGIVEIS_PRE_CLASSIFICACAO and len(filtrados) > len(elegiveis):
+        logger.info(
+            f"[Ag2][PreClassificacao] apenas {len(elegiveis)} elegiveis com limite "
+            f"{round(LIMITE_AREA_PRE_CLASSIFICACAO*100)}%; relaxando para "
+            f"{round(LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO*100)}% (minimo desejado="
+            f"{MIN_ELEGIVEIS_PRE_CLASSIFICACAO})"
+        )
+        limite_area_usado = LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO
+        elegiveis, incompativeis_pre = _rodar_pre_classificacao(limite_area_usado)
+        logger.info(
+            f"[Ag2][PreClassificacao] apos relaxamento: elegiveis={len(elegiveis)} | "
+            f"reprovados={len(incompativeis_pre)}"
+        )
+
+    # Anota os reprovados com os campos padrao de descarte.
+    for im in incompativeis_pre:
+        pre = im.get("pre_classificacao") or {}
+        im["cluster"] = "B"
+        im["status_julgamento"] = "REPROVADO_PRE_CLASSIFICACAO"
+        im["ranking_llm"] = None
+        im["score_llm"] = None
+        im["classificado_por"] = "python_pre_classificacao"
+        im["provider_llm"] = None
+        im["modelo_llm"] = None
+        motivos = pre.get("motivos_incompatibilidade") or []
+        im["justificativa"] = "Pre-classificacao: " + "; ".join(motivos)
+
+    # 4b. Detalhamento auditavel dos reprovados: quantos cairam por cada motivo
+    # e quais caracteristicas mais eliminaram. Um imovel pode ter mais de um motivo.
+    logger.info(
+        f"[Ag2][PreClassificacao] limite_area={round(limite_area_usado*100)}% | "
+        f"area_alvo={area_alvo}m2 | terreno_alvo={terreno_alvo}m2 | "
+        f"elegiveis={len(elegiveis)} | reprovados={len(incompativeis_pre)}"
+    )
+    if incompativeis_pre:
+        por_area = por_terreno = por_caracteristica = 0
+        contagem_caracteristicas: dict[str, int] = {}
+        for im in incompativeis_pre:
+            pre = im.get("pre_classificacao") or {}
+            dif_area = (pre.get("area_construida") or {}).get("diferenca_percentual")
+            lim_area = (pre.get("area_construida") or {}).get("limite_percentual")
+            dif_terr = (pre.get("area_terreno") or {}).get("diferenca_percentual")
+            lim_terr = (pre.get("area_terreno") or {}).get("limite_percentual")
+            divergencias = pre.get("divergencias_caracteristicas") or []
+            if dif_area is not None and lim_area is not None and dif_area > lim_area:
+                por_area += 1
+            if dif_terr is not None and lim_terr is not None and dif_terr > lim_terr:
+                por_terreno += 1
+            if divergencias:
+                por_caracteristica += 1
+                for nome in divergencias:
+                    contagem_caracteristicas[nome] = contagem_caracteristicas.get(nome, 0) + 1
+        logger.info(
+            f"[Ag2][PreClassificacao] motivos da reprovacao (podem se sobrepor): "
+            f"area_construida>{round(limite_area_usado*100)}%={por_area} | "
+            f"area_terreno>{round(limite_area_usado*100)}%={por_terreno} | "
+            f"caracteristica_divergente={por_caracteristica}"
+        )
+        if contagem_caracteristicas:
+            top = sorted(contagem_caracteristicas.items(), key=lambda kv: kv[1], reverse=True)
+            detalhe = " | ".join(f"{nome}={qtd}" for nome, qtd in top)
+            logger.info(f"[Ag2][PreClassificacao] caracteristicas que mais eliminaram: {detalhe}")
+        # Amostra dos primeiros reprovados com a justificativa completa, para auditoria.
+        for im in incompativeis_pre[:5]:
+            ident = im.get("listing_id") or im.get("id") or im.get("url") or "?"
+            motivos_txt = "; ".join((im.get("pre_classificacao") or {}).get("motivos_incompatibilidade") or [])
+            logger.info(f"  [reprovado] id={ident} | {motivos_txt}")
+        if len(incompativeis_pre) > 5:
+            logger.info(f"  [reprovado] ... e mais {len(incompativeis_pre) - 5} imovel(is)")
 
     # 5. Score Python robusto; preserva campo legado e novo campo auditavel.
     for im in filtrados:
@@ -1387,7 +1487,9 @@ def identificar_comparaveis(
         "total_construidos": len(filtrados),
         "elegiveis_apos_pre_classificacao": len(elegiveis),
         "incompativeis_pre_classificacao": len(incompativeis_pre),
-        "regra_area_percentual": 30,
+        "regra_area_percentual": round(limite_area_usado * 100),
+        "regra_area_percentual_padrao": round(LIMITE_AREA_PRE_CLASSIFICACAO * 100),
+        "relaxamento_area_acionado": limite_area_usado != LIMITE_AREA_PRE_CLASSIFICACAO,
         "caracteristicas_eliminatorias": list(CARACTERISTICAS_PRE_CLASSIFICACAO.keys()),
         "estatisticas_areas": estatisticas_areas,
         "referencia_alvo": {"area_construida": area_alvo, "area_terreno": terreno_alvo},
@@ -2016,13 +2118,23 @@ def _classificar_imovel_na_zona(
         return "zona_nao_verificada"
 
     dist = _distancia_haversine(lat_alvo, lon_alvo, lat, lon)
-    classificacao = _classificar_por_distancia(dist, raio)
     im["distancia_metros"] = round(dist)
-    im["classificacao_zona"] = classificacao
     im["coordenadas"] = {"lat": lat, "lon": lon}
     im["geocodificacao_nivel"] = nivel
     im["endereco_geocodificado"] = endereco_usado
     im["confianca_geocodificacao"] = "baixa" if nivel == "bairro" else "alta"
+
+    # A geocodificacao no nivel bairro usa o centroide do bairro como aproximacao
+    # da posicao do imovel (nao ha rua/coordenada propria). A regra:
+    #   - se o centroide do bairro cai DENTRO do raio da zona, aceitamos como
+    #     na_zona (o bairro em si pertence a zona homogenea do alvo);
+    #   - se cai FORA do raio, nao afirmamos que o imovel esta fora (a posicao
+    #     real e desconhecida): marcamos zona_nao_verificada, categoria que nao
+    #     descarta o imovel e permite recupera-lo depois via fallback (Opcao B).
+    classificacao = _classificar_por_distancia(dist, raio)
+    if nivel == "bairro" and classificacao == "fora_zona":
+        classificacao = "zona_nao_verificada"
+    im["classificacao_zona"] = classificacao
     return classificacao
 
 
@@ -2149,23 +2261,68 @@ def analisar_zona_homogenea(
     zona = raio_zona or zona or {}
     raio = zona.get("raio_metros", RAIO_FALLBACK_METROS)
 
+    # Rotulos amigaveis para o nivel de geocodificacao registrado em cada imovel.
+    _ROTULO_NIVEL_GEO = {
+        "coordenadas_athena": "coord_propria",   # lat/lon veio da fonte, mais preciso
+        "endereco_completo": "endereco",
+        "rua_numero": "rua+numero",
+        "rua": "rua",
+        "bairro": "bairro(centroide)",           # aproximacao — mesmo ponto p/ todo o bairro
+        "cidade": "cidade(centroide)",
+    }
+
+    def _log_classificacao(im: dict, idx: int, total: int, classificacao: str, prefixo: str = ""):
+        """Loga a classificacao de um imovel com detalhes de como foi geolocalizado."""
+        rotulo = im.get("street") or im.get("rua") or im.get("neighborhood") or im.get("bairro") or "?"
+        nivel = im.get("geocodificacao_nivel")
+        nivel_txt = _ROTULO_NIVEL_GEO.get(nivel, nivel or "sem_geo")
+        confianca = im.get("confianca_geocodificacao") or "?"
+        dist = im.get("distancia_metros")
+        dist_txt = f"{dist}m" if dist is not None else "dist=?"
+        cabec = f"  [{prefixo}{idx}/{total}]"
+        if classificacao == "zona_nao_verificada":
+            # Mostra a distancia aproximada mesmo quando nao verificado (ajuda a auditar).
+            aprox = f" | ~{dist_txt} (centroide)" if dist is not None else ""
+            logger.info(
+                f"{cabec} zona_nao_verificada | geo={nivel_txt} | conf={confianca}{aprox} | {rotulo}"
+            )
+        else:
+            logger.info(
+                f"{cabec} {dist_txt} | {classificacao} | geo={nivel_txt} | conf={confianca} | "
+                f"raio={raio}m | {rotulo}"
+            )
+
     # 3. Geocodifica/classifica candidatos construidos
+    logger.info(f"[Ag2][Zona] classificando {len(imoveis)} comparaveis | raio={raio}m")
     confirmados = []
     fora = []
     nao_verificados = []
 
     for idx, im in enumerate(imoveis, 1):
         classificacao = _classificar_imovel_na_zona(im, lat_alvo, lon_alvo, raio, cidade, estado)
-        rotulo = im.get("street") or im.get("rua") or im.get("neighborhood") or im.get("bairro") or "?"
         if classificacao == "zona_nao_verificada":
             nao_verificados.append(im)
-            logger.info(f"  [{idx}/{len(imoveis)}] zona_nao_verificada | {rotulo}")
         elif classificacao == "na_zona":
             confirmados.append(im)
-            logger.info(f"  [{idx}/{len(imoveis)}] {im['distancia_metros']}m | na_zona | {rotulo}")
         else:
             fora.append(im)
-            logger.info(f"  [{idx}/{len(imoveis)}] {im['distancia_metros']}m | fora_zona | {rotulo}")
+        _log_classificacao(im, idx, len(imoveis), classificacao)
+
+    # Diagnostico agregado: como os comparaveis foram geolocalizados.
+    if imoveis:
+        contagem_niveis: dict[str, int] = {}
+        for im in imoveis:
+            nivel = im.get("geocodificacao_nivel") or "sem_geo"
+            contagem_niveis[nivel] = contagem_niveis.get(nivel, 0) + 1
+        niveis_txt = " | ".join(
+            f"{_ROTULO_NIVEL_GEO.get(n, n)}={q}"
+            for n, q in sorted(contagem_niveis.items(), key=lambda kv: kv[1], reverse=True)
+        )
+        logger.info(f"[Ag2][Zona] geolocalizacao dos comparaveis: {niveis_txt}")
+        logger.info(
+            f"[Ag2][Zona] comparaveis: na_zona={len(confirmados)} | "
+            f"fora_zona={len(fora)} | nao_verificados={len(nao_verificados)}"
+        )
 
     # 3b. Terrenos passam pela MESMA validacao geografica. Terreno influencia
     # diretamente a decomposicao de preco de casas no Agente 5, entao nao pode
@@ -2173,18 +2330,48 @@ def analisar_zona_homogenea(
     terrenos_confirmados = []
     terrenos_fora_zona = []
     terrenos_nao_verificados = []
+    if terrenos:
+        logger.info(f"[Ag2][Zona] classificando {len(terrenos)} terreno(s) | raio={raio}m")
     for idx, t in enumerate(terrenos, 1):
         classificacao = _classificar_imovel_na_zona(t, lat_alvo, lon_alvo, raio, cidade, estado)
-        rotulo = t.get("street") or t.get("rua") or t.get("neighborhood") or t.get("bairro") or "?"
         if classificacao == "zona_nao_verificada":
             terrenos_nao_verificados.append(t)
-            logger.info(f"  [terreno {idx}/{len(terrenos)}] zona_nao_verificada | {rotulo}")
         elif classificacao == "na_zona":
             terrenos_confirmados.append(t)
-            logger.info(f"  [terreno {idx}/{len(terrenos)}] {t['distancia_metros']}m | na_zona | {rotulo}")
         else:
             terrenos_fora_zona.append(t)
-            logger.info(f"  [terreno {idx}/{len(terrenos)}] {t['distancia_metros']}m | fora_zona | {rotulo}")
+        _log_classificacao(t, idx, len(terrenos), classificacao, prefixo="terreno ")
+
+    # 3c. Fallback de baixa confianca (Opcao B).
+    # Quando poucos comparaveis foram confirmados geograficamente, os imoveis
+    # "zona_nao_verificada" (posicao real desconhecida) sao anexados a lista de
+    # confirmados para que os Agentes 3/5 tenham amostra suficiente. Eles ficam
+    # marcados para que a jusante saiba que entraram por fallback, com confianca baixa.
+    fallback_zona_acionado = False
+    confirmados_efetivos = list(confirmados)
+    terrenos_efetivos = list(terrenos_confirmados)
+    if len(confirmados) < MIN_CONFIRMADOS_ZONA and nao_verificados:
+        fallback_zona_acionado = True
+        logger.info(
+            f"[Ag2][Zona] apenas {len(confirmados)} confirmados na zona (minimo desejado="
+            f"{MIN_CONFIRMADOS_ZONA}); anexando {len(nao_verificados)} nao_verificados "
+            f"como fallback de baixa confianca"
+        )
+        for im in nao_verificados:
+            im["incluido_por_fallback_zona"] = True
+            im["confianca_zona"] = "baixa"
+        confirmados_efetivos = confirmados + nao_verificados
+    # Terrenos seguem a mesma politica: sem terreno confirmado, usa os nao verificados.
+    if not terrenos_confirmados and terrenos_nao_verificados:
+        fallback_zona_acionado = True
+        logger.info(
+            f"[Ag2][Zona] nenhum terreno confirmado na zona; anexando "
+            f"{len(terrenos_nao_verificados)} terreno(s) nao_verificado(s) como fallback"
+        )
+        for t in terrenos_nao_verificados:
+            t["incluido_por_fallback_zona"] = True
+            t["confianca_zona"] = "baixa"
+        terrenos_efetivos = list(terrenos_nao_verificados)
 
     status = "ok"
     if nao_verificados:
@@ -2199,12 +2386,13 @@ def analisar_zona_homogenea(
         "status": status,
         "run_id": _sanitizar_run_id(run_id),
         "zona_homogenea": zona,
-        "comparaveis_confirmados": confirmados + terrenos_confirmados,
+        "comparaveis_confirmados": confirmados_efetivos + terrenos_efetivos,
         "fora_zona": fora,
         "comparaveis_nao_verificados": nao_verificados,
         # terrenos agora validados geograficamente. "terrenos" aponta para os
-        # confirmados (na zona) para o Agente 5 usar so os que sao referencia real.
-        "terrenos": terrenos_confirmados,
+        # confirmados (na zona) para o Agente 5 usar so os que sao referencia real;
+        # inclui os nao verificados apenas quando nenhum terreno foi confirmado.
+        "terrenos": terrenos_efetivos,
         "terrenos_confirmados": terrenos_confirmados,
         "terrenos_fora_zona": terrenos_fora_zona,
         "terrenos_nao_verificados": terrenos_nao_verificados,
@@ -2223,6 +2411,8 @@ def analisar_zona_homogenea(
             "terrenos_confirmados": len(terrenos_confirmados),
             "terrenos_fora_zona": len(terrenos_fora_zona),
             "terrenos_nao_verificados": len(terrenos_nao_verificados),
+            "fallback_zona_acionado": fallback_zona_acionado,
+            "min_confirmados_desejado": MIN_CONFIRMADOS_ZONA,
         },
     }
 

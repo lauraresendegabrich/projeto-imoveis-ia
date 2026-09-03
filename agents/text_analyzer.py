@@ -3,12 +3,12 @@ Agente 3 - Analisador Qualitativo de Descricao e Imagens (vocabulario controlado
 ==========================================================
 
 RESPONSABILIDADE:
-    Analisa fotos e descricao dos imoveis comparaveis (Cluster A + na_zona)
+    Analisa fotos e descricao dos imoveis comparaveis (Cluster A na zona homogenea)
     para determinar estado de conservacao, padrao de acabamento e score qualitativo.
     Usa modelos de visao multimodal (texto + imagens em uma unica chamada).
 
 ENTRADA:
-    - data/zona_homogenea_ag2.json (fonte principal — Cluster A + na_zona)
+    - data/zona_homogenea_ag2.json (fonte principal — Cluster A na/ao redor da zona)
     - data/imoveis_comparaveis_ag2.json (fallback — Cluster A sem filtro zona)
 
 SAIDA:
@@ -16,7 +16,9 @@ SAIDA:
 
 FLUXO:
     1. Carrega zona_homogenea_ag2.json (Agente 2 - Etapa 4)
-    2. Filtra: cluster="A" E classificacao_zona="na_zona"
+    2. Filtra: cluster="A" E (classificacao_zona="na_zona" OU incluido_por_fallback_zona).
+       O fallback cobre o caso de amostra escassa (Opcao B), em que imoveis
+       "zona_nao_verificada" sao anexados aos confirmados com confianca baixa.
     3. Para cada imovel:
          a. Seleciona fotos espacadas conforme o provedor (Qwen Colab 4, Gemini 4, Groq 2, NVIDIA 1)
          b. Monta prompt com titulo, descricao, campos estruturados e fotos
@@ -2064,7 +2066,8 @@ def analisar_comparaveis(
 ) -> dict:
     """
     Analisa os imoveis comparaveis do Agente 2 usando texto + fotos juntos.
-    Fonte: zona_homogenea_ag2.json - filtra cluster=A + na_zona.
+    Fonte: zona_homogenea_ag2.json - filtra cluster=A com classificacao_zona="na_zona"
+    ou incluido_por_fallback_zona (imoveis anexados por amostra escassa - Opcao B).
     """
     logger.info("=" * 60)
     logger.info("AGENTE 3: ANALISADOR TEXTUAL")
@@ -2082,12 +2085,19 @@ def analisar_comparaveis(
             with open(caminho_zona, "r", encoding="utf-8") as f:
                 dados_zona = json.load(f)
             confirmados = dados_zona.get("comparaveis_confirmados", [])
+            # Aceita imoveis na zona OU incluidos por fallback de baixa confianca
+            # (zona_nao_verificada anexados quando havia poucos confirmados — Opcao B).
             comparaveis = [
                 c for c in confirmados
-                if c.get("cluster") == "A" and c.get("classificacao_zona") == "na_zona"
+                if c.get("cluster") == "A" and (
+                    c.get("classificacao_zona") == "na_zona"
+                    or c.get("incluido_por_fallback_zona")
+                )
             ]
+            n_fallback = sum(1 for c in comparaveis if c.get("incluido_por_fallback_zona"))
             logger.info(f"zona_homogenea_ag2.json: {len(confirmados)} confirmados -> "
-                        f"{len(comparaveis)} com Cluster A + na_zona")
+                        f"{len(comparaveis)} com Cluster A + na_zona"
+                        + (f" (incluindo {n_fallback} por fallback de baixa confianca)" if n_fallback else ""))
         else:
             logger.warning(f"Zona homogenea nao disponivel — usando comparaveis do Ag. 2 direto")
             caminho_comp = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
@@ -2132,7 +2142,7 @@ def analisar_comparaveis(
         logger.info(f"Limitando de {len(comparaveis)} para {MAX_COMPARAVEIS_AG3} comparaveis (top ranking)")
         comparaveis = comparaveis[:MAX_COMPARAVEIS_AG3]
 
-    logger.info(f"Analisando {len(comparaveis)} comparaveis (Cluster A + na_zona)...")
+    logger.info(f"Analisando {len(comparaveis)} comparaveis (Cluster A na zona/fallback)...")
     com_ok = 0
     com_insuficiente = 0
 
@@ -2162,7 +2172,7 @@ def analisar_comparaveis(
         "total_analisados":       len(comparaveis),
         "analisados_ok":          com_ok,
         "descricao_insuficiente": com_insuficiente,
-        "filtro":                 "cluster=A + classificacao_zona=na_zona",
+        "filtro":                 "cluster=A + (na_zona ou fallback zona_nao_verificada)",
         "score_qualitativo_medio": round(sum(scores_finais) / len(scores_finais), 4) if scores_finais else None,
     }
 
