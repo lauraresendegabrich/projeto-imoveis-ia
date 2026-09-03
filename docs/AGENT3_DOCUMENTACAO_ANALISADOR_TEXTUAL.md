@@ -34,7 +34,7 @@ Analisa fotos e descrição dos imóveis comparáveis para determinar estado de 
 | Prioridade | Modelo | Provider | Fotos por chamada |
 |---|---|---|---|
 | 1ª | gemini-2.5-flash | Google (GOOGLE_API_KEY) | até 8 |
-| 2ª | qwen3.6-27b | Groq (GROQ_API_KEY) | até 3 |
+| 2ª | qwen3.8-27b | Groq (GROQ_API_KEY) | até 3 |
 | 3ª | llama-3.2-11b-vision | NVIDIA NIM (NVIDIA_API_KEY) | 1 por vez |
 
 Se Gemini falhar (500, timeout, etc.) → tenta Groq → tenta NVIDIA → se tudo falhar → retorna score neutro 0.50.
@@ -208,7 +208,7 @@ Se `estado=desconhecido` E `padrao=desconhecido` E `sem negativos` E `confianca=
 | Serviço | Modelo | Uso |
 |---------|--------|-----|
 | Google Gemini | gemini-2.5-flash | Análise multimodal (principal) |
-| Groq | qwen3.6-27b | Fallback multimodal |
+| Groq | qwen3.8-27b | Fallback multimodal |
 | NVIDIA NIM | llama-3.2-11b-vision | Fallback final |
 
 ---

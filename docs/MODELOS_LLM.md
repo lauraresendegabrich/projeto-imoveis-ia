@@ -5,8 +5,8 @@
 | Agente | Tarefa | Modelo Principal | Fallbacks | Provider |
 |--------|--------|-----------------|-----------|----------|
 | Ag.2 | Clustering de comparáveis | openai/gpt-oss-120b | gpt-oss-20b → Gemini 2.5 Flash → numérico | Groq |
-| Ag.2 | Zona homogênea (visão) | qwen/qwen3.6-27b | fallback regex | Groq |
-| Ag.3 | Análise qualitativa (visão) | Gemini 2.5 Flash | qwen/qwen3.6-27b → NVIDIA NIM llama-3.2-11b | Google / Groq / NVIDIA |
+| Ag.2 | Zona homogênea (visão) | qwen/qwen3.8-27b | fallback regex | Groq |
+| Ag.3 | Análise qualitativa (visão) | Gemini 2.5 Flash | qwen/qwen3.8-27b → NVIDIA NIM llama-3.2-11b | Google / Groq / NVIDIA |
 | Ag.4 | Interpretação infraestrutura | openai/gpt-oss-20b | — | Groq |
 
 ---
@@ -41,7 +41,7 @@
 
 ## Agente 2 — Zona Homogênea (visão)
 
-### Modelo: qwen/qwen3.6-27b (Groq)
+### Modelo: qwen/qwen3.8-27b (Groq)
 - Envia 1 imagem de satélite (1280x1280 JPEG 85%)
 - Limite: 20MB por request (imagem fica ~400KB)
 - Máximo 5 imagens por request (usa apenas 1)
@@ -61,7 +61,7 @@
 ```
 1. Gemini 2.5 Flash    → 8 fotos + texto (1 chamada, ~15-25s)
    ↓ se falhar (429 quota / 500 erro)
-2. Groq qwen3.6-27b   → 2 fotos + texto curto (1 chamada, ~10s)
+2. Groq qwen3.8-27b   → 2 fotos + texto curto (1 chamada, ~10s)
    ↓ se falhar (413 payload)
 3. NVIDIA NIM llama-3.2-11b → 1 foto principal + 7 extras (~30-90s)
 ```
@@ -72,7 +72,7 @@
 - Limite: 20 requests/minuto no free tier
 - Retry automático quando der 500
 
-### Groq qwen3.6-27b (fallback 1):
+### Groq qwen3.8-27b (fallback 1):
 - Aceita imagens via URL
 - Limite: 8000 tokens/minuto (TPM)
 - Usa apenas 2 fotos (primeira + do meio) pra caber no limite
@@ -106,7 +106,7 @@
 |----------|--------|--------|
 | Groq | openai/gpt-oss-120b | 200k tokens/dia |
 | Groq | openai/gpt-oss-20b | 200k tokens/dia |
-| Groq | qwen/qwen3.6-27b | 200k tokens/dia, 8k TPM |
+| Groq | qwen/qwen3.8-27b | 200k tokens/dia, 8k TPM |
 | Google | Gemini 2.5 Flash | 20 requests/minuto |
 | NVIDIA | llama-3.2-11b-vision | Sem limite documentado |
 
@@ -129,12 +129,15 @@ GOOGLE_MAPS_KEY=...        # Google Maps (imagem satélite zona homogênea)
 | 13/08/2026 | Ag.3: NVIDIA NIM → Gemini 2.5 Flash | 8 fotos por chamada, muito mais rápido |
 | 13/08/2026 | Ag.2 clustering: llama-3.3-70b → gpt-oss-120b | Llama desligado 16/08, GPT-OSS tem 200k/dia |
 | 13/08/2026 | Ag.4: llama-3.1-8b → gpt-oss-20b | Llama desligado 16/08 |
+| 03/09/2026 | Ag.2 clustering (NVIDIA fallback): meta/llama-3.3-70b-instruct → openai/gpt-oss-20b | Modelo NVIDIA morto (EOL 26/08, erro 410). gpt-oss-20b é o texto vivo no NVIDIA (120b não é servido lá) |
+| 03/09/2026 | Ag.2 zona (NVIDIA visão): google/gemma-4-31b-it → meta/llama-3.2-11b-vision-instruct | gemma-4 dava timeout/indisponível; llama-3.2-11b-vision é o VLM gratuito vivo no NVIDIA |
+| 03/09/2026 | Ag.2 e Ag.3 (visão Groq): qwen/qwen3.6-27b → qwen/qwen3.8-27b | Groq descontinuou o 3.6 (decommission 14/09/2026); 3.8-27b é o substituto oficial e aceita imagem (testado) |
 
 ---
 
 ## Observações
 
-- O qwen3.6-27b usa modo "thinking" (`<think>...</think>`) — o parser remove automaticamente
+- O qwen3.8-27b usa modo "thinking" (`<think>...</think>`) — o parser remove automaticamente
 - O Gemini pode dar 403 quando não consegue acessar URLs de imagem do VivaReal
 - O Groq free tier reseta quotas diariamente (meia-noite UTC)
 - O Gemini reseta a cada minuto (rolling window de 20 requests)

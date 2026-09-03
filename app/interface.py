@@ -628,7 +628,8 @@ if "resultado" in st.session_state:
         portais = resultado.get("resumo", {}).get("portais", {})
         na_rua_n = resultado.get("resumo", {}).get("na_rua", 0)
         tempo_coleta = resultado.get("resumo", {}).get("tempo_coleta_s", 0)
-        terrenos_sep = resultado.get("resumo", {}).get("terrenos_excluidos", 0)
+        _resumo_ag2 = resultado.get("resumo", {})
+        terrenos_sep = _resumo_ag2.get("terrenos_separados", _resumo_ag2.get("terrenos_excluidos", 0))
         with st.expander("🔍 Agente Coletor de Dados"):
             st.write(f"Encontramos **{total_encontrados}** imóveis à venda no bairro {bairro}, {cidade}/{estado}.")
             col_c1, col_c2, col_c3 = st.columns(3)
@@ -642,7 +643,7 @@ if "resultado" in st.session_state:
         # Ag.2
         cluster_a = resultado.get("resumo", {}).get("cluster_a", len(confirmados))
         cluster_b = resultado.get("resumo", {}).get("cluster_b", 0)
-        terrenos_sep = resultado.get("resumo", {}).get("terrenos_excluidos", 0)
+        terrenos_sep = _resumo_ag2.get("terrenos_separados", _resumo_ag2.get("terrenos_excluidos", 0))
         with st.expander("📊 Agente Identificador de Comparáveis"):
             # Monta texto compacto em um único bloco markdown
             linhas = [f"Dos {total_encontrados} imóveis encontrados:"]

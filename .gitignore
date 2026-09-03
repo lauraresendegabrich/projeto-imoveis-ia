@@ -33,3 +33,6 @@ data/preco_liquidez_ag5.json
 
 # metadados de cache gerados em runtime
 data/*.meta.json
+
+# pastas isoladas por execucao (run_id) — dados de avaliacoes individuais
+data/run_*/

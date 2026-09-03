@@ -12,13 +12,15 @@ RESPONSABILIDADE:
     de satelite.
 
 ENTRADA:
-    - data/imoveis_completos_ag1.json (saida do Agente 1)
-    - imovel_alvo (dict com area, bedrooms, bathrooms, parkingSpaces, etc.)
+    - data/imoveis_completos_ag1.json (saida do Agente 1; fallback para imoveis_coletados_ag1.json)
+    - imovel_alvo (dict com tipo, area, cidade e demais caracteristicas)
+    - run_id opcional para isolar arquivos de uma avaliacao
 
 SAIDA:
-    - data/imoveis_comparaveis_ag2.json (pre-classificacao + ranking + clusters)
-    - data/zona_homogenea_ag2.json (confirmados na zona + coordenadas alvo)
-    - data/satelite_zona_homogenea_ag2.png (imagem com marcador)
+    - data/[run_id]/imoveis_comparaveis_ag2.json (pre-classificacao + ranking + clusters)
+    - data/[run_id]/zona_homogenea_ag2.json (confirmados + nao verificados + terrenos + coordenadas alvo)
+    - data/[run_id]/satelite_zona_homogenea_ag2.png (imagem com marcador)
+    Sem run_id, mantem os caminhos legados diretamente em data/.
 
 FLUXO COMPLETO:
 ===============
@@ -83,11 +85,13 @@ FLUXO COMPLETO:
       - o score numerico serve apenas para ordenar a sequencia dos lotes
 
     Cadeia de fallback:
-      1. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
-      2. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b
-      3. Gemini — gemini-3.5-flash-lite
-      4. NVIDIA NIM — meta/llama-3.3-70b-instruct
-      5. Se todas as LLMs falharem, o lote fica como Cluster B por falta de julgamento LLM
+      1. Qwen3-VL-8B — Google Colab
+      2. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
+      3. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b
+      4. Gemini — gemini-3.5-flash-lite
+      5. NVIDIA NIM — openai/gpt-oss-20b
+      6. Toda resposta e validada integralmente antes de ser aceita.
+      7. Se NENHUM candidato for julgado por LLM, usa top 20 do ranking Python como fallback.
 
     A LLM recebe somente candidatos sem incompatibilidade objetiva detectada
     e realiza o julgamento final de comparabilidade.
@@ -119,7 +123,55 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+RAIO_FALLBACK_METROS = 500
+TOP_N_FALLBACK_PYTHON = 20
+
+# Barreira de sanidade para o raio livre escolhido pela LLM de visao.
+# A LLM continua livre para escolher qualquer valor (437, 615, 882, 1340...),
+# mas valores absurdos por erro de geracao sao limitados a esta faixa.
+RAIO_MINIMO_SEGURANCA = 100
+RAIO_MAXIMO_SEGURANCA = 3000
+
+
+def _sanitizar_run_id(run_id: str | None) -> str | None:
+    """Normaliza run_id para uso seguro em nome de diretorio."""
+    if not run_id:
+        return None
+    seguro = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(run_id).strip())[:80]
+    return seguro or None
+
+
+def _obter_data_dir(run_id: str | None = None) -> str:
+    """Retorna diretorio da execucao; sem run_id mantem compatibilidade legada."""
+    run_id = _sanitizar_run_id(run_id)
+    pasta = os.path.join(DATA_DIR, f"run_{run_id}") if run_id else DATA_DIR
+    os.makedirs(pasta, exist_ok=True)
+    return pasta
+
+
+def _salvar_json_atomico(dados, caminho: str) -> None:
+    """Grava JSON sem deixar arquivo parcial se o processo for interrompido."""
+    os.makedirs(os.path.dirname(caminho), exist_ok=True)
+    temporario = f"{caminho}.tmp"
+    with open(temporario, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=2, default=str)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temporario, caminho)
+
+
+def _salvar_bytes_atomico(dados: bytes, caminho: str) -> None:
+    """Grava bytes de forma atomica."""
+    os.makedirs(os.path.dirname(caminho), exist_ok=True)
+    temporario = f"{caminho}.tmp"
+    with open(temporario, "wb") as f:
+        f.write(dados)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temporario, caminho)
 
 
 # =============================================================================
@@ -269,12 +321,56 @@ def _obter_area_terreno(imovel: dict) -> float | None:
 
 
 def _eh_casa(imovel: dict) -> bool:
-    """Detecta tipos residenciais do grupo casa/sobrado sem confundir com apartamento."""
+    """Detecta tipos residenciais do grupo casa/sobrado sem confundir com apartamento/terreno."""
     tipo = _normalizar_texto(imovel.get("propertyType") or imovel.get("tipo") or "")
+    if _eh_terreno(imovel):
+        return False
     if any(x in tipo for x in ("apartamento", "apartment", "flat", "cobertura")):
         return False
     return any(x in tipo for x in ("casa", "house", "sobrado", "village"))
 
+
+def _eh_terreno(imovel: dict) -> bool:
+    """Detecta terreno/lote mesmo quando a origem usa nomenclaturas diferentes."""
+    tipo = _normalizar_texto(imovel.get("propertyType") or imovel.get("tipo") or "")
+    if not tipo:
+        return False
+    tipo_tokens = tipo.replace("_", " ").replace("-", " ")
+    return bool(re.search(r"\b(terreno|terrenos|lote|lotes|land|lot|allotment)\b", tipo_tokens))
+
+
+def _obter_numero_endereco(imovel: dict) -> str:
+    """Busca numero do endereco em chaves comuns sem inventar valor."""
+    for chave in ("number", "numero", "streetNumber", "street_number", "addressNumber", "numero_endereco"):
+        valor = imovel.get(chave)
+        if valor not in (None, ""):
+            return str(valor).strip()
+    return ""
+
+
+def _validar_imovel_alvo(imovel_alvo: dict) -> list[str]:
+    """Valida dados essenciais e retorna alertas nao bloqueantes."""
+    if not isinstance(imovel_alvo, dict):
+        raise ValueError("imovel_alvo deve ser um dict")
+
+    tipo = imovel_alvo.get("propertyType") or imovel_alvo.get("tipo")
+    if not tipo:
+        raise ValueError("Agente 2: tipo do imovel alvo e obrigatorio (propertyType/tipo)")
+
+    if _obter_area_construida(imovel_alvo) is None and not _eh_terreno(imovel_alvo):
+        raise ValueError("Agente 2: area construida do imovel alvo e obrigatoria")
+
+    cidade = imovel_alvo.get("city") or imovel_alvo.get("cidade")
+    if not cidade:
+        raise ValueError("Agente 2: cidade do imovel alvo e obrigatoria")
+
+    alertas = []
+    bairro = imovel_alvo.get("neighborhood") or imovel_alvo.get("bairro")
+    if not bairro:
+        alertas.append("Bairro do imovel alvo nao informado; validacao geografica pode ter menor precisao")
+    if _eh_casa(imovel_alvo) and _obter_area_terreno(imovel_alvo) is None:
+        alertas.append("Area de terreno do alvo nao informada; comparacao de terreno nao sera eliminatoria")
+    return alertas
 
 def _montar_texto_caracteristicas(imovel: dict) -> str:
     """Junta somente campos textuais/amenities usados na extracao objetiva."""
@@ -434,18 +530,14 @@ def _pre_classificar(alvo: dict, candidato: dict, caracteristicas_alvo: dict | N
 
 def _calcular_score_similaridade(alvo: dict, candidato: dict) -> float:
     """
-    Calcula score de similaridade entre o imovel alvo e um candidato.
-    Score de 0.0 (totalmente diferente) a 1.0 (identico).
+    Score numerico 0..1 usado para ordenar candidatos antes da LLM.
 
-    Pesos:
-      - area: 30% (m² e o fator mais importante na avaliacao)
-      - quartos: 25%
-      - preco_m2: 20% (indica padrao construtivo similar)
-      - banheiros: 15%
-      - vagas: 10%
+    Corrige dois problemas importantes:
+      - normaliza strings numericas antes de comparar;
+      - diferencia zero real (ex.: 0 vagas/0 quartos) de dado ausente (None).
 
-    Usa distancia relativa: |alvo - candidato| / max(alvo, candidato)
-    Se um campo esta ausente, usa penalidade de 50% naquele peso.
+    Campos ausentes em apenas um dos lados recebem similaridade 0.5 no peso.
+    Quando ambos estao ausentes, o campo e ignorado.
     """
     pesos = {
         "area": 0.30,
@@ -455,39 +547,62 @@ def _calcular_score_similaridade(alvo: dict, candidato: dict) -> float:
         "parkingSpaces": 0.10,
     }
 
+    def _numero_score(imovel: dict, campo: str) -> float | None:
+        if campo == "area":
+            return _obter_area_construida(imovel)
+        if campo == "pricePerSqm":
+            valor = imovel.get("pricePerSqm")
+            if valor in (None, ""):
+                # Calcula apenas se houver preco e area validos.
+                preco = _para_float(imovel.get("price") or imovel.get("preco"))
+                area = _obter_area_construida(imovel)
+                if preco is not None and area is not None and area > 0:
+                    return preco / area
+                return None
+            return _para_float(valor)
+
+        valor = imovel.get(campo)
+        if valor is None or valor == "" or isinstance(valor, bool):
+            return None
+        try:
+            texto = str(valor).strip().replace(",", ".")
+            numero = float(texto)
+            # Para quartos/banheiros/vagas, zero e valor valido.
+            return numero if numero >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
     score_total = 0.0
     peso_total = 0.0
 
     for campo, peso in pesos.items():
-        val_alvo = alvo.get(campo)
-        val_cand = candidato.get(campo)
+        val_alvo = _numero_score(alvo, campo)
+        val_cand = _numero_score(candidato, campo)
 
-        if val_alvo and val_cand and val_alvo > 0 and val_cand > 0:
-            # Distancia relativa: 0 = identico, 1 = totalmente diferente
-            maximo = max(val_alvo, val_cand)
-            distancia = abs(val_alvo - val_cand) / maximo
-            # Converte pra similaridade: 1 = identico, 0 = diferente
-            similaridade = max(0, 1 - distancia)
+        if val_alvo is not None and val_cand is not None:
+            # Dois zeros representam igualdade perfeita.
+            if val_alvo == 0 and val_cand == 0:
+                similaridade = 1.0
+            else:
+                maximo = max(abs(val_alvo), abs(val_cand))
+                if maximo == 0:
+                    similaridade = 1.0
+                else:
+                    distancia = abs(val_alvo - val_cand) / maximo
+                    similaridade = max(0.0, 1.0 - distancia)
             score_total += similaridade * peso
             peso_total += peso
-        elif val_alvo or val_cand:
-            # Um tem o campo e outro nao — penalidade parcial
+        elif val_alvo is not None or val_cand is not None:
             score_total += 0.5 * peso
             peso_total += peso
-        # Se ambos nao tem, ignora o campo
+        # ambos ausentes -> ignora
 
     if peso_total == 0:
         return 0.0
-
     return round(score_total / peso_total, 4)
 
-
-# =============================================================================
-# BLOCO 3 - CLUSTERING VIA LLM
-# =============================================================================
-
 def _formatar_caracteristicas_prompt(imovel: dict) -> str:
-    """Formata caracteristicas objetivas sem incluir score numerico."""
+    """Formata caracteristicas objetivas extraidas para contexto da LLM."""
     car = _extrair_caracteristicas(imovel)
     partes = []
     for nome, valor in car.items():
@@ -500,70 +615,86 @@ def _formatar_caracteristicas_prompt(imovel: dict) -> str:
     return ", ".join(partes)
 
 
+def _resumir_descricao(imovel: dict, limite: int = 320) -> str:
+    """Retorna descricao curta, limpa e sem quebras para caber nos lotes."""
+    valor = imovel.get("description") or imovel.get("descricao") or imovel.get("title") or imovel.get("titulo") or ""
+    texto = re.sub(r"\s+", " ", str(valor)).strip()
+    if not texto:
+        return "nao_informada"
+    return texto[:limite] + ("..." if len(texto) > limite else "")
+
 def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
     """
-    Prompt compacto (~4k tokens com 15 candidatos) para Groq 8k TPM.
-
-    Os candidatos ja passaram pela pre-classificacao objetiva.
-    O score numerico NAO e colocado no prompt para nao ancorar a LLM.
+    Prompt de comparabilidade sem preco/preco-m2 para evitar circularidade na precificacao.
+    Inclui descricao curta e caracteristicas extraidas para dar contexto qualitativo a LLM.
+    O score Python tambem nao e enviado, evitando ancoragem.
     """
-    # Alvo: formato compacto em linhas curtas
     terreno_alvo = _obter_area_terreno(alvo) if _eh_casa(alvo) else None
     alvo_resumo = (
-        f"Tipo={alvo.get('propertyType','?')} Area={alvo.get('area','?')}m² "
-        f"Q={alvo.get('bedrooms','?')} B={alvo.get('bathrooms','?')} V={alvo.get('parkingSpaces','?')} "
-        f"R$/m²={alvo.get('pricePerSqm','?')} "
-        f"Bairro={alvo.get('neighborhood','?')} Rua={alvo.get('street','?')}"
+        f"Tipo={alvo.get('propertyType') or alvo.get('tipo') or '?'} "
+        f"Area={_obter_area_construida(alvo) or '?'}m2 "
+        f"Q={alvo.get('bedrooms', '?')} B={alvo.get('bathrooms', '?')} V={alvo.get('parkingSpaces', '?')} "
+        f"Bairro={alvo.get('neighborhood') or alvo.get('bairro') or '?'} "
+        f"Rua={alvo.get('street') or alvo.get('rua') or '?'}"
     )
-    if terreno_alvo:
-        alvo_resumo += f" Terreno={terreno_alvo:.0f}m²"
+    if terreno_alvo is not None:
+        alvo_resumo += f" Terreno={terreno_alvo:.0f}m2"
 
-    # Candidatos: 1-2 linhas por candidato
+    alvo_car = _formatar_caracteristicas_prompt(alvo)
+    alvo_desc = _resumir_descricao(alvo)
+
     linhas = []
     for idx, c in enumerate(candidatos, 1):
         area_t = _obter_area_terreno(c) if _eh_casa(alvo) else None
         linha = (
-            f"[{idx}] {c.get('propertyType','?')} "
-            f"{c.get('area','?')}m² "
-            f"Q={c.get('bedrooms','?')} B={c.get('bathrooms','?')} V={c.get('parkingSpaces','?')} "
-            f"R$/m²={c.get('pricePerSqm','?')} "
-            f"{(c.get('neighborhood') or '?')[:15]} "
-            f"{(c.get('street') or '?')[:25]}"
+            f"[{idx}] Tipo={c.get('propertyType') or c.get('tipo') or '?'} "
+            f"Area={_obter_area_construida(c) or '?'}m2 "
+            f"Q={c.get('bedrooms', '?')} B={c.get('bathrooms', '?')} V={c.get('parkingSpaces', '?')} "
+            f"Bairro={c.get('neighborhood') or c.get('bairro') or '?'} "
+            f"Rua={c.get('street') or c.get('rua') or '?'}"
         )
-        if area_t:
-            linha += f" T={area_t:.0f}"
+        if area_t is not None:
+            linha += f" Terreno={area_t:.0f}m2"
+        linha += f"\n    Caracteristicas: {_formatar_caracteristicas_prompt(c)}"
+        linha += f"\n    Descricao: {_resumir_descricao(c)}"
         linhas.append(linha)
 
     candidatos_texto = "\n".join(linhas)
 
-    prompt = f"""Classifique candidatos como A (comparavel) ou B (nao comparavel) vs o alvo.
-Ja passaram por filtro Python de area (±30%) e caracteristicas objetivas.
-Campo ausente = desconhecido, NAO ausencia. Nao repita cortes ja feitos.
+    return f"""Classifique cada candidato como A (comparavel) ou B (nao comparavel) em relacao ao imovel alvo.
 
-ALVO: {alvo_resumo}
+Os candidatos ja passaram por uma pre-classificacao Python objetiva de area e divergencias explicitas.
+Nao use preco nem valor por m2 como criterio: eles foram deliberadamente removidos para evitar circularidade na avaliacao.
+Campo ausente significa DESCONHECIDO, nunca ausencia da caracteristica.
+
+ALVO:
+{alvo_resumo}
+Caracteristicas: {alvo_car}
+Descricao: {alvo_desc}
 
 CANDIDATOS ({len(candidatos)}):
 {candidatos_texto}
 
-CRITERIOS:
-- Tipo/uso compativeis e localizacao sao prioritarios
-- Area e quartos sao relevantes
-- Banheiros/vagas/diferenciais sao secundarios
-- Preco nunca elimina sozinho
-- B somente quando CONJUNTO das diferencas for inadequado
-- score>=60 -> A, score<60 -> B
-- score_similaridade DEVE ser inteiro de 0 a 100; nunca escreva numeros por extenso
+CRITERIOS DE JULGAMENTO:
+1. Tipo/uso e contexto de localizacao sao prioritarios.
+2. Area e numero de quartos sao muito relevantes.
+3. Banheiros, vagas, terreno e caracteristicas estruturais ajudam a diferenciar o padrao.
+4. Use a descricao somente para entender tipologia, padrao e caracteristicas; nao invente dados ausentes.
+5. Nao rejeite por uma unica diferenca secundaria. Classifique B quando o CONJUNTO das diferencas tornar o candidato inadequado como referencia de mercado.
+6. A = referencia suficientemente semelhante para compor a amostra de comparaveis.
+7. B = referencia inadequada para a amostra.
+8. score_similaridade deve ser INTEIRO de 0 a 100 e refletir sua propria avaliacao, nao um preco.
 
-Retorne SOMENTE:
-{{"classificacao":[{{"id":1,"cluster":"A","score_similaridade":85,"justificativa":"frase curta"}}]}}
-Todos os {len(candidatos)} IDs devem aparecer exatamente uma vez."""
+RETORNE SOMENTE JSON VALIDO, sem markdown e sem texto externo:
+{{"classificacao":[{{"id":1,"cluster":"A","score_similaridade":85,"justificativa":"frase objetiva"}}]}}
 
-    return prompt
-
-
-# =============================================================================
-# QWEN3-VL-8B — GOOGLE COLAB
-# =============================================================================
+REGRAS DE SAIDA OBRIGATORIAS:
+- Todos os IDs de 1 a {len(candidatos)} devem aparecer EXATAMENTE uma vez.
+- Nao omita candidatos.
+- Nao repita IDs.
+- cluster deve ser somente "A" ou "B".
+- score_similaridade deve ser inteiro entre 0 e 100.
+- justificativa deve ser texto nao vazio."""
 
 def _obter_secret(nome: str) -> str:
     """
@@ -694,234 +825,186 @@ def _chamar_qwen_colab(
         return ""
 
 
-def _resposta_clustering_json_valida(texto: str) -> bool:
-    """
-    Valida somente a estrutura minima da resposta do clustering.
-
-    Isso impede uma resposta textual do Qwen de bloquear
-    os fallbacks Groq/Gemini/NVIDIA.
-    """
+def _extrair_json_classificacao(texto: str) -> dict | None:
+    """Extrai objeto {classificacao:[...]} ou converte array direto para esse formato."""
     if not texto:
-        return False
-
-    texto = re.sub(r"```json\s*", "", texto)
+        return None
+    texto = re.sub(r"```json\s*", "", texto, flags=re.I)
     texto = re.sub(r"```\s*", "", texto)
     texto = texto.strip()
-
     if "</think>" in texto:
         texto = texto.split("</think>", 1)[1].strip()
 
-    # Formato principal:
-    # {"classificacao": [...]}
+    # Primeiro tenta objeto JSON balanceado pelo primeiro/ultimo delimitador.
+    inicio = texto.find("{")
+    fim = texto.rfind("}")
+    if inicio >= 0 and fim > inicio:
+        try:
+            data = json.loads(texto[inicio:fim + 1])
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+
+    inicio = texto.find("[")
+    fim = texto.rfind("]")
+    if inicio >= 0 and fim > inicio:
+        try:
+            data = json.loads(texto[inicio:fim + 1])
+            if isinstance(data, list):
+                return {"classificacao": data}
+        except Exception:
+            pass
+    return None
+
+
+def _normalizar_score_llm(valor) -> int | None:
+    """Aceita 85, 85.0, '85' ou '85%' e retorna inteiro 0..100."""
+    if valor is None or isinstance(valor, bool):
+        return None
     try:
-        inicio = texto.find("{")
-        fim = texto.rfind("}")
-
-        if inicio >= 0 and fim > inicio:
-            data = json.loads(
-                texto[inicio:fim + 1]
-            )
-
-            classificacao = data.get("classificacao")
-
-            if isinstance(classificacao, list) and classificacao:
-                return True
-
-    except Exception:
-        pass
-
-    # Formato alternativo: array direto
-    try:
-        inicio = texto.find("[")
-        fim = texto.rfind("]")
-
-        if inicio >= 0 and fim > inicio:
-            data = json.loads(
-                texto[inicio:fim + 1]
-            )
-
-            if isinstance(data, list) and data:
-                return True
-
-    except Exception:
-        pass
-
-    return False
+        if isinstance(valor, str):
+            valor = valor.strip().replace("%", "").replace(",", ".")
+        numero = float(valor)
+        if not (0 <= numero <= 100):
+            return None
+        return int(round(numero))
+    except (TypeError, ValueError):
+        return None
 
 
-
-
-def _chamar_llm(prompt: str) -> str:
+def _validar_classificacao_llm(texto: str, total_esperado: int) -> dict | None:
     """
-    Cadeia de fallback do clustering:
+    Valida integralmente a resposta antes de aceitar um provider.
+    Exige IDs 1..N exatamente uma vez, cluster A/B, score 0..100 e justificativa nao vazia.
+    """
+    data = _extrair_json_classificacao(texto)
+    if not data:
+        return None
+    classificacoes = data.get("classificacao")
+    if not isinstance(classificacoes, list) or len(classificacoes) != total_esperado:
+        return None
 
-      1. Qwen3-VL-8B — Google Colab
-      2. Groq GROQ_API_KEY
-      3. Groq GROQ_API_KEY_2
-      4. Gemini
-      5. NVIDIA NIM
-      6. Se tudo falhar -> retorna ""
+    ids = []
+    normalizadas = []
+    for item in classificacoes:
+        if not isinstance(item, dict):
+            return None
+        try:
+            idx = int(item.get("id"))
+        except (TypeError, ValueError):
+            return None
+        cluster = str(item.get("cluster") or "").strip().upper()
+        score = _normalizar_score_llm(item.get("score_similaridade"))
+        justificativa = str(item.get("justificativa") or "").strip()
+        if cluster not in {"A", "B"} or score is None or not justificativa:
+            return None
+        ids.append(idx)
+        normalizadas.append({
+            "id": idx,
+            "cluster": cluster,
+            "score_similaridade": score,
+            "justificativa": justificativa,
+        })
+
+    esperados = list(range(1, total_esperado + 1))
+    if sorted(ids) != esperados or len(set(ids)) != total_esperado:
+        return None
+
+    normalizadas.sort(key=lambda x: x["id"])
+    return {"classificacao": normalizadas}
+
+
+def _resposta_clustering_json_valida(texto: str, total_esperado: int | None = None) -> bool:
+    """Compatibilidade: valida estrutura completa quando total e informado."""
+    if total_esperado is None:
+        data = _extrair_json_classificacao(texto)
+        return bool(data and isinstance(data.get("classificacao"), list) and data["classificacao"])
+    return _validar_classificacao_llm(texto, total_esperado) is not None
+
+def _chamar_llm(prompt: str, candidatos: list[dict]) -> dict | None:
+    """
+    Tenta providers em sequencia e SO aceita uma resposta integralmente valida.
+
+    Retorno:
+      {"resposta": <json-normalizado>, "provider_llm": ..., "modelo_llm": ..., "conta_llm": ...}
+      ou None se todos falharem/retornarem formato invalido.
     """
     import time as t_mod
 
-    # ============================================================
-    # TENTATIVA 1 — QWEN NO COLAB
-    # ============================================================
+    tentativas = []
 
     qwen_url = _obter_secret("QWEN_API_URL")
-
     if qwen_url:
-        logger.info(
-            "[Ag2][Clustering] Tentando Qwen3-VL-8B no Colab..."
-        )
+        tentativas.append((
+            "qwen_colab", "Qwen3-VL-8B", "QWEN_API_KEY",
+            lambda: _chamar_qwen_colab(prompt, max_new_tokens=1600),
+        ))
 
-        t0 = t_mod.time()
+    tentativas.append((
+        "groq", "openai/gpt-oss-120b", "GROQ_API_KEY",
+        lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b"),
+    ))
 
-        resposta = _chamar_qwen_colab(
-            prompt,
-            max_new_tokens=1600,
-        )
+    if os.getenv("GROQ_API_KEY_2", ""):
+        tentativas.append((
+            "groq", "openai/gpt-oss-120b", "GROQ_API_KEY_2",
+            lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY_2", ""), model="openai/gpt-oss-120b"),
+        ))
 
-        if resposta:
-
-            # Mostra exatamente o que o Qwen respondeu
-            _log_resposta_llm(
-                "Qwen3-VL-8B Colab",
-                resposta )
-
-            
-            if _resposta_clustering_json_valida(resposta):
-
-                logger.info(
-                    f"[Ag2][Clustering] LLM respondeu: "
-                    f"Qwen3-VL-8B Colab em "
-                    f"{t_mod.time()-t0:.1f}s"
-                )
-
-                return resposta
-
-            logger.warning(
-                "[Ag2][Clustering] Qwen respondeu, "
-                "mas o JSON nao e valido — tentando fallback..."
-            )
-
-        else:
-            logger.info(
-                "[Ag2][Clustering] Qwen indisponivel — "
-                "tentando Groq..."
-            )
-
-    # ============================================================
-    # TENTATIVA 2 — GROQ PRINCIPAL
-    # ============================================================
-
-    t0 = t_mod.time()
-
-    resposta = _chamar_groq(
-        prompt,
-        os.getenv("GROQ_API_KEY", ""),
-        model="openai/gpt-oss-120b",
-    )
-
-    if resposta:
-        logger.info(
-            f"[Ag2][Clustering] LLM respondeu: "
-            f"Groq openai/gpt-oss-120b em "
-            f"{t_mod.time()-t0:.1f}s"
-        )
-        return resposta
-
-    # ============================================================
-    # TENTATIVA 3 — GROQ CONTA 2
-    # ============================================================
-
-    groq_key_2 = os.getenv("GROQ_API_KEY_2", "")
-
-    if groq_key_2:
-        logger.info(
-            "[Ag2][Clustering] Groq 1 falhou — "
-            "tentando GROQ_API_KEY_2..."
-        )
-
-        t0 = t_mod.time()
-
-        resposta = _chamar_groq(
-            prompt,
-            groq_key_2,
-            model="openai/gpt-oss-120b",
-        )
-
-        if resposta:
-            logger.info(
-                f"[Ag2][Clustering] LLM respondeu: "
-                f"Groq KEY2 em {t_mod.time()-t0:.1f}s"
-            )
-            return resposta
-
-    # ============================================================
-    # TENTATIVA 4 — GEMINI
-    # ============================================================
-
-    google_key = (
-        os.getenv("GOOGLE_API_KEY_2", "")
-        or os.getenv("GOOGLE_API_KEY", "")
-    )
-
+    google_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
     if google_key:
-        logger.info(
-            "[Ag2][Clustering] Groq falhou — tentando Gemini..."
-        )
-
-        t0 = t_mod.time()
-
-        resposta = _chamar_gemini(
-            prompt,
-            google_key,
-        )
-
-        if resposta:
-            logger.info(
-                f"[Ag2][Clustering] LLM respondeu: "
-                f"Gemini em {t_mod.time()-t0:.1f}s"
-            )
-            return resposta
-
-    # ============================================================
-    # TENTATIVA 5 — NVIDIA
-    # ============================================================
+        tentativas.append((
+            "gemini", "gemini-3.5-flash-lite", "GOOGLE_API_KEY_2/GOOGLE_API_KEY",
+            lambda: _chamar_gemini(prompt, google_key),
+        ))
 
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-
     if nvidia_key:
-        logger.info(
-            "[Ag2][Clustering] Gemini falhou — "
-            "tentando NVIDIA NIM..."
-        )
+        tentativas.append((
+            "nvidia", "openai/gpt-oss-20b", "NVIDIA_API_KEY",
+            lambda: _chamar_nvidia(prompt, nvidia_key),
+        ))
 
+    for provider, modelo, conta, chamar in tentativas:
+        logger.info(f"[Ag2][Clustering] Tentando {provider} / {modelo}...")
         t0 = t_mod.time()
+        try:
+            resposta = chamar() or ""
+        except Exception as e:
+            logger.warning(f"[Ag2][Clustering] {provider}/{modelo} falhou: {type(e).__name__}: {e}")
+            resposta = ""
 
-        resposta = _chamar_nvidia(
-            prompt,
-            nvidia_key,
-        )
+        if not resposta:
+            logger.info(f"[Ag2][Clustering] {provider}/{modelo} sem resposta — proximo provider")
+            continue
 
-        if resposta:
-            logger.info(
-                f"[Ag2][Clustering] LLM respondeu: "
-                f"NVIDIA NIM em {t_mod.time()-t0:.1f}s"
+        _log_resposta_llm(f"{provider} | {modelo}", resposta)
+        validada = _validar_classificacao_llm(resposta, len(candidatos))
+        if validada is None:
+            logger.warning(
+                f"[Ag2][Clustering] {provider}/{modelo} respondeu em {t_mod.time()-t0:.1f}s, "
+                "mas a classificacao esta incompleta/invalida — tentando proximo provider"
             )
-            return resposta
+            continue
 
-    logger.warning(
-        "[Ag2][Clustering] Todas as LLMs falharam — "
-        "lote ficara como Cluster B sem julgamento LLM"
-    )
+        logger.info(f"[Ag2][Clustering] resposta valida: {provider}/{modelo} em {t_mod.time()-t0:.1f}s")
+        return {
+            "resposta": json.dumps(validada, ensure_ascii=False),
+            "provider_llm": provider,
+            "modelo_llm": modelo,
+            "conta_llm": conta,
+        }
 
-    return ""
-
+    logger.warning("[Ag2][Clustering] Todos os providers falharam ou retornaram JSON invalido")
+    return None
 
 def _chamar_nvidia(prompt: str, api_key: str) -> str:
-    """Chama NVIDIA NIM (meta/llama-3.3-70b-instruct). Timeout 30s, sem retries longos."""
+    """Chama NVIDIA NIM (openai/gpt-oss-20b). Timeout 30s, sem retries longos.
+
+    O antigo meta/llama-3.3-70b-instruct foi descontinuado (EOL 2026-08-26).
+    O openai/gpt-oss-20b e o modelo de texto gratuito vivo no endpoint NVIDIA.
+    """
     if not api_key:
         return ""
     try:
@@ -935,7 +1018,7 @@ def _chamar_nvidia(prompt: str, api_key: str) -> str:
         )
 
         response = client.chat.completions.create(
-            model="meta/llama-3.3-70b-instruct",
+            model="openai/gpt-oss-20b",
             messages=[
                 {"role": "system", "content": "Responda SOMENTE com JSON valido, sem markdown, sem texto extra."},
                 {"role": "user", "content": prompt},
@@ -946,7 +1029,7 @@ def _chamar_nvidia(prompt: str, api_key: str) -> str:
 
         texto = response.choices[0].message.content or ""
         if texto:
-            logger.info(f"    [LLM] NVIDIA NIM meta/llama-3.3-70b-instruct respondeu OK")
+            logger.info(f"    [LLM] NVIDIA NIM openai/gpt-oss-20b respondeu OK")
         return texto
     except Exception as e:
         logger.warning(f"    [LLM] NVIDIA NIM falhou: {e}")
@@ -1030,122 +1113,104 @@ def _chamar_gemini(prompt: str, api_key: str) -> str:
         return ""
 
 
-def _marcar_sem_julgamento_llm(candidatos: list[dict], motivo: str, classificado_por: str) -> list[dict]:
-    """
-    Mantem candidatos no resultado, mas impede que o score numerico os transforme em Cluster A.
-    Usado apenas para lotes sem resposta LLM valida.
-    """
+def _marcar_sem_julgamento_llm(
+    candidatos: list[dict],
+    motivo: str,
+    classificado_por: str,
+    lote_llm: int | None = None,
+) -> list[dict]:
+    """Marca falha tecnica sem fingir que o candidato foi julgado como nao comparavel."""
     for c in candidatos:
-        c["cluster"] = "B"
+        c["cluster"] = None
+        c["status_julgamento"] = "NAO_JULGADO"
         c["ranking_llm"] = None
+        c["score_llm"] = None
         c["classificado_por"] = classificado_por
+        c["provider_llm"] = None
+        c["modelo_llm"] = None
+        c["lote_llm"] = lote_llm
         c["justificativa"] = motivo
     return candidatos
 
-
-def _parsear_resposta_llm(resposta: str, candidatos: list[dict]) -> list[dict]:
-    """
-    Parseia a resposta JSON da LLM e aplica nos candidatos.
-    Se a resposta nao puder ser validada, os candidatos ficam em Cluster B;
-    o score numerico nao pode promove-los a Cluster A.
-    """
-    # Remove bloco <think>...</think> se presente
-    if '</think>' in resposta:
-        resposta = resposta.split('</think>', 1)[1].strip()
-    resposta = re.sub(r'```json\s*', '', resposta)
-    resposta = re.sub(r'```\s*', '', resposta)
-    
-    # Tenta extrair JSON da resposta
-    # Primeiro tenta achar objeto com "classificacao"
-    m = re.search(r'\{[\s\S]*"classificacao"[\s\S]*\}', resposta)
-    if not m:
-        # Fallback: tenta achar um array direto (Gemini pode retornar só o array)
-        m_arr = re.search(r'\[[\s\S]*\]', resposta)
-        if m_arr:
-            try:
-                arr = json.loads(m_arr.group(0))
-                if isinstance(arr, list) and len(arr) > 0:
-                    # Wrapa em {"classificacao": [...]}
-                    m_text = json.dumps({"classificacao": arr})
-                    m = type('Match', (), {'group': lambda self, x=0: m_text})()
-            except json.JSONDecodeError:
-                pass
-    if not m:
-        logger.warning("LLM nao retornou JSON valido — candidatos ficam como Cluster B")
+def _parsear_resposta_llm(
+    resposta: str,
+    candidatos: list[dict],
+    provider_llm: str,
+    modelo_llm: str,
+    lote_llm: int,
+    conta_llm: str = "",
+) -> list[dict]:
+    """Aplica uma resposta JA validada e preserva score Python separado do score LLM."""
+    data = _validar_classificacao_llm(resposta, len(candidatos))
+    if data is None:
         return _marcar_sem_julgamento_llm(
             candidatos,
-            "LLM nao retornou classificacao valida; candidato nao promovido por score numerico",
+            "Resposta LLM ficou invalida na etapa de aplicacao",
             "llm_resposta_invalida",
+            lote_llm=lote_llm,
         )
 
-    try:
-        data = json.loads(m.group(0))
-        classificacoes = data.get("classificacao", [])
-    except json.JSONDecodeError:
-        logger.warning("JSON invalido da LLM — candidatos ficam como Cluster B")
-        return _marcar_sem_julgamento_llm(
-            candidatos,
-            "JSON invalido da LLM; candidato nao promovido por score numerico",
-            "llm_resposta_invalida",
-        )
-
-    # Aplica classificacoes nos candidatos
-    for item in classificacoes:
-        idx = item.get("id", 0) - 1  # 1-indexed -> 0-indexed
-        if 0 <= idx < len(candidatos):
-            candidatos[idx]["cluster"] = item.get("cluster", "B")
-            candidatos[idx]["justificativa"] = item.get("justificativa", "")
-            candidatos[idx]["classificado_por"] = "llm"
-            # Score da LLM (0-100) sobrescreve o numérico se disponivel
-            llm_score = item.get("score_similaridade")
-            if llm_score is not None:
-                candidatos[idx]["score_similaridade"] = float(llm_score) / 100.0  # normaliza pra 0-1
-
-    # Garante que todos tem os campos. Se a LLM omitiu algum candidato,
-    # ele fica B em vez de ser promovido pelo score numerico.
-    for c in candidatos:
-        if "cluster" not in c:
-            c["cluster"] = "B"
-            c["classificado_por"] = "llm_resposta_incompleta"
-            c["justificativa"] = "Candidato ausente na resposta da LLM; mantido como nao comparavel"
-        if "ranking_llm" not in c:
-            c["ranking_llm"] = None
-        if "justificativa" not in c:
-            c["justificativa"] = ""
-
+    por_id = {item["id"]: item for item in data["classificacao"]}
+    for idx, candidato in enumerate(candidatos, 1):
+        item = por_id[idx]
+        candidato["cluster"] = item["cluster"]
+        candidato["status_julgamento"] = "JULGADO_LLM"
+        candidato["score_llm"] = round(item["score_similaridade"] / 100.0, 4)
+        candidato["justificativa"] = item["justificativa"]
+        candidato["classificado_por"] = "llm"
+        candidato["provider_llm"] = provider_llm
+        candidato["modelo_llm"] = modelo_llm
+        candidato["conta_llm"] = conta_llm
+        candidato["lote_llm"] = lote_llm
+        # score_similaridade permanece como alias legado do score Python.
+        if "score_pre_llm" not in candidato:
+            candidato["score_pre_llm"] = candidato.get("score_similaridade", 0.0)
     return candidatos
 
+def _fallback_numerico(candidatos: list[dict], top_n: int | None = None) -> list[dict]:
+    """
+    Fallback deterministico.
 
-def _fallback_numerico(candidatos: list[dict]) -> list[dict]:
+    - top_n=None: comportamento manual/usar_llm=False, threshold 0.60.
+    - top_n=N: usado SOMENTE quando nenhum provider LLM julgou nenhum candidato;
+      promove os N melhores do ranking Python para Cluster A.
     """
-    Fallback quando a LLM falha: usa score numerico pra clusterizar.
-    Cluster A: score >= 0.60 (similar)
-    Cluster B: score < 0.60 (nao similar)
-    Ranking: todos recebem (1 = mais similar).
-    """
+    ordenados = sorted(candidatos, key=lambda x: x.get("score_pre_llm", x.get("score_similaridade", 0)), reverse=True)
+
+    if top_n is not None:
+        limite = min(max(int(top_n), 0), len(ordenados))
+        for ranking, c in enumerate(ordenados, 1):
+            score = c.get("score_pre_llm", c.get("score_similaridade", 0)) or 0
+            c["ranking_llm"] = None
+            c["score_llm"] = None
+            c["provider_llm"] = None
+            c["modelo_llm"] = None
+            c["status_julgamento"] = "FALLBACK_PYTHON"
+            c["classificado_por"] = "fallback_python_top20"
+            if ranking <= limite:
+                c["cluster"] = "A"
+                c["justificativa"] = f"Fallback tecnico: top {limite} do ranking Python (score={score:.3f})"
+            else:
+                c["cluster"] = "B"
+                c["justificativa"] = f"Fallback tecnico: fora do top {limite} do ranking Python (score={score:.3f})"
+        return ordenados
+
     THRESHOLD = 0.60
-
-    # Ordena por score
-    ordenados = sorted(candidatos, key=lambda x: x.get("score_similaridade", 0), reverse=True)
-
     for ranking, c in enumerate(ordenados, 1):
-        score = c.get("score_similaridade", 0)
+        score = c.get("score_pre_llm", c.get("score_similaridade", 0)) or 0
         c["ranking_llm"] = ranking
+        c["score_llm"] = None
+        c["provider_llm"] = None
+        c["modelo_llm"] = None
+        c["status_julgamento"] = "FALLBACK_PYTHON"
+        c["classificado_por"] = "fallback_numerico"
         if score >= THRESHOLD:
             c["cluster"] = "A"
-            c["justificativa"] = f"Score numerico {score:.2f} >= {THRESHOLD} (threshold)"
-            c["classificado_por"] = "fallback_numerico"
+            c["justificativa"] = f"Score Python {score:.2f} >= {THRESHOLD}"
         else:
             c["cluster"] = "B"
-            c["justificativa"] = f"Score numerico {score:.2f} < {THRESHOLD} (threshold)"
-            c["classificado_por"] = "fallback_numerico"
-
+            c["justificativa"] = f"Score Python {score:.2f} < {THRESHOLD}"
     return ordenados
-
-
-# =============================================================================
-# BLOCO 4 - FUNCAO PUBLICA
-# =============================================================================
 
 def identificar_comparaveis(
     imovel_alvo: dict,
@@ -1153,222 +1218,179 @@ def identificar_comparaveis(
     arquivo_entrada: str = "imoveis_completos_ag1.json",
     arquivo_saida: str = "imoveis_comparaveis_ag2.json",
     usar_llm: bool = True,
+    run_id: str | None = None,
 ) -> dict:
-    """
-    Identifica comparaveis com pre-classificacao objetiva + score numerico + LLM.
-
-    Ordem:
-      1. carrega dados;
-      2. separa terrenos;
-      3. calcula medias descritivas de area (terreno somente para casas);
-      4. pre-classifica e elimina incompatibilidades objetivas;
-      5. calcula score numerico apenas para ordenar/priorizar;
-      6. envia TODOS os sobreviventes para LLM em lotes de ate 15;
-      7. o score numerico apenas define a ordem de envio;
-      8. somente a LLM pode promover candidatos a Cluster A quando usar_llm=True;
-      9. junta Cluster A, Cluster B e terrenos sem perder candidatos.
-    """
+    """Identifica comparaveis com pre-classificacao + score Python + julgamento LLM validado."""
     logger.info("=" * 60)
     logger.info("AGENTE 2: IDENTIFICADOR DE COMPARAVEIS")
     logger.info("=" * 60)
 
-    # ── 1. CARREGA DADOS ───────────────────────────────────────────
-    if imoveis_coletados is None:
-        caminho = os.path.join(DATA_DIR, arquivo_entrada)
-        if not os.path.exists(caminho):
-            caminho = os.path.join(DATA_DIR, "imoveis_coletados_ag1.json")
-        if not os.path.exists(caminho):
-            logger.error("Nenhum arquivo de imoveis encontrado")
-            return {"imovel_alvo": imovel_alvo, "comparaveis": [], "resumo": {}}
+    alertas_entrada = _validar_imovel_alvo(imovel_alvo)
+    run_dir = _obter_data_dir(run_id)
 
-        with open(caminho, "r", encoding="utf-8") as f:
-            imoveis_coletados = json.load(f)
+    # 1. Carrega dados
+    if imoveis_coletados is None:
+        # Com run_id, JAMAIS buscar arquivo global: isso quebraria o isolamento entre
+        # avaliacoes (poderia carregar dados de uma execucao anterior). Sem run_id,
+        # usa os caminhos legados diretamente em data/.
+        if _sanitizar_run_id(run_id):
+            candidatos_caminho = [
+                os.path.join(run_dir, arquivo_entrada),
+                os.path.join(run_dir, "imoveis_coletados_ag1.json"),
+            ]
+        else:
+            candidatos_caminho = [
+                os.path.join(DATA_DIR, arquivo_entrada),
+                os.path.join(DATA_DIR, "imoveis_coletados_ag1.json"),
+            ]
+        caminho = next((p for p in candidatos_caminho if os.path.exists(p)), None)
+        if not caminho:
+            logger.error("Nenhum arquivo de imoveis encontrado")
+            return {
+                "status": "erro_sem_entrada",
+                "run_id": _sanitizar_run_id(run_id),
+                "imovel_alvo": imovel_alvo,
+                "comparaveis": [],
+                "terrenos": [],
+                "alertas": alertas_entrada + ["Nenhum arquivo do Agente 1 encontrado"],
+                "resumo": {},
+            }
+        try:
+            with open(caminho, "r", encoding="utf-8") as f:
+                imoveis_coletados = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise RuntimeError(f"Agente 2: falha ao ler entrada {caminho}: {e}") from e
         logger.info(f"Carregados: {len(imoveis_coletados)} imoveis de {caminho}")
 
-    # Trabalha sobre uma lista concreta.
     imoveis_coletados = list(imoveis_coletados or [])
 
-    # ── 2. SEPARA TERRENOS ─────────────────────────────────────────
-    terrenos = [i for i in imoveis_coletados if (i.get("propertyType") or "").lower() == "terrenos"]
-    filtrados = [i for i in imoveis_coletados if (i.get("propertyType") or "").lower() != "terrenos"]
-    logger.info(
-        f"[Ag2][PreClassificacao] Recebidos construidos: {len(filtrados)} | "
-        f"terrenos separados: {len(terrenos)}"
-    )
+    # 2. Separa terrenos de forma robusta
+    terrenos = [i for i in imoveis_coletados if _eh_terreno(i)]
+    filtrados = [i for i in imoveis_coletados if not _eh_terreno(i)]
+    logger.info(f"[Ag2][PreClassificacao] construidos={len(filtrados)} | terrenos_separados={len(terrenos)}")
 
-    # ── 3. MEDIAS DESCRITIVAS ──────────────────────────────────────
+    # 3. Estatisticas / referencia
     estatisticas_areas = _calcular_estatisticas_areas(filtrados, imovel_alvo)
     area_alvo = _obter_area_construida(imovel_alvo)
     terreno_alvo = _obter_area_terreno(imovel_alvo) if _eh_casa(imovel_alvo) else None
     caracteristicas_alvo = _extrair_caracteristicas(imovel_alvo)
 
-    logger.info(
-        f"[Ag2][PreClassificacao] Media area construida: "
-        f"{estatisticas_areas['media_area_construida']} "
-        f"(n={estatisticas_areas['amostras_area_construida']})"
-    )
-    if estatisticas_areas["area_terreno_aplicavel"]:
-        logger.info(
-            f"[Ag2][PreClassificacao] Media area terreno: "
-            f"{estatisticas_areas['media_area_terreno']} "
-            f"(n={estatisticas_areas['amostras_area_terreno']})"
-        )
-    else:
-        logger.info("[Ag2][PreClassificacao] Media area terreno: nao aplicavel para apartamento/flat/cobertura")
-    terreno_log = f"{terreno_alvo}m²" if _eh_casa(imovel_alvo) else "nao_aplicavel"
-    logger.info(
-        f"[Ag2][PreClassificacao] Referencia REAL do alvo: "
-        f"area={area_alvo}m² | terreno={terreno_log}"
-    )
-    logger.info(
-        "[Ag2][PreClassificacao] Caracteristicas alvo: "
-        + json.dumps(caracteristicas_alvo, ensure_ascii=False)
-    )
-
-    # ── 4. PRE-CLASSIFICACAO ELIMINATORIA ──────────────────────────
+    # 4. Pre-classificacao
     elegiveis = []
     incompativeis_pre = []
-
     for im in filtrados:
         pre = _pre_classificar(imovel_alvo, im, caracteristicas_alvo=caracteristicas_alvo)
         im["pre_classificacao"] = pre
-
         if pre["elegivel_llm"]:
             elegiveis.append(im)
         else:
-            # Mantem no resultado, mas nao gasta LLM.
             im["cluster"] = "B"
+            im["status_julgamento"] = "REPROVADO_PRE_CLASSIFICACAO"
             im["ranking_llm"] = None
+            im["score_llm"] = None
             im["classificado_por"] = "python_pre_classificacao"
+            im["provider_llm"] = None
+            im["modelo_llm"] = None
             motivos = pre.get("motivos_incompatibilidade") or []
             im["justificativa"] = "Pre-classificacao: " + "; ".join(motivos)
             incompativeis_pre.append(im)
 
-    logger.info(
-        f"[Ag2][PreClassificacao] compativeis/dados_insuficientes={len(elegiveis)} | "
-        f"incompativeis={len(incompativeis_pre)}"
-    )
-
-    # ── 5. SCORE NUMERICO ──────────────────────────────────────────
-    # Calcula para todos os construidos por compatibilidade de saida/auditoria,
-    # mas APENAS os elegiveis podem seguir para LLM.
+    # 5. Score Python robusto; preserva campo legado e novo campo auditavel.
     for im in filtrados:
-        im["score_similaridade"] = _calcular_score_similaridade(imovel_alvo, im)
+        score = _calcular_score_similaridade(imovel_alvo, im)
+        im["score_pre_llm"] = score
+        im["score_similaridade"] = score  # alias legado
 
-    elegiveis.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
+    elegiveis.sort(key=lambda x: x.get("score_pre_llm", 0), reverse=True)
     for ranking_pre, im in enumerate(elegiveis, 1):
         im["ranking_pre_llm"] = ranking_pre
 
-    logger.info("[Ag2][Score] Top 5 entre os sobreviventes da pre-classificacao:")
-    for i, im in enumerate(elegiveis[:5]):
-        logger.info(
-            f"  [{i+1}] score={im.get('score_similaridade', 0):.3f} | "
-            f"{im.get('area','?')}m² | {im.get('bedrooms','?')}q | "
-            f"{im.get('priceFormatted','?')} | {im.get('street') or im.get('neighborhood','?')}"
-        )
-
-    # ── 6. CLUSTERING VIA LLM ──────────────────────────────────────
-    # Nao existe limite TOTAL de candidatos para a LLM.
-    # Todos os sobreviventes da pre-classificacao sao enviados.
-    # O score numerico apenas ordena a sequencia de processamento.
     TAMANHO_LOTE = 15
+    llm_tentados = 0
+    llm_classificados = 0
+    llm_nao_julgados = 0
+    classificados_elegiveis = []
 
-    if usar_llm:
+    # 6. LLM
+    if usar_llm and elegiveis:
         import time as t_ag2
-
-        candidatos_llm_enviar = elegiveis
-
-        for im in candidatos_llm_enviar:
+        for im in elegiveis:
             im["pre_classificacao"]["enviado_llm"] = True
 
-        todos_classificados = []
-        lotes = [
-            candidatos_llm_enviar[i:i + TAMANHO_LOTE]
-            for i in range(0, len(candidatos_llm_enviar), TAMANHO_LOTE)
-        ]
+        lotes = [elegiveis[i:i + TAMANHO_LOTE] for i in range(0, len(elegiveis), TAMANHO_LOTE)]
+        logger.info(f"[Ag2][Clustering] {len(elegiveis)} elegiveis em {len(lotes)} lote(s)")
 
-        logger.info(
-            f"[Ag2][Clustering] TODOS os {len(candidatos_llm_enviar)} candidatos elegiveis "
-            f"serao enviados para LLM em {len(lotes)} lote(s) de ate {TAMANHO_LOTE}"
-        )
-
-        t_inicio_clustering = t_ag2.time()
         for num_lote, lote in enumerate(lotes, 1):
-            logger.info(f"[Ag2][Clustering] Lote {num_lote}/{len(lotes)}: {len(lote)} candidatos...")
-            t_lote = t_ag2.time()
+            llm_tentados += len(lote)
             prompt = _montar_prompt_clustering(imovel_alvo, lote)
-            resposta = _chamar_llm(prompt)
-
-            if resposta:
-                logger.info(
-                    f"[Ag2][Clustering] Lote {num_lote}: resposta OK "
-                    f"({len(resposta)} chars) em {t_ag2.time()-t_lote:.1f}s"
+            retorno_llm = _chamar_llm(prompt, lote)
+            if retorno_llm:
+                lote = _parsear_resposta_llm(
+                    retorno_llm["resposta"], lote,
+                    provider_llm=retorno_llm["provider_llm"],
+                    modelo_llm=retorno_llm["modelo_llm"],
+                    conta_llm=retorno_llm.get("conta_llm", ""),
+                    lote_llm=num_lote,
                 )
-                lote = _parsear_resposta_llm(resposta, lote)
+                llm_classificados += len(lote)
             else:
-                logger.warning(
-                    f"[Ag2][Clustering] Lote {num_lote}: LLM sem resposta — candidatos ficam como Cluster B"
-                )
                 lote = _marcar_sem_julgamento_llm(
                     lote,
-                    "Nenhum provedor LLM retornou classificacao; candidato mantido como nao comparavel",
+                    "Nenhum provider retornou classificacao completa e valida",
                     "llm_indisponivel",
+                    lote_llm=num_lote,
                 )
-
-            todos_classificados.extend(lote)
-
-            # Pausa curta entre lotes; a cadeia de fallback cuida de indisponibilidade/quota.
+                llm_nao_julgados += len(lote)
+            classificados_elegiveis.extend(lote)
             if num_lote < len(lotes):
                 t_ag2.sleep(3)
 
-        logger.info(f"[Ag2][Clustering] Tempo total: {t_ag2.time()-t_inicio_clustering:.1f}s")
-        classificados_elegiveis = todos_classificados
+        # Se TODOS os julgamentos LLM falharam, top 20 do Python vira fallback.
+        if llm_classificados == 0 and elegiveis:
+            logger.warning(
+                f"[Ag2][Fallback] Nenhum candidato foi julgado por LLM; usando top {TOP_N_FALLBACK_PYTHON} do ranking Python"
+            )
+            classificados_elegiveis = _fallback_numerico(elegiveis, top_n=TOP_N_FALLBACK_PYTHON)
+            llm_nao_julgados = len(elegiveis)
+    elif usar_llm:
+        classificados_elegiveis = []
     else:
-        logger.info("[Ag2][Clustering] LLM desativada — usando apenas score numerico nos elegiveis")
         classificados_elegiveis = _fallback_numerico(elegiveis)
 
-    # Ranking LLM para todos que foram efetivamente enviados para julgamento.
-    selecionados_julgados = [
-        c for c in classificados_elegiveis
-        if c.get("pre_classificacao", {}).get("enviado_llm")
-    ]
-    selecionados_julgados.sort(key=lambda x: x.get("score_similaridade", 0), reverse=True)
-    for ranking, c in enumerate(selecionados_julgados, 1):
+    # Ranking LLM apenas para candidatos realmente julgados pela LLM.
+    julgados = [c for c in classificados_elegiveis if c.get("status_julgamento") == "JULGADO_LLM"]
+    julgados.sort(key=lambda x: (x.get("score_llm") if x.get("score_llm") is not None else -1), reverse=True)
+    for ranking, c in enumerate(julgados, 1):
         c["ranking_llm"] = ranking
 
-    # ── 7. RESULTADO FINAL ──────────────────────────────────────────
     todos_construidos = classificados_elegiveis + incompativeis_pre
-
     cluster_a = sorted(
         [c for c in todos_construidos if c.get("cluster") == "A"],
-        key=lambda x: x.get("ranking_llm") or 999999,
+        key=lambda x: (
+            0 if x.get("ranking_llm") is not None else 1,
+            x.get("ranking_llm") or x.get("ranking_pre_llm") or 999999,
+        ),
     )
-    cluster_b = [c for c in todos_construidos if c.get("cluster") != "A"]
+    cluster_b = [c for c in todos_construidos if c.get("cluster") == "B"]
+    nao_julgados = [c for c in todos_construidos if c.get("cluster") is None]
 
     for t in terrenos:
         t["cluster"] = "terreno"
+        t["status_julgamento"] = "SEPARADO_TIPO"
         t["ranking_llm"] = None
         t["classificado_por"] = "separacao_tipo"
-        t["justificativa"] = "Terreno separado do ranking — tipo incomparavel com imovel construido"
+        t["justificativa"] = "Terreno separado do ranking de imoveis construidos"
 
-    resultado_final = cluster_a + cluster_b + terrenos
+    resultado_final = cluster_a + cluster_b + nao_julgados + terrenos
 
     resumo_pre = {
         "total_construidos": len(filtrados),
         "elegiveis_apos_pre_classificacao": len(elegiveis),
         "incompativeis_pre_classificacao": len(incompativeis_pre),
-        "selecionados_para_llm": len(elegiveis) if usar_llm else 0,
-        "nao_selecionados_por_limite_llm": 0,
-        "limite_llm": None,
-        "todos_elegiveis_enviados_llm": bool(usar_llm),
-        "tamanho_lote_llm": TAMANHO_LOTE,
         "regra_area_percentual": 30,
         "caracteristicas_eliminatorias": list(CARACTERISTICAS_PRE_CLASSIFICACAO.keys()),
         "estatisticas_areas": estatisticas_areas,
-        "referencia_alvo": {
-            "area_construida": area_alvo,
-            "area_terreno": terreno_alvo,
-        },
+        "referencia_alvo": {"area_construida": area_alvo, "area_terreno": terreno_alvo},
         "caracteristicas_alvo": caracteristicas_alvo,
     }
 
@@ -1376,51 +1398,56 @@ def identificar_comparaveis(
         "total_analisados": len(filtrados),
         "cluster_a": len(cluster_a),
         "cluster_b": len(cluster_b),
-        "terrenos_excluidos": len(terrenos),
-        "metodo": (
-            "pre_classificacao_python + similaridade_numerica + clustering_llm"
-            if usar_llm
-            else "pre_classificacao_python + similaridade_numerica"
-        ),
+        "nao_julgados": len(nao_julgados),
+        "terrenos_separados": len(terrenos),
+        "llm_tentados": llm_tentados,
+        "llm_classificados": llm_classificados,
+        "llm_nao_julgados": llm_nao_julgados,
+        "fallback_python_top20_acionado": bool(usar_llm and elegiveis and llm_classificados == 0),
+        "metodo": "pre_classificacao_python + score_python + clustering_llm_validado" if usar_llm else "pre_classificacao_python + score_python",
         "pre_classificacao": resumo_pre,
     }
 
-    logger.info("=" * 60)
-    logger.info(
-        f"RESULTADO: {resumo['cluster_a']} similares | {resumo['cluster_b']} nao similares | "
-        f"{resumo['terrenos_excluidos']} terrenos separados"
-    )
-    logger.info(
-        f"[Ag2][PreClassificacao] eliminados antes da LLM: "
-        f"{resumo_pre['incompativeis_pre_classificacao']}"
-    )
-    logger.info(
-        f"[Ag2][Clustering] enviados para LLM: {resumo_pre['selecionados_para_llm']} "
-        f"(todos os elegiveis apos pre-classificacao)"
-    )
-    logger.info("=" * 60)
+    status = "ok"
+    if not cluster_a and elegiveis:
+        status = "alerta_sem_cluster_a"
+    if not filtrados and not terrenos:
+        status = "erro_sem_candidatos"
 
-    # ── 8. SALVA ────────────────────────────────────────────────────
     saida = {
+        "status": status,
+        "run_id": _sanitizar_run_id(run_id),
         "imovel_alvo": imovel_alvo,
         "comparaveis": resultado_final,
+        "cluster_a": cluster_a,
+        "cluster_b": cluster_b,
+        "nao_julgados": nao_julgados,
         "terrenos": terrenos,
         "estatisticas_areas": estatisticas_areas,
         "pre_classificacao": resumo_pre,
+        "alertas": alertas_entrada,
         "resumo": resumo,
     }
 
-    caminho_saida = os.path.join(DATA_DIR, arquivo_saida)
-    with open(caminho_saida, "w", encoding="utf-8") as f:
-        json.dump(saida, f, ensure_ascii=False, indent=2, default=str)
+    # Resumo final auditavel (mesmo padrao do Agente 1): consolida numeros e status.
+    logger.info("=" * 55)
+    logger.info(f"[Ag2] RESULTADO FINAL: status={status}")
+    logger.info(f"[Ag2]   Construidos analisados : {len(filtrados)}")
+    logger.info(f"[Ag2]   Elegiveis pos-pre-class: {len(elegiveis)} | reprovados_pre: {len(incompativeis_pre)}")
+    logger.info(f"[Ag2]   Cluster A (comparaveis): {len(cluster_a)}")
+    logger.info(f"[Ag2]   Cluster B (descartados): {len(cluster_b)}")
+    logger.info(f"[Ag2]   Nao julgados (falha LLM): {len(nao_julgados)}")
+    logger.info(f"[Ag2]   Terrenos separados     : {len(terrenos)}")
+    logger.info(f"[Ag2]   LLM: tentados={llm_tentados} | classificados={llm_classificados} | nao_julgados={llm_nao_julgados}")
+    if resumo["fallback_python_top20_acionado"]:
+        logger.info(f"[Ag2]   [!] Fallback Python top {TOP_N_FALLBACK_PYTHON} acionado (nenhum julgamento LLM)")
+    logger.info("=" * 55)
+
+    caminho_saida = os.path.join(run_dir, arquivo_saida)
+    _salvar_json_atomico(saida, caminho_saida)
+    saida["arquivo_saida"] = caminho_saida
     logger.info(f"Salvo em: {caminho_saida}")
-
     return saida
-
-
-# =============================================================================
-# BLOCO 5 - ZONA HOMOGENEA (Google Maps + Vision)
-# =============================================================================
 
 def _obter_imagem_satelite(endereco: str, lat: float = None, lon: float = None, zoom: int = 16) -> bytes:
     """
@@ -1467,28 +1494,12 @@ def _obter_imagem_satelite(endereco: str, lat: float = None, lon: float = None, 
 
 def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     """
-    Envia imagem de satelite para analise visual e identificacao da zona homogenea.
-
-    Cadeia de fallback:
-      1. Qwen3-VL-8B — Google Colab
-      2. Gemini (gemini-3.5-flash-lite) — com response_mime_type JSON
-      3. Groq Vision (qwen3.6-27b)
-      4. NVIDIA NIM (google/gemma-4-31b-it)
-      5. Fallback: raio padrao 500m
-
-    Foca nos tres fatores prioritarios para definir a zona:
-      - Padrao construtivo aparente (casas, sobrados, predios, misto)
-      - Homogeneidade visual (alta, media, baixa)
-      - Densidade urbana (baixa, media, alta)
-
-    Retorna dict com:
-      - padrao_construtivo: str
-      - homogeneidade_visual: str
-      - densidade_urbana: str
-      - raio_sugerido_metros: int
-      - justificativa_raio: str
-      - descricao_zona_homogenea: str
-      - confianca: str
+    Analisa visualmente a zona. Providers de visao:
+      1. Qwen3-VL-8B Colab
+      2. Gemini gemini-3.5-flash-lite
+      3. Groq qwen/qwen3.8-27b
+      4. NVIDIA meta/llama-3.2-11b-vision-instruct
+      5. fallback unico RAIO_FALLBACK_METROS
     """
     import base64
     import time as t_zona
@@ -1500,11 +1511,17 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     qwen_key = _obter_secret("QWEN_API_KEY")
     qwen_disponivel = bool(qwen_url and qwen_key)
 
+    fallback = {
+        "raio_metros": RAIO_FALLBACK_METROS,
+        "raio_sugerido_metros": RAIO_FALLBACK_METROS,
+        "descricao_zona_homogenea": "Analise visual nao disponivel; raio fallback aplicado",
+        "confianca": "baixa",
+        "provider_visao": "fallback",
+    }
     if not qwen_disponivel and not google_key and not groq_key and not nvidia_key:
-        logger.warning("Nenhum provedor de visao configurado — usando raio padrao")
-        return {"raio_metros": 500}
+        logger.warning("Nenhum provider de visao configurado — usando raio fallback")
+        return fallback
 
-    # Converte pra JPEG com qualidade 85 (mantém resolução original 1280x1280)
     try:
         from PIL import Image
         import io
@@ -1514,128 +1531,77 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
         imagem_comprimida = buffer.getvalue()
         img_b64 = base64.b64encode(imagem_comprimida).decode("utf-8")
         img_mime = "image/jpeg"
-        logger.info(
-            f"Imagem: {img.width}x{img.height} | "
-            f"{len(imagem_bytes)//1024}KB -> "
-            f"{len(imagem_comprimida)//1024}KB (JPEG 85%)"
-        )
     except Exception:
         img_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
         img_mime = "image/png"
 
-    prompt = f"""Analise a imagem de satélite centrada no imóvel (marcador vermelho).
-Endereço: {endereco_alvo}
+    prompt = f"""Analise a imagem de satelite centrada no imovel alvo (marcador vermelho).
+Endereco: {endereco_alvo}
 
-Sugira um raio para a ZONA HOMOGÊNEA usando SOMENTE elementos visíveis.
-Não use conhecimento externo. Não faça inferências sobre preço ou perfil socioeconômico.
+Defina uma ZONA HOMOGENEA usando SOMENTE elementos visiveis.
+Nao use conhecimento externo, preco, renda ou perfil socioeconomico.
 
 ANALISE:
-1. Padrão construtivo: casas | sobrados | predios_baixos | predios_medios | torres_altas | misto | indefinido
-2. Homogeneidade visual: alta | media | baixa | indefinida
-3. Densidade urbana: baixa | media | alta | indefinida
-4. Transição visual: nenhuma_relevante | proxima | intermediaria | distante | indefinida
-
-RAIO (escolha SOMENTE): 300 | 500 | 700 | 1000 | 1500 metros
-300=mudanças próximas | 500=homogêneo entorno | 700=predominante | 1000=amplo | 1500=muito homogêneo
+1. Padrao construtivo aparente.
+2. Homogeneidade visual.
+3. Densidade urbana.
+4. Existencia e proximidade de transicoes visuais relevantes.
+5. Escolha LIVREMENTE um raio em metros que melhor represente a area visualmente homogenea.
+   Nao escolha a partir de uma lista fixa. Use um numero inteiro e justifique visualmente.
 
 RESPONDA SOMENTE JSON:
 {{
   "padrao_construtivo": "...",
-  "homogeneidade_visual": "...",
-  "densidade_urbana": "...",
+  "homogeneidade_visual": "alta | media | baixa | indefinida",
+  "densidade_urbana": "baixa | media | alta | indefinida",
   "transicao_visual": "...",
-  "raio_sugerido_metros": 700,
+  "raio_sugerido_metros": 650,
   "justificativa_raio": "...",
   "descricao_zona_homogenea": "...",
   "confianca": "alta | media | baixa"
 }}"""
 
-    # ============================================================
-    # TENTATIVA 1 — QWEN3-VL-8B NO GOOGLE COLAB
-    # ============================================================
     if qwen_disponivel:
-        logger.info("[Ag2][Zona] Tentando Qwen3-VL-8B no Colab...")
         t0 = t_zona.time()
-
-        resposta_qwen = _chamar_qwen_colab(
-            prompt=prompt,
-            imagem_bytes=imagem_bytes,
-            max_new_tokens=1024,
-        )
-
-        if resposta_qwen:
-            _log_resposta_llm(
-                "Qwen3-VL-8B Colab - Zona Homogenea",
-                resposta_qwen,
-            )
-
-            resultado = _parsear_json_zona(resposta_qwen)
-
+        resposta = _chamar_qwen_colab(prompt=prompt, imagem_bytes=imagem_bytes, max_new_tokens=1024)
+        if resposta:
+            _log_resposta_llm("Qwen3-VL-8B Colab - Zona Homogenea", resposta)
+            resultado = _parsear_json_zona(resposta)
             if resultado:
-                logger.info(
-                    f"[Ag2][Zona] provedor=Qwen3-VL-8B Colab | "
-                    f"tempo={t_zona.time()-t0:.1f}s"
-                )
+                resultado["provider_visao"] = "qwen_colab"
+                resultado["modelo_visao"] = "Qwen3-VL-8B"
+                logger.info(f"[Ag2][Zona] Qwen em {t_zona.time()-t0:.1f}s")
                 return resultado
 
-            logger.warning(
-                "[Ag2][Zona] Qwen respondeu, mas o JSON da zona nao foi valido — "
-                "tentando Gemini..."
-            )
-        else:
-            logger.info("[Ag2][Zona] Qwen indisponivel — tentando Gemini...")
-
-    # ============================================================
-    # TENTATIVA 2 — GEMINI
-    # ============================================================
     if google_key:
-        t0 = t_zona.time()
         resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
         if resultado:
-            logger.info(
-                f"[Ag2][Zona] provedor=Gemini | "
-                f"tempo={t_zona.time()-t0:.1f}s"
-            )
+            resultado["provider_visao"] = "gemini"
+            resultado["modelo_visao"] = "gemini-3.5-flash-lite"
             return resultado
-        logger.info("[Ag2][Zona] Gemini visao falhou — tentando Groq Vision...")
 
-    # ============================================================
-    # TENTATIVA 3 — GROQ VISION
-    # ============================================================
     if groq_key:
-        t0 = t_zona.time()
         resultado = _chamar_groq_visao(prompt, img_b64, img_mime, groq_key)
         if resultado:
-            logger.info(
-                f"[Ag2][Zona] provedor=Groq | "
-                f"tempo={t_zona.time()-t0:.1f}s"
-            )
+            resultado["provider_visao"] = "groq"
+            resultado["modelo_visao"] = "qwen/qwen3.8-27b"
             return resultado
-        logger.info(
-            "[Ag2][Zona] Groq Vision falhou — "
-            "tentando NVIDIA NIM (timeout 30s)..."
-        )
 
-    # ============================================================
-    # TENTATIVA 4 — NVIDIA NIM
-    # ============================================================
     if nvidia_key:
-        t0 = t_zona.time()
         resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
         if resultado:
-            logger.info(
-                f"[Ag2][Zona] provedor=NVIDIA | "
-                f"tempo={t_zona.time()-t0:.1f}s"
-            )
+            resultado["provider_visao"] = "nvidia"
+            resultado["modelo_visao"] = "meta/llama-3.2-11b-vision-instruct"
             return resultado
 
-    return {
-        "raio_metros": 500,
-        "descricao_zona_homogenea": "Analise visual nao disponivel",
-    }
+    return fallback
 
 def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
-    """Chama NVIDIA NIM (google/gemma-4-31b-it) para analise visual. Timeout 30s, sem retries."""
+    """Chama NVIDIA NIM (meta/llama-3.2-11b-vision-instruct) para analise visual.
+
+    O antigo google/gemma-4-31b-it foi descontinuado. O llama-3.2-11b-vision-instruct
+    e o VLM gratuito vivo no endpoint NVIDIA. Timeout 30s, sem retries.
+    """
     try:
         from openai import OpenAI
         import httpx
@@ -1647,7 +1613,7 @@ def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str)
         )
 
         response = client.chat.completions.create(
-            model="google/gemma-4-31b-it",
+            model="meta/llama-3.2-11b-vision-instruct",
             messages=[
                 {
                     "role": "user",
@@ -1665,9 +1631,9 @@ def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str)
         )
 
         texto = response.choices[0].message.content or ""
-        logger.info(f"NVIDIA NIM (gemma-4-31b-it) respondeu ({len(texto)} chars)")
+        logger.info(f"NVIDIA NIM (llama-3.2-11b-vision-instruct) respondeu ({len(texto)} chars)")
 
-        return _parsear_json_zona(texto)
+        return _validar_zona_llm(texto)
 
     except Exception as e:
         logger.warning(f"    [LLM] NVIDIA NIM visao falhou: {e}")
@@ -1675,13 +1641,17 @@ def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str)
 
 
 def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
-    """Chama Groq (qwen3.6-27b) com imagem para zona homogenea. Retorna dict ou None."""
+    """Chama Groq (qwen3.8-27b) com imagem para zona homogenea. Retorna dict ou None.
+
+    O qwen3.6-27b foi descontinuado (decommission 14/09/2026); qwen3.8-27b e o
+    substituto oficial do Groq e tambem aceita imagem.
+    """
     try:
         from groq import Groq
         client = Groq(api_key=api_key)
 
         response = client.chat.completions.create(
-            model="qwen/qwen3.6-27b",
+            model="qwen/qwen3.8-27b",
             messages=[
                 {
                     "role": "user",
@@ -1696,12 +1666,36 @@ def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -
             ],
             temperature=0,
             max_completion_tokens=1024,
+            # JSON Schema Mode: o qwen3.8-27b suporta oficialmente e garante a
+            # estrutura completa da zona, reduzindo respostas incompletas.
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "zona_homogenea",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "padrao_construtivo": {"type": "string"},
+                            "homogeneidade_visual": {"type": "string"},
+                            "densidade_urbana": {"type": "string"},
+                            "transicao_visual": {"type": "string"},
+                            "raio_sugerido_metros": {"type": "integer"},
+                            "justificativa_raio": {"type": "string"},
+                            "descricao_zona_homogenea": {"type": "string"},
+                            "confianca": {"type": "string"},
+                        },
+                        "required": list(CAMPOS_OBRIGATORIOS_ZONA),
+                        "additionalProperties": False,
+                    },
+                },
+            },
         )
 
         texto = response.choices[0].message.content or ""
-        logger.info(f"Groq Vision (qwen3.6-27b) respondeu ({len(texto)} chars)")
+        logger.info(f"Groq Vision (qwen3.8-27b) respondeu ({len(texto)} chars)")
 
-        return _parsear_json_zona(texto)
+        return _validar_zona_llm(texto)
 
     except Exception as e:
         logger.warning(f"    [LLM] Groq Vision falhou: {e}")
@@ -1732,7 +1726,7 @@ def _chamar_gemini_visao(prompt: str, imagem_bytes: bytes, api_key: str) -> dict
         texto = response.text or ""
         logger.info(f"Gemini visao respondeu ({len(texto)} chars)")
 
-        return _parsear_json_zona(texto)
+        return _validar_zona_llm(texto)
 
     except Exception as e:
         logger.warning(f"    [LLM] Gemini visao falhou: {e}")
@@ -1740,82 +1734,146 @@ def _chamar_gemini_visao(prompt: str, imagem_bytes: bytes, api_key: str) -> dict
 
 
 def _parsear_json_zona(texto: str) -> dict | None:
-    """Parseia o JSON da zona homogenea da resposta da LLM. Retorna dict ou None."""
-    # Remove <think>...</think>
-    if '</think>' in texto:
-        texto = texto.split('</think>', 1)[1].strip()
+    """Parseia zona e converte raio numerico/string para inteiro sem lista fixa."""
+    if not texto:
+        return None
+    if "</think>" in texto:
+        texto = texto.split("</think>", 1)[1].strip()
+    texto = re.sub(r"```json\s*", "", texto, flags=re.I)
+    texto = re.sub(r"```\s*", "", texto).strip()
 
-    # Remove markdown code blocks
-    texto = re.sub(r'```json\s*', '', texto)
-    texto = re.sub(r'```\s*', '', texto)
-    texto = texto.strip()
+    inicio = texto.find("{")
+    if inicio < 0:
+        return None
+    # Balanceamento que IGNORA chaves dentro de strings JSON. Sem isso, um valor
+    # como "confianca": "}" (lixo gerado por alguns modelos) fecharia o objeto no
+    # lugar errado e produziria JSON invalido.
+    nivel = 0
+    fim = -1
+    em_string = False
+    escape = False
+    for i in range(inicio, len(texto)):
+        ch = texto[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            em_string = not em_string
+            continue
+        if em_string:
+            continue
+        if ch == "{":
+            nivel += 1
+        elif ch == "}":
+            nivel -= 1
+            if nivel == 0:
+                fim = i
+                break
+    if fim <= inicio:
+        return None
 
-    # Tenta encontrar JSON balanceado
-    inicio = texto.find('{')
-    if inicio >= 0:
-        nivel = 0
-        fim = -1
-        for i in range(inicio, len(texto)):
-            if texto[i] == '{':
-                nivel += 1
-            elif texto[i] == '}':
-                nivel -= 1
-                if nivel == 0:
-                    fim = i
-                    break
-        if fim > inicio:
-            bloco = texto[inicio:fim+1]
-            try:
-                resultado = json.loads(bloco)
-                # Valida que tem campos esperados
-                if "raio_sugerido_metros" in resultado or "padrao_construtivo" in resultado:
-                    # Normaliza raio
-                    if "raio_sugerido_metros" in resultado:
-                        resultado["raio_metros"] = resultado["raio_sugerido_metros"]
-                    raios_validos = [300, 500, 700, 1000, 1500]
-                    raio = resultado.get("raio_metros", 700)
-                    if isinstance(raio, (int, float)):
-                        raio = int(raio)
-                        if raio not in raios_validos:
-                            raio = min(raios_validos, key=lambda x: abs(x - raio))
-                        resultado["raio_metros"] = raio
-                        resultado["raio_sugerido_metros"] = raio
-                    return resultado
-            except json.JSONDecodeError:
-                pass
+    try:
+        resultado = json.loads(texto[inicio:fim + 1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(resultado, dict):
+        return None
+    if not any(k in resultado for k in ("raio_sugerido_metros", "raio_metros", "padrao_construtivo")):
+        return None
 
+    raio_raw = resultado.get("raio_sugerido_metros", resultado.get("raio_metros"))
+    if raio_raw is None:
+        raio = RAIO_FALLBACK_METROS
+    else:
+        try:
+            if isinstance(raio_raw, str):
+                m = re.search(r"-?\d+(?:[.,]\d+)?", raio_raw)
+                if not m:
+                    raise ValueError("raio sem numero")
+                raio_raw = m.group(0).replace(",", ".")
+            raio = int(round(float(raio_raw)))
+        except (TypeError, ValueError):
+            raio = RAIO_FALLBACK_METROS
+
+    # A LLM escolhe livremente o raio; aplicamos apenas uma barreira de sanidade
+    # para evitar valores absurdos por erro de geracao (ex.: 50000m).
+    if raio <= 0:
+        raio = RAIO_FALLBACK_METROS
+    elif raio < RAIO_MINIMO_SEGURANCA:
+        logger.info(f"[Ag2][Zona] raio {raio}m abaixo do minimo; ajustado para {RAIO_MINIMO_SEGURANCA}m")
+        raio = RAIO_MINIMO_SEGURANCA
+    elif raio > RAIO_MAXIMO_SEGURANCA:
+        logger.info(f"[Ag2][Zona] raio {raio}m acima do maximo; ajustado para {RAIO_MAXIMO_SEGURANCA}m")
+        raio = RAIO_MAXIMO_SEGURANCA
+    resultado["raio_metros"] = raio
+    resultado["raio_sugerido_metros"] = raio
+    return resultado
+
+
+# Campos obrigatorios da resposta de visao da zona homogenea.
+CAMPOS_OBRIGATORIOS_ZONA = (
+    "padrao_construtivo",
+    "homogeneidade_visual",
+    "densidade_urbana",
+    "transicao_visual",
+    "raio_sugerido_metros",
+    "justificativa_raio",
+    "descricao_zona_homogenea",
+    "confianca",
+)
+
+
+def _validar_zona_llm(texto: str) -> dict | None:
+    """
+    Validacao rigorosa da resposta de visao (mesmo rigor do clustering).
+
+    So aceita quando a resposta traz TODOS os campos obrigatorios preenchidos.
+    Se qualquer campo faltar/vier vazio, retorna None para o roteador tentar o
+    proximo provider, em vez de aceitar uma resposta incompleta e completar com
+    defaults (que mascarava falhas do provider).
+    """
+    dados = _parsear_json_zona(texto)
+    if not dados:
+        return None
+    for campo in CAMPOS_OBRIGATORIOS_ZONA:
+        valor = dados.get(campo)
+        if valor is None:
+            logger.info(f"[Ag2][Zona] resposta incompleta: campo '{campo}' ausente — proximo provider")
+            return None
+        # Campos textuais nao podem vir vazios; raio ja foi normalizado para int > 0.
+        if isinstance(valor, str) and not valor.strip():
+            logger.info(f"[Ag2][Zona] resposta incompleta: campo '{campo}' vazio — proximo provider")
+            return None
+    return dados
 
 def _geocodificar(endereco: str) -> tuple:
-    """
-    Geocodifica um endereco. Tenta 2 fontes:
-      1. Nominatim (OpenStreetMap) — gratis, sem key, 1 req/s
-      2. Google Geocoding API (fallback) — mais completo, gasta da cota de 10.000/mes
-
-    Retorna (latitude, longitude) ou (None, None) se ambos falharem.
-    """
+    """Geocodifica uma tentativa: Nominatim primeiro, Google depois."""
     import requests
+    if not endereco or not str(endereco).strip():
+        return None, None
 
-    # 1. Nominatim (gratis, sem key)
     try:
         r = requests.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": endereco, "format": "json", "limit": 1},
+            params={"q": endereco, "format": "json", "limit": 1, "countrycodes": "br"},
             headers={"User-Agent": "ProjetoImoveisIA/1.0"},
             timeout=10,
         )
         if r.status_code == 200 and r.json():
             data = r.json()[0]
             return float(data["lat"]), float(data["lon"])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Nominatim falhou para {endereco!r}: {e}")
 
-    # 2. Google Geocoding API (fallback — mais completo)
     maps_key = os.getenv("GOOGLE_MAPS_KEY", "")
     if maps_key:
         try:
             r = requests.get(
                 "https://maps.googleapis.com/maps/api/geocode/json",
-                params={"address": endereco, "key": maps_key},
+                params={"address": endereco, "key": maps_key, "region": "br"},
                 timeout=10,
             )
             if r.status_code == 200:
@@ -1823,11 +1881,67 @@ def _geocodificar(endereco: str) -> tuple:
                 if results:
                     loc = results[0]["geometry"]["location"]
                     return float(loc["lat"]), float(loc["lng"])
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug(f"Google Geocoding falhou para {endereco!r}: {e}")
     return None, None
 
+
+def _inferir_componentes_endereco(endereco: str, cidade: str = "", estado: str = "") -> dict:
+    """Tenta aproveitar componentes do endereco textual apenas para fallbacks, sem exigir formato fixo."""
+    partes = [p.strip() for p in str(endereco or "").split(",") if p.strip()]
+    numero = next((p for p in partes if re.fullmatch(r"\d+[A-Za-z]?", p)), "")
+    rua = partes[0] if partes else ""
+    bairro = ""
+    cidade_norm = _normalizar_texto(cidade)
+    for i, p in enumerate(partes):
+        if cidade_norm and _normalizar_texto(p) == cidade_norm and i > 0:
+            anterior = partes[i - 1]
+            if anterior != numero and _normalizar_texto(anterior) != _normalizar_texto(rua):
+                bairro = anterior
+            break
+    return {"rua": rua, "numero": numero, "bairro": bairro}
+
+
+def _geocodificar_com_fallback(
+    *,
+    endereco_principal: str = "",
+    rua: str = "",
+    numero: str = "",
+    bairro: str = "",
+    cidade: str = "",
+    estado: str = "",
+    permitir_cidade: bool = False,
+) -> tuple[float | None, float | None, str | None, str | None]:
+    """
+    Tenta do mais preciso ao menos preciso.
+    Retorna (lat, lon, nivel, endereco_usado).
+    niveis: endereco_completo, rua_numero, rua, bairro, cidade.
+    """
+    import time
+    tentativas = []
+
+    def add(nivel: str, partes: list[str]):
+        endereco = ", ".join(str(p).strip() for p in partes if p not in (None, "") and str(p).strip())
+        if endereco and endereco not in [x[1] for x in tentativas]:
+            tentativas.append((nivel, endereco))
+
+    add("endereco_completo", [endereco_principal])
+    if rua and numero:
+        add("rua_numero", [rua, numero, bairro, cidade, estado, "Brasil"])
+    if rua:
+        add("rua", [rua, bairro, cidade, estado, "Brasil"])
+    if bairro:
+        add("bairro", [bairro, cidade, estado, "Brasil"])
+    if permitir_cidade and cidade:
+        add("cidade", [cidade, estado, "Brasil"])
+
+    for idx, (nivel, endereco) in enumerate(tentativas):
+        lat, lon = _geocodificar(endereco)
+        if lat is not None and lon is not None:
+            return lat, lon, nivel, endereco
+        if idx < len(tentativas) - 1:
+            time.sleep(1.05)
+    return None, None, None, None
 
 def _distancia_haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
@@ -1843,17 +1957,73 @@ def _distancia_haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> 
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _classificar_por_distancia(distancia_metros: float, raio_zona: int = 700) -> str:
+def _classificar_por_distancia(distancia_metros: float, raio_zona: int | float = RAIO_FALLBACK_METROS) -> str:
+    """Classifica usando exatamente o raio escolhido/normalizado, sem minimo artificial de 400m."""
+    try:
+        raio = float(raio_zona)
+    except (TypeError, ValueError):
+        raio = float(RAIO_FALLBACK_METROS)
+    if raio <= 0:
+        raio = float(RAIO_FALLBACK_METROS)
+    return "na_zona" if distancia_metros <= raio else "fora_zona"
+
+def _classificar_imovel_na_zona(
+    im: dict,
+    lat_alvo: float,
+    lon_alvo: float,
+    raio: float,
+    cidade: str,
+    estado: str,
+) -> str:
     """
-    Classifica se o imovel esta na zona homogenea ou fora.
-    Usa o raio sugerido pela LLM (baseado na analise visual da regiao).
-    Raio minimo: 400m (evita zonas muito pequenas em centros urbanos).
+    Geocodifica um imovel (reusa lat/lon do Athena quando existem) e classifica
+    em na_zona / fora_zona / zona_nao_verificada, gravando os campos no proprio dict.
+    Retorna a classificacao. Usada tanto para comparaveis quanto para terrenos.
     """
-    raio = max(raio_zona, 400)
-    if distancia_metros <= raio:
-        return "na_zona"
-    else:
-        return "fora_zona"
+    rua = im.get("street") or im.get("rua") or ""
+    bairro = im.get("neighborhood") or im.get("bairro") or ""
+    numero = _obter_numero_endereco(im)
+    lat_existente = im.get("lat") if im.get("lat") is not None else im.get("latitude")
+    lon_existente = im.get("lon") if im.get("lon") is not None else im.get("longitude")
+
+    lat = lon = None
+    nivel = None
+    endereco_usado = None
+    if lat_existente is not None and lon_existente is not None:
+        try:
+            lat, lon = float(lat_existente), float(lon_existente)
+            nivel = "coordenadas_athena"
+            endereco_usado = "lat/lon existentes"
+        except (TypeError, ValueError):
+            lat = lon = None
+
+    if lat is None or lon is None:
+        lat, lon, nivel, endereco_usado = _geocodificar_com_fallback(
+            rua=rua,
+            numero=numero,
+            bairro=bairro,
+            cidade=cidade or im.get("city") or im.get("cidade") or "",
+            estado=estado or im.get("state") or im.get("estado") or "",
+            permitir_cidade=False,
+        )
+
+    if lat is None or lon is None:
+        im["distancia_metros"] = None
+        im["classificacao_zona"] = "zona_nao_verificada"
+        im["coordenadas"] = None
+        im["geocodificacao_nivel"] = None
+        im["endereco_geocodificado"] = None
+        return "zona_nao_verificada"
+
+    dist = _distancia_haversine(lat_alvo, lon_alvo, lat, lon)
+    classificacao = _classificar_por_distancia(dist, raio)
+    im["distancia_metros"] = round(dist)
+    im["classificacao_zona"] = classificacao
+    im["coordenadas"] = {"lat": lat, "lon": lon}
+    im["geocodificacao_nivel"] = nivel
+    im["endereco_geocodificado"] = endereco_usado
+    im["confianca_geocodificacao"] = "baixa" if nivel == "bairro" else "alta"
+    return classificacao
 
 
 def analisar_zona_homogenea(
@@ -1863,175 +2033,202 @@ def analisar_zona_homogenea(
     estado: str = "",
     lat_alvo_precomp: float = None,
     lon_alvo_precomp: float = None,
+    bairro_alvo: str = "",
+    rua_alvo: str = "",
+    numero_alvo: str = "",
+    terrenos: Optional[list[dict]] = None,
+    run_id: str | None = None,
 ) -> dict:
     """
-    Analisa a zona homogenea do imovel alvo e valida os comparaveis.
+    Valida geograficamente os comparaveis.
 
-    FLUXO:
-      1. Geocodificacao do endereco alvo (Nominatim → lat/lng)
-      2. Geracao da imagem da regiao (Google Maps Static API, hybrid, scale=2, marcador)
-      3. Analise visual da regiao (NVIDIA NIM gemma-4-31b-it; fallback: Gemini)
-      4. Definicao da zona de analise (raio sugerido pela LLM, minimo 400m)
-      5. Geocoding de cada imovel (Nominatim) + calculo de distancia (Haversine)
-      6. Classificacao: na_zona ou fora_zona
+    Ordem de geocodificacao do candidato quando Athena nao trouxe lat/lon:
+      1. rua + numero + bairro + cidade + estado;
+      2. rua + bairro + cidade + estado;
+      3. bairro + cidade + estado;
+      4. se tudo falhar -> zona_nao_verificada (NAO vira fora_zona).
 
-    CLASSIFICACAO:
-      - na_zona: ate o raio sugerido pela LLM (ou mesmo bairro sem coordenada)
-      - fora_zona: acima do raio
-
-    Parametros
-    ----------
-    endereco_alvo : str
-        Endereco completo do imovel alvo
-    imoveis : list[dict]
-        Lista de imoveis pra validar geograficamente
-    cidade : str
-        Cidade (complementa enderecos incompletos)
-    estado : str
-        Estado (sigla)
-
-    Retorna
-    -------
-    dict com:
-      - zona_homogenea: analise visual da LLM (tipo, uso, padrao, densidade, raio, etc.)
-      - comparaveis_confirmados: imoveis na zona
-      - fora_zona: imoveis fora da zona
-      - imagem_satelite: caminho do PNG salvo
+    Para o alvo, tenta endereco completo e fallbacks progressivos. Se nenhuma forma
+    geocodificar, nao confirma todos: retorna comparaveis_nao_verificados.
     """
     logger.info("=" * 55)
     logger.info("ZONA HOMOGENEA: Google Maps + LLM Vision")
     logger.info("=" * 55)
+    run_dir = _obter_data_dir(run_id)
+    imoveis = list(imoveis or [])
 
-    # ── 1. GEOCODIFICACAO DO ALVO ─────────────────────────────────
-    if lat_alvo_precomp and lon_alvo_precomp:
-        lat_alvo, lon_alvo = lat_alvo_precomp, lon_alvo_precomp
-        logger.info(f"[Ag2][Geo] reutilizando coordenadas do alvo | lat={lat_alvo:.6f} | lon={lon_alvo:.6f}")
+    # Garante passagem de terrenos ao Agente 5. Se nao vierem explicitamente,
+    # tenta recuperar da saida da mesma execucao.
+    if terrenos is None:
+        terrenos = []
+        caminho_comp = os.path.join(run_dir, "imoveis_comparaveis_ag2.json")
+        if os.path.exists(caminho_comp):
+            try:
+                with open(caminho_comp, "r", encoding="utf-8") as f:
+                    terrenos = list((json.load(f) or {}).get("terrenos") or [])
+            except Exception as e:
+                logger.warning(f"Nao foi possivel recuperar terrenos da saida do Agente 2: {e}")
     else:
-        logger.info("[Ag2][Zona] Geocodificando: %s", endereco_alvo)
-        lat_alvo, lon_alvo = _geocodificar(endereco_alvo)
-    if not lat_alvo:
-        logger.warning("Nao geocodificou o alvo — usando todos os imoveis como confirmados")
-        return {
-            "zona_homogenea": {},
-            "comparaveis_confirmados": imoveis,
-            "fora_zona": [],
-            "imagem_satelite": None,
-        }
-    logger.info(f"[Ag2][Zona] Alvo: {lat_alvo:.6f}, {lon_alvo:.6f}")
+        terrenos = list(terrenos or [])
 
-    # ── 2. IMAGEM DE SATELITE ─────────────────────────────────────
-    logger.info("Gerando imagem de satelite (hybrid, scale=2, marcador)...")
+    # 1. Geocodificacao do alvo
+    nivel_geo_alvo = "coordenadas_precomputadas" if lat_alvo_precomp is not None and lon_alvo_precomp is not None else None
+    endereco_geo_alvo = endereco_alvo
+    if lat_alvo_precomp is not None and lon_alvo_precomp is not None:
+        try:
+            lat_alvo, lon_alvo = float(lat_alvo_precomp), float(lon_alvo_precomp)
+        except (TypeError, ValueError):
+            lat_alvo = lon_alvo = None
+    else:
+        inferidos = _inferir_componentes_endereco(endereco_alvo, cidade, estado)
+        rua_fb = rua_alvo or inferidos["rua"]
+        numero_fb = numero_alvo or inferidos["numero"]
+        bairro_fb = bairro_alvo or inferidos["bairro"]
+        lat_alvo, lon_alvo, nivel_geo_alvo, endereco_geo_alvo = _geocodificar_com_fallback(
+            endereco_principal=endereco_alvo,
+            rua=rua_fb,
+            numero=numero_fb,
+            bairro=bairro_fb,
+            cidade=cidade,
+            estado=estado,
+            # cidade isolada e grosseira demais para declarar zona confirmada.
+            permitir_cidade=False,
+        )
+
+    if lat_alvo is None or lon_alvo is None:
+        logger.warning("Nao foi possivel geocodificar o alvo nem pelos fallbacks — zona nao verificada")
+        for im in imoveis:
+            im["distancia_metros"] = None
+            im["classificacao_zona"] = "zona_nao_verificada"
+            im["coordenadas"] = None
+            im["geocodificacao_nivel"] = None
+        resultado = {
+            "status": "zona_nao_verificada",
+            "run_id": _sanitizar_run_id(run_id),
+            "zona_homogenea": {
+                "raio_metros": RAIO_FALLBACK_METROS,
+                "raio_sugerido_metros": RAIO_FALLBACK_METROS,
+                "descricao_zona_homogenea": "Alvo nao geocodificado; nenhuma confirmacao geografica foi feita",
+                "confianca": "baixa",
+            },
+            "comparaveis_confirmados": [],
+            "fora_zona": [],
+            "comparaveis_nao_verificados": imoveis,
+            # Sem alvo geocodificado, nenhum terreno pode ser validado geograficamente.
+            "terrenos": [],
+            "terrenos_confirmados": [],
+            "terrenos_fora_zona": [],
+            "terrenos_nao_verificados": terrenos,
+            "imagem_satelite": None,
+            "coordenadas_alvo": None,
+            "geocodificacao_alvo": {"nivel": None, "endereco_usado": None},
+        }
+        _salvar_json_atomico(resultado, os.path.join(run_dir, "zona_homogenea_ag2.json"))
+        return resultado
+
+    logger.info(f"[Ag2][Zona] Alvo {lat_alvo:.6f}, {lon_alvo:.6f} | nivel={nivel_geo_alvo}")
+
+    # 2. Imagem satelite; se falhar, usa o MESMO raio fallback de toda a cadeia.
     imagem = _obter_imagem_satelite(endereco_alvo, lat=lat_alvo, lon=lon_alvo)
     img_path = None
     if imagem:
-        img_path = os.path.join(DATA_DIR, "satelite_zona_homogenea_ag2.png")
-        with open(img_path, "wb") as f:
-            f.write(imagem)
-        logger.info(f"Imagem salva: {img_path} ({len(imagem)//1024}KB)")
-    else:
-        logger.warning("Nao gerou imagem de satelite — continuando sem analise visual")
-
-    # ── 3. ANALISE VISUAL VIA GROQ VISION ─────────────────────────
-    zona = {}
-    if imagem:
-        logger.info("Enviando imagem para cadeia LLM Vision...")
+        img_path = os.path.join(run_dir, "satelite_zona_homogenea_ag2.png")
+        _salvar_bytes_atomico(imagem, img_path)
         zona = _analisar_zona_homogenea(imagem, endereco_alvo)
-        logger.info(f"Zona: padrao={zona.get('padrao_construtivo','?')} | "
-                    f"homogeneidade={zona.get('homogeneidade_visual','?')} | "
-                    f"densidade={zona.get('densidade_urbana','?')} | "
-                    f"raio={zona.get('raio_sugerido_metros', zona.get('raio_metros','?'))}m")
-        # Loga o JSON completo retornado pela LLM
-        campos_zona = {k: v for k, v in zona.items() if k != "descricao_zona_homogenea" or "<think>" not in str(v)}
-        logger.info(f"Zona JSON: {json.dumps(campos_zona, ensure_ascii=False)}")
+    else:
+        logger.warning("Nao gerou imagem de satelite — usando raio fallback unico")
+        zona = {
+            "raio_metros": RAIO_FALLBACK_METROS,
+            "raio_sugerido_metros": RAIO_FALLBACK_METROS,
+            "descricao_zona_homogenea": "Imagem de satelite indisponivel; raio fallback aplicado",
+            "confianca": "baixa",
+            "provider_visao": "fallback_sem_imagem",
+        }
 
-    # ── 4. GEOCODING DOS IMOVEIS + CLASSIFICACAO POR DISTANCIA ────
-    import time
-    raio_zona = zona.get("raio_sugerido_metros", zona.get("raio_metros", 700))
-    logger.info(f"Geocodificando {len(imoveis)} imoveis (raio da LLM: {raio_zona}m, minimo: {max(raio_zona, 400)}m)...")
+    raio_zona = _parsear_json_zona(json.dumps(zona, ensure_ascii=False)) if zona else None
+    zona = raio_zona or zona or {}
+    raio = zona.get("raio_metros", RAIO_FALLBACK_METROS)
 
-    confirmados = []      # na_zona (por distancia ou por bairro)
-    fora = []             # fora_zona
+    # 3. Geocodifica/classifica candidatos construidos
+    confirmados = []
+    fora = []
+    nao_verificados = []
 
-    for idx, im in enumerate(imoveis):
-        rua = im.get("street", "")
-        bairro = im.get("neighborhood", "")
-
-        # Se já tem coordenadas (Athena), usa direto sem geocodificar
-        lat_existente = im.get("lat")
-        lon_existente = im.get("lon")
-        if lat_existente and lon_existente:
-            try:
-                lat = float(lat_existente)
-                lon = float(lon_existente)
-                dist = _distancia_haversine(lat_alvo, lon_alvo, lat, lon)
-                classificacao = _classificar_por_distancia(dist, raio_zona)
-                im["distancia_metros"] = round(dist)
-                im["classificacao_zona"] = classificacao
-                im["coordenadas"] = {"lat": lat, "lon": lon}
-                if classificacao == "na_zona":
-                    confirmados.append(im)
-                else:
-                    fora.append(im)
-                logger.info(f"  [{idx+1}/{len(imoveis)}] {dist:.0f}m | {classificacao} | {rua or bairro} (coords existentes)")
-                continue
-            except (ValueError, TypeError):
-                pass
-
-        # Se nao tem rua especifica e nao tem coordenadas, nao tem como verificar
-        # Descarta — sem localizacao verificavel
-        if not rua:
-            im["distancia_metros"] = None
-            im["classificacao_zona"] = "fora_zona"
-            im["coordenadas"] = None
-            fora.append(im)
-            logger.info(f"  [{idx+1}/{len(imoveis)}] fora_zona (sem localizacao verificavel) | {bairro}")
-            continue
-
-        # Geocodifica com endereco completo (rua + bairro + cidade + estado)
-        end_imovel = f"{rua}, {bairro}, {cidade}, {estado}, Brasil"
-        lat, lon = _geocodificar(end_imovel)
-        time.sleep(1)  # Nominatim: 1 req/s
-
-        if lat and lon:
-            dist = _distancia_haversine(lat_alvo, lon_alvo, lat, lon)
-            classificacao = _classificar_por_distancia(dist, raio_zona)
-
-            im["distancia_metros"] = round(dist)
-            im["classificacao_zona"] = classificacao
-            im["coordenadas"] = {"lat": lat, "lon": lon}
-
-            if classificacao == "na_zona":
-                confirmados.append(im)
-            else:
-                fora.append(im)
-
-            logger.info(f"  [{idx+1}/{len(imoveis)}] {dist:.0f}m | {classificacao} | {rua}")
+    for idx, im in enumerate(imoveis, 1):
+        classificacao = _classificar_imovel_na_zona(im, lat_alvo, lon_alvo, raio, cidade, estado)
+        rotulo = im.get("street") or im.get("rua") or im.get("neighborhood") or im.get("bairro") or "?"
+        if classificacao == "zona_nao_verificada":
+            nao_verificados.append(im)
+            logger.info(f"  [{idx}/{len(imoveis)}] zona_nao_verificada | {rotulo}")
+        elif classificacao == "na_zona":
+            confirmados.append(im)
+            logger.info(f"  [{idx}/{len(imoveis)}] {im['distancia_metros']}m | na_zona | {rotulo}")
         else:
-            # Geocoding falhou — sem localizacao verificavel, descarta
-            im["distancia_metros"] = None
-            im["classificacao_zona"] = "fora_zona"
-            im["coordenadas"] = None
             fora.append(im)
-            logger.info(f"  [{idx+1}/{len(imoveis)}] fora_zona (geocoding falhou) | {rua}")
+            logger.info(f"  [{idx}/{len(imoveis)}] {im['distancia_metros']}m | fora_zona | {rotulo}")
 
-    # ── 5. RESUMO ─────────────────────────────────────────────────
-    raio_usado = max(raio_zona, 400)
-    logger.info("=" * 55)
-    logger.info(f"[Ag2][Zona] raio={raio_zona}m | na_zona={len(confirmados)} | fora_zona={len(fora)}")
-    logger.info("=" * 55)
+    # 3b. Terrenos passam pela MESMA validacao geografica. Terreno influencia
+    # diretamente a decomposicao de preco de casas no Agente 5, entao nao pode
+    # entrar sem validar distancia. Separa em confirmados/fora/nao_verificados.
+    terrenos_confirmados = []
+    terrenos_fora_zona = []
+    terrenos_nao_verificados = []
+    for idx, t in enumerate(terrenos, 1):
+        classificacao = _classificar_imovel_na_zona(t, lat_alvo, lon_alvo, raio, cidade, estado)
+        rotulo = t.get("street") or t.get("rua") or t.get("neighborhood") or t.get("bairro") or "?"
+        if classificacao == "zona_nao_verificada":
+            terrenos_nao_verificados.append(t)
+            logger.info(f"  [terreno {idx}/{len(terrenos)}] zona_nao_verificada | {rotulo}")
+        elif classificacao == "na_zona":
+            terrenos_confirmados.append(t)
+            logger.info(f"  [terreno {idx}/{len(terrenos)}] {t['distancia_metros']}m | na_zona | {rotulo}")
+        else:
+            terrenos_fora_zona.append(t)
+            logger.info(f"  [terreno {idx}/{len(terrenos)}] {t['distancia_metros']}m | fora_zona | {rotulo}")
 
+    status = "ok"
+    if nao_verificados:
+        status = "ok_com_nao_verificados"
+    if not confirmados and imoveis:
+        status = "alerta_sem_confirmados" if not nao_verificados else "alerta_zona_inconclusiva"
+
+    # O Agente 5 le os terrenos de comparaveis_confirmados (separa por tipo la dentro).
+    # Incluimos os terrenos validados na zona nessa lista para que o Ag5 os utilize
+    # no calculo de m2 de terreno, mantendo tambem os campos dedicados abaixo.
     resultado = {
+        "status": status,
+        "run_id": _sanitizar_run_id(run_id),
         "zona_homogenea": zona,
-        "comparaveis_confirmados": confirmados,
+        "comparaveis_confirmados": confirmados + terrenos_confirmados,
         "fora_zona": fora,
+        "comparaveis_nao_verificados": nao_verificados,
+        # terrenos agora validados geograficamente. "terrenos" aponta para os
+        # confirmados (na zona) para o Agente 5 usar so os que sao referencia real.
+        "terrenos": terrenos_confirmados,
+        "terrenos_confirmados": terrenos_confirmados,
+        "terrenos_fora_zona": terrenos_fora_zona,
+        "terrenos_nao_verificados": terrenos_nao_verificados,
         "imagem_satelite": img_path,
         "coordenadas_alvo": {"lat": lat_alvo, "lon": lon_alvo},
+        "geocodificacao_alvo": {
+            "nivel": nivel_geo_alvo,
+            "endereco_usado": endereco_geo_alvo,
+            "confianca": "baixa" if nivel_geo_alvo == "bairro" else "alta",
+        },
+        "resumo_zona": {
+            "raio_usado_metros": raio,
+            "confirmados": len(confirmados),
+            "fora_zona": len(fora),
+            "nao_verificados": len(nao_verificados),
+            "terrenos_confirmados": len(terrenos_confirmados),
+            "terrenos_fora_zona": len(terrenos_fora_zona),
+            "terrenos_nao_verificados": len(terrenos_nao_verificados),
+        },
     }
 
-    # Salva resultado em JSON
-    caminho_saida = os.path.join(DATA_DIR, "zona_homogenea_ag2.json")
-    with open(caminho_saida, "w", encoding="utf-8") as f:
-        json.dump(resultado, f, ensure_ascii=False, indent=2, default=str)
+    caminho_saida = os.path.join(run_dir, "zona_homogenea_ag2.json")
+    _salvar_json_atomico(resultado, caminho_saida)
+    resultado["arquivo_saida"] = caminho_saida
     logger.info(f"Salvo em: {caminho_saida}")
-
     return resultado
+

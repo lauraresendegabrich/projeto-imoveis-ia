@@ -18,8 +18,8 @@ Recebe os imóveis coletados pelo Agente 1 e identifica quais são realmente com
 ```
 ETAPA 1 — Separação de terrenos
 ETAPA 2 — Score numérico de similaridade
-ETAPA 3 — Clustering via LLM (Groq llama-3.3-70b)
-ETAPA 4 — Zona Homogênea (Google Maps + Groq qwen3.6-27b)
+ETAPA 3 — Clustering via LLM (Groq gpt-oss-120b)
+ETAPA 4 — Zona Homogênea (Google Maps + Groq qwen3.8-27b)
 ```
 
 ---
@@ -33,7 +33,7 @@ Antes de qualquer análise, separa terrenos dos construídos:
 
 Por quê: não faz sentido comparar terreno vazio com casa construída. Score numérico seria distorcido (terreno não tem quartos, banheiros, vagas).
 
-Os terrenos ficam no resultado final com `cluster="terreno"` e vão para a zona homogênea (validação geográfica é relevante pra qualquer tipo).
+Os terrenos ficam no resultado final com `cluster="terreno"` e **passam pela mesma validação geográfica** da zona homogênea (geocodificação + distância ao alvo). São separados em `terrenos_confirmados` (na zona), `terrenos_fora_zona` e `terrenos_nao_verificados`. Isso importa porque o terreno influencia diretamente a decomposição de preço de casas no Agente 5 — um terreno distante distorceria o m² de terreno de referência.
 
 ---
 
@@ -69,15 +69,20 @@ similaridade = 1 - distância
 
 | Prioridade | LLM | Modelo | Configuração |
 |---|---|---|---|
-| 1ª | Groq | llama-3.3-70b-versatile | GROQ_API_KEY |
-| 2ª | Groq | llama-3.3-70b-versatile | GROQ_API_KEY_2 (2ª conta) |
-| 3ª | Gemini | gemini-2.5-flash | GOOGLE_API_KEY |
-| 4ª | Fallback numérico | score ≥ 0.60 → A | — |
+| 1ª | Qwen3-VL-8B | Colab | QWEN_API_URL + QWEN_API_KEY |
+| 2ª | Groq | openai/gpt-oss-120b | GROQ_API_KEY |
+| 3ª | Groq | openai/gpt-oss-120b | GROQ_API_KEY_2 (2ª conta) |
+| 4ª | Gemini | gemini-3.5-flash-lite | GOOGLE_API_KEY_2 / GOOGLE_API_KEY |
+| 5ª | NVIDIA NIM | openai/gpt-oss-20b | NVIDIA_API_KEY |
+| 6ª | Fallback numérico | top 20 do ranking Python → A | — |
+
+> Nota de modelos (verificado em 2026-09): a NVIDIA descontinuou `meta/llama-3.3-70b-instruct` (EOL 2026-08-26); o substituto vivo no endpoint gratuito é `openai/gpt-oss-20b` (o `gpt-oss-120b` não é servido pela NVIDIA).
 
 ### Lotes
 
-- **Tamanho:** 20 candidatos por lote (~6.000 tokens, metade do limite Groq)
-- **Pausa:** 5 segundos entre lotes
+- **Tamanho:** 15 candidatos por lote
+- **Pausa:** 3 segundos entre lotes
+- Toda resposta é validada integralmente (IDs 1..N, cluster A/B, score 0..100, justificativa) antes de ser aceita.
 - **199 imóveis = 10 lotes**
 
 ### O que a LLM recebe
@@ -132,21 +137,22 @@ Valida geograficamente quais imóveis estão na mesma vizinhança.
 
 1. **Geocodifica** o endereço do alvo (Nominatim → lat/lng; fallback: Google Geocoding)
 2. **Gera imagem** de satélite (Google Maps Static API, hybrid, 1280×1280, scale=2, marcador vermelho)
-3. **Groq (qwen3.6-27b)** analisa a imagem visualmente e retorna:
-   - padrão construtivo, homogeneidade visual, densidade urbana
-   - **raio sugerido** em metros (300-1500m)
-   - justificativa e confiança
+3. **LLM de visão** analisa a imagem e retorna (cadeia: Qwen Colab → Groq qwen3.8-27b → Gemini → NVIDIA visão → fallback de raio):
+   - padrão construtivo, homogeneidade visual, densidade urbana, transição visual
+   - **raio sugerido** livre em metros + justificativa
+   - descrição da zona e confiança
+   - A resposta só é aceita se trouxer **todos os 8 campos** obrigatórios preenchidos; caso contrário, tenta o próximo provider (mesmo rigor do clustering). O Groq usa JSON Schema Mode.
 4. **Usa lat/lon do Athena** direto para cada imóvel (não geocodifica de novo)
 5. **Calcula distância** (Haversine) de cada imóvel ao alvo
 6. **Classifica:**
    - `na_zona` = distância ≤ raio sugerido
    - `fora_zona` = distância > raio
-7. **Só envia Cluster A + terrenos** para validação (Cluster B não vai)
-8. **Sem localização verificável = fora_zona** (não assume na_zona)
+   - `zona_nao_verificada` = sem coordenadas nem geocodificação (não assume na_zona)
+7. **Cluster A + terrenos** vão para validação geográfica (Cluster B não vai)
 
-### Raio mínimo
+### Raio livre com barreira de sanidade
 
-Mesmo que a LLM sugira raio menor, aplica mínimo de 400m. Evita excluir comparáveis a poucos quarteirões em centros densos.
+A LLM escolhe o raio livremente (437, 615, 882, 1340...). Não há lista fixa. Só aplicamos uma barreira de sanidade para evitar valores absurdos por erro de geração: valores abaixo de **100m** sobem para 100m e acima de **3000m** descem para 3000m. Raio inválido (≤ 0) cai no fallback de 500m.
 
 ---
 
@@ -216,10 +222,14 @@ Mesmo que a LLM sugira raio menor, aplica mínimo de 400m. Evita excluir compar�
 }
 ```
 
+O JSON também traz `terrenos_confirmados`, `terrenos_fora_zona` e `terrenos_nao_verificados`. Os terrenos confirmados são incluídos em `comparaveis_confirmados` (o Agente 5 separa por tipo ao ler).
+
 **Usado por:**
 - **Agente 3** → pega `comparaveis_confirmados` com cluster=A + na_zona → analisa fotos/descrição
 - **Agente 4** → pega `coordenadas_alvo` (lat/lon) → busca POIs no entorno
-- **Agente 5** → pega `comparaveis_confirmados` + terrenos → calcula preço
+- **Agente 5** → pega `comparaveis_confirmados` (construídos + terrenos validados na zona) → calcula preço
+
+> Isolamento por `run_id`: quando uma avaliação usa `run_id`, o Agente 2 lê a entrada **apenas** da pasta daquela execução. Nunca cai no arquivo global, evitando misturar dados de avaliações diferentes.
 
 ### `data/satelite_zona_homogenea_ag2.png`
 
@@ -254,9 +264,12 @@ Tempo total: ~4 min
 
 | Serviço | Modelo | Uso | Configuração |
 |---|---|---|---|
-| Groq | llama-3.3-70b-versatile | Clustering semântico | `GROQ_API_KEY` + `GROQ_API_KEY_2` |
-| Groq | qwen3.6-27b | Análise visual satélite | `GROQ_API_KEY` |
-| Gemini | gemini-2.5-flash | Fallback clustering | `GOOGLE_API_KEY` |
+| Groq | openai/gpt-oss-120b | Clustering semântico | `GROQ_API_KEY` + `GROQ_API_KEY_2` |
+| NVIDIA NIM | openai/gpt-oss-20b | Fallback clustering (texto) | `NVIDIA_API_KEY` |
+| Gemini | gemini-3.5-flash-lite | Fallback clustering + visão | `GOOGLE_API_KEY_2` / `GOOGLE_API_KEY` |
+| Qwen3-VL-8B | Colab | Visão zona (1º) + clustering (1º) | `QWEN_API_URL` + `QWEN_API_KEY` |
+| Groq | qwen/qwen3.8-27b | Análise visual satélite | `GROQ_API_KEY` |
+| NVIDIA NIM | meta/llama-3.2-11b-vision-instruct | Análise visual satélite (fallback) | `NVIDIA_API_KEY` |
 | Google Maps Static API | — | Imagem de satélite | `GOOGLE_MAPS_KEY` |
 | Nominatim (OpenStreetMap) | — | Geocodificação (grátis) | — |
 | Google Geocoding API | — | Geocodificação (fallback) | `GOOGLE_MAPS_KEY` |

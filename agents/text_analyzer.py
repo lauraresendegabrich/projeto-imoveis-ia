@@ -30,7 +30,7 @@ CADEIA DE FALLBACK (LLMs):
     COMPARAVEIS: Qwen3-VL-8B Colab -> Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
     Qwen3-VL-8B Colab: ate 4 fotos por URL + JSON solicitado no prompt
     Gemini: ate 4 fotos + JSON
-    Groq qwen3.6-27b: ate 2 fotos + JSON Object Mode
+    Groq qwen3.8-27b: ate 2 fotos + JSON Object Mode
     NVIDIA NIM llama-3.2-11b-vision: 1 foto + JSON solicitado no prompt
 
 SAIDA ESTRUTURADA:
@@ -78,7 +78,7 @@ QUEM USA A SAIDA:
 DEPENDENCIAS:
     - requests (Qwen3-VL-8B no Google Colab)
     - google-genai (Gemini 3.5 Flash Lite)
-    - groq (qwen3.6-27b)
+    - groq (qwen3.8-27b)
     - openai (NVIDIA NIM)
 
 COMO RODAR:
@@ -1509,7 +1509,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
 
         def _executar(client_obj):
             return client_obj.chat.completions.create(
-                model="qwen/qwen3.6-27b",
+                model="qwen/qwen3.8-27b",
                 messages=[{"role": "user", "content": content}],
                 temperature=0,
                 max_completion_tokens=1400,
@@ -1525,7 +1525,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
             return {}
 
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
-        resultado["llm_usada"] = "groq-qwen3.6-27b"
+        resultado["llm_usada"] = "groq-qwen3.8-27b"
         return resultado
 
     except Exception as e:
@@ -1551,7 +1551,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
                     resultado2 = _validar_saida_llm(_parse_json_obj(texto_resp2))
                     if resultado2:
                         resultado2["fotos_analisadas"] = len(fotos_selecionadas)
-                        resultado2["llm_usada"] = "groq-qwen3.6-27b"
+                        resultado2["llm_usada"] = "groq-qwen3.8-27b"
                         return resultado2
                 except Exception as retry_error:
                     logger.warning(f"[Ag3][Groq] retry falhou: {retry_error}")

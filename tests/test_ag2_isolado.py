@@ -21,6 +21,8 @@ print("=" * 60)
 imovel_alvo = {
     "endereco": "Rua Codajás, 14, São Gabriel, Belo Horizonte, MG, Brasil",
     "localizacao": "Belo Horizonte, MG",
+    "cidade": "Belo Horizonte",
+    "estado": "MG",
     "bairro": "São Gabriel",
     "rua": "Rua Codajás",
     "tipo_imovel": "apartment",

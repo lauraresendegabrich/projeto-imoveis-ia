@@ -6,7 +6,7 @@
 |---------|--------|---------------|-------------------|--------------|
 | Groq (conta 1) | llama-3.3-70b-versatile | 100.000 tokens/dia | 12.000 tokens/min | GROQ_API_KEY |
 | Groq (conta 2) | llama-3.3-70b-versatile | 100.000 tokens/dia | 12.000 tokens/min | GROQ_API_KEY_2 |
-| Groq (qualquer conta) | qwen3.6-27b (visão) | Compartilha limite da conta | 8.000 tokens/min | GROQ_API_KEY |
+| Groq (qualquer conta) | qwen3.8-27b (visão) | Compartilha limite da conta | 8.000 tokens/min | GROQ_API_KEY |
 | Gemini | gemini-3.5-flash-lite | **500 requests/dia** | 15 req/min, 250k tokens/min | GOOGLE_API_KEY_2 |
 | NVIDIA NIM | llama-3.2-11b-vision | Sem limite diário | ~5 req/min | NVIDIA_API_KEY |
 
@@ -19,7 +19,7 @@
 | Agente | O que consome | Requests/tokens estimados |
 |--------|---------------|---------------------------|
 | Agente 2 (clustering) | 10 lotes × ~6.000 tokens | ~60.000 tokens Groq |
-| Agente 2 (zona homogênea) | 1 chamada visão | ~2.000 tokens Groq (qwen3.6-27b) |
+| Agente 2 (zona homogênea) | 1 chamada visão | ~2.000 tokens Groq (qwen3.8-27b) |
 | Agente 3 (alvo) | 1 chamada multimodal | 1 request Gemini |
 | Agente 3 (comparáveis) | 20 imóveis × 1 chamada | 20 requests Gemini |
 | Agente 4 (interpretação) | 1 chamada | ~1.000 tokens Groq |
@@ -50,11 +50,11 @@ Agente 2 (clustering):
   4. Fallback numérico (score ≥ 0.60 → Cluster A)
 
 Agente 2 (zona homogênea — visão):
-  1. Groq (GROQ_API_KEY) — qwen3.6-27b (max 4096 tokens saída)
+  1. Groq (GROQ_API_KEY) — qwen3.8-27b (max 4096 tokens saída)
 
 Agente 3 (análise visual — fotos):
   1. Gemini (GOOGLE_API_KEY_2) — gemini-3.5-flash-lite (até 8 fotos)
-  2. Groq (GROQ_API_KEY) — qwen3.6-27b (até 3 fotos, 8k tokens/min)
+  2. Groq (GROQ_API_KEY) — qwen3.8-27b (até 3 fotos, 8k tokens/min)
   3. NVIDIA NIM (NVIDIA_API_KEY) — llama-3.2-11b-vision (1 foto por vez, ~25-130s)
   4. Score neutro 0.50
 
@@ -104,7 +104,7 @@ Agente 4 (interpretação textual):
 | Modelo | Provider | Tipo | Usado em |
 |--------|----------|------|----------|
 | llama-3.3-70b-versatile | Groq | Texto | Ag.2 clustering |
-| qwen3.6-27b | Groq | Visão (imagem) | Ag.2 zona homogênea |
+| qwen3.8-27b | Groq | Visão (imagem) | Ag.2 zona homogênea |
 | gemini-3.5-flash-lite | Google | Multimodal (texto+imagem) | Ag.3 fotos, Ag.2 fallback |
 | llama-3.2-11b-vision | NVIDIA NIM | Visão (1 foto) | Ag.3 fallback final |
 | llama-3.1-8b-instant | Groq | Texto | Ag.4 interpretação |
