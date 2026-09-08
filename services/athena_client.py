@@ -169,13 +169,13 @@ class AthenaClient:
                 partes.append(f"{expr} = '{cls._sql_escape(core)}'")
 
         elif tipo == "rua":
+            # Match pela CHAVE COMPLETA da rua (logradouro sem prefixo/numero),
+            # nao por termo isolado. Antes, o ultimo termo (ex.: "jose") era casado
+            # com LIKE '%jose%', o que fazia "Rua Jose" bater "Avenida Coronel Jose"
+            # e ruas distintas colidirem. Agora exige a sequencia inteira do nome.
             chave = cls._chave_rua(valor)
-            candidatos = [completo, chave]
-            if chave:
-                ultimo = chave.split()[-1]
-                if len(ultimo) >= 4:
-                    candidatos.append(ultimo)
-            for candidato in dict.fromkeys(v for v in candidatos if v):
+            candidatos = [c for c in (completo, chave) if c]
+            for candidato in dict.fromkeys(candidatos):
                 lit = cls._sql_escape(candidato)
                 partes.append(f"{expr} = '{lit}'")
                 partes.append(f"{expr} LIKE '%{lit}%'")

@@ -250,15 +250,62 @@ def _chave_rua(rua: object) -> str:
 
 
 def _textos_equivalentes(a: str, b: str) -> bool:
-    """Comparacao tolerante sem aceitar string vazia como match."""
+    """
+    Compara dois logradouros ja normalizados (sem prefixo Rua/Av, sem acento).
+
+    Match por PALAVRAS, nao por substring. Sao a mesma rua quando:
+      - sao iguais; ou
+      - o conjunto de palavras de um lado esta CONTIDO no do outro, contando
+        pelo menos uma palavra "forte" (>=4 letras) em comum.
+
+    Isso aceita variacoes legitimas de completude, como:
+      "antonio torres penedo" x "antonio torres penedo" (igual)
+      "doutor claudio manoel romeiro" x "claudio manoel romeiro" (subconjunto)
+    mas NAO aceita os falsos positivos do match antigo:
+      "jose" (Rua Jose) x "coronel jose" (Avenida Coronel Jose)  -> so 1 palavra final
+      "lima" (Rua Lima) x "lima verde" (Rua Lima Verde)          -> substring solta
+    Um unico termo comum (mesmo >=4 letras) NAO basta: exige que um conjunto
+    contenha o outro por inteiro.
+    """
     if not a or not b:
         return False
-    if a == b or a in b or b in a:
+    if a == b:
         return True
-    # Ultimo termo ajuda em abreviacoes como "R. Dr. Liraucio Gomes" x "Rua Doutor Liraucio Gomes".
-    ultimo_a = a.split()[-1]
-    ultimo_b = b.split()[-1]
-    return len(ultimo_a) >= 4 and ultimo_a == ultimo_b
+
+    # Titulos/conectivos que NAO fazem parte do nome proprio da rua. Quando a unica
+    # diferenca entre os dois logradouros sao estas palavras, ainda e a mesma rua
+    # (ex.: "Doutor Claudio Manoel Romeiro" x "Claudio Manoel Romeiro").
+    TITULOS = {
+        "doutor", "dr", "professor", "prof", "coronel", "cel", "comendador",
+        "presidente", "governador", "general", "capitao", "major", "sao", "santa",
+        "santo", "dom", "dona", "engenheiro", "eng", "desembargador", "senador",
+        "vereador", "prefeito", "padre", "pe", "de", "da", "do", "das", "dos", "e",
+    }
+
+    tokens_a = [t for t in a.split() if t]
+    tokens_b = [t for t in b.split() if t]
+    if not tokens_a or not tokens_b:
+        return False
+
+    set_a, set_b = set(tokens_a), set(tokens_b)
+    menor, maior = (set_a, set_b) if len(set_a) <= len(set_b) else (set_b, set_a)
+
+    # Um lado precisa ter todas as palavras contidas no outro.
+    if not menor.issubset(maior):
+        return False
+
+    # As palavras EXTRAS do lado maior so podem ser titulos/conectivos. Se o lado
+    # maior adiciona uma palavra significativa do nome (ex.: "verde" em "Lima Verde",
+    # "campo" em "Flores do Campo"), sao ruas DIFERENTES -> nao casa.
+    extras = maior - menor
+    if any(t not in TITULOS for t in extras):
+        return False
+
+    # O nucleo comum precisa ter conteudo real: ao menos duas palavras fortes, ou
+    # uma palavra forte quando os nomes ja sao identicos no nucleo. Evita casar
+    # ruas de nome unico e generico por subconjunto (ex.: "Central").
+    nucleo_forte = [t for t in menor if len(t) >= 4 and t not in TITULOS]
+    return len(nucleo_forte) >= 2 or (menor == maior and len(nucleo_forte) >= 1)
 
 
 def _mesma_rua(valor: object, alvo: object) -> bool:
@@ -1593,10 +1640,13 @@ def coletar_imoveis(
     logger.info("=" * 55)
 
     # JSONs continuam como snapshots/debug. O pipeline deve usar o retorno em memoria.
+    # Sempre sobrescreve, inclusive com [], para nunca servir dados de outra coleta:
+    # um resultado antigo sobrevivendo no disco seria pior que vazio (poderia ser
+    # lido como se fosse desta consulta). O pipeline real para no graph.py quando a
+    # coleta vem vazia, entao o disco nao chega a ser reutilizado indevidamente.
     salvar_dados(combinados, arquivo_processados)
     _salvar_meta_cache(arquivo_processados, consulta_cache)
 
-    # Sempre sobrescreve, inclusive com [], para nunca reaproveitar "completos" de outra coleta.
     completos = [i for i in combinados if i.get("publishedAt")]
     salvar_dados(completos, "imoveis_completos_ag1.json")
 
