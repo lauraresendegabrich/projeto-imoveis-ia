@@ -2009,21 +2009,33 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
 
     logger.info(f"    [diag] id={label} | fotos_brutas={len(images)} | limite_interface={MAX_FOTOS_INTERFACE} | titulo={len(titulo)} chars | desc={len(descricao)} chars")
 
-    # Descricao insuficiente e sem fotos
+    # Descricao insuficiente e sem fotos.
+    # IMPORTANTE: este retorno mantem o MESMO shape do retorno "ok" (todas as
+    # chaves), para que qualquer consumidor a jusante (analisar_comparaveis,
+    # interface, Agente 5) possa acessar os campos com seguranca, inclusive os
+    # que fazem acesso direto (ex.: analise['fotos_analisadas']).
     if (not texto or len(texto) < 10) and not images:
         return {
             "id_imovel": id_imovel, "status": "descricao_insuficiente",
             "estado_conservacao": "desconhecido", "padrao_acabamento": "desconhecido",
             "pontos_positivos": [], "pontos_negativos": [],
             "caracteristicas_unidade": [], "caracteristicas_condominio": [],
-            "limitacoes_analise": ["Sem descricao suficiente e sem fotos para analise."],
+            "qualidade_imagens": "ruim",
             "confianca_extracao": "baixa",
+            "evidencias": {"conservacao": [], "acabamento": []},
+            "fotos_analisadas": 0,
+            "total_fotos_disponiveis": len(images),
+            "llm_usada": "nenhuma",
+            "limitacoes_analise": ["Sem descricao suficiente e sem fotos para analise."],
             "observacoes": ["Descricao insuficiente para analise."],
             "scores": {"score_qualitativo": 0.50},
+            "detalhes_calculo": {"regra_neutra_aplicada": True},
             "classificacao_qualitativa": "neutro",
             "justificativa": "Sem evidencias suficientes para justificar ajuste no valor.",
             "analise_qualitativa": "Descricao insuficiente para analise.",
             "limitacoes": LIMITACOES_PADRAO,
+            "score_llm": None,
+            "justificativa_score_llm": "",
         }
 
     # Chama LLM Vision (texto + fotos juntos)
