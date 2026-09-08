@@ -41,13 +41,19 @@ SAIDA ESTRUTURADA:
     - Groq API: response_format={"type": "json_object"}; validacao final em Python
     - NVIDIA NIM: JSON solicitado no prompt, sem JSON Schema rigido; validacao tolerante em Python
 
-CALCULO DO SCORE (deterministico, Python):
+CALCULO DO SCORE (deterministico, Python — score OFICIAL):
     Base: 0.50
-    + ajuste conservacao: novo(+0.20), reformado(+0.15), bom(+0.10), regular(-0.05), precisa_reforma(-0.25)
+    + ajuste conservacao: novo(+0.20), reformado(+0.15), bom(+0.10), regular(-0.08), precisa_reforma(-0.25)
     + ajuste padrao: alto_padrao(+0.15), medio(+0.07), simples(-0.03)
-    + bonus positivos: acabamento diferenciado(+0.05), varanda gourmet(+0.04), etc. (max +0.15)
-    + penalizacoes: documentacao_irregular(-0.20), infiltracao(-0.15), etc. (max -0.30)
+    + bonus positivos (amenidades): varanda gourmet(+0.04), piscina privativa(+0.04), etc. (max +0.15)
+    + penalizacoes: documentacao_irregular(-0.20), rachaduras/trincas(-0.15), infiltracao(-0.15),
+      mofo/bolor(-0.10), precisa_reforma(-0.25), etc. (max -0.30)
     Score final: clamp [0.0, 1.0]
+
+SCORE DA LLM (Fase 1 — experimental, NAO usado no calculo oficial):
+    A LLM tambem retorna score_llm (0-100) e justificativa_score. Sao apenas
+    gravados e logados lado a lado com o score deterministico para comparacao.
+    O score oficial continua sendo o deterministico do Python.
 
 CLASSIFICACAO:
     < 0.40 → desfavoravel
@@ -125,22 +131,28 @@ MAX_AMENITIES = 20
 # =============================================================================
 # Somente pontos positivos/negativos controlados podem alterar o score.
 # Caracteristicas da unidade e do condominio sao informativas.
+# Positivos = AMENIDADES que agregam valor INDEPENDENTE do padrao de acabamento.
+# Removidos "acabamento diferenciado", "boa iluminacao natural" e "integracao de
+# ambientes" porque duplicavam o que padrao_acabamento=alto_padrao ja pontua
+# (dupla contagem). Aqui ficam so extras que um imovel de padrao medio pode ou
+# nao ter e que mudam o valor.
 PONTOS_POSITIVOS_CONTROLADOS = [
-    "acabamento diferenciado",
     "cozinha planejada",
     "armários planejados",
     "varanda gourmet",
     "vista livre",
-    "boa iluminação natural",
-    "integração de ambientes",
     "área externa privativa",
     "churrasqueira privativa",
     "piscina privativa",
 ]
 
+# Negativos = defeitos que derrubam valor. Maioria visivel em foto; documentacao
+# irregular so vale quando MENCIONADA na descricao (nao e inferivel de imagem).
 PONTOS_NEGATIVOS_CONTROLADOS = [
     "documentação irregular",
     "infiltração/umidade",
+    "mofo/bolor",
+    "rachaduras/trincas",
     "precisa reforma",
     "pintura deteriorada",
     "acabamento desgastado",
@@ -432,12 +444,21 @@ _ALIASES_NEGATIVOS = {
     "acabamentos desgastados": "acabamento desgastado",
     "danos visiveis": "danos visíveis",
     "dano visivel": "danos visíveis",
+    "mofo": "mofo/bolor",
+    "bolor": "mofo/bolor",
+    "mofo/bolor": "mofo/bolor",
+    "mofo e bolor": "mofo/bolor",
+    "rachadura": "rachaduras/trincas",
+    "rachaduras": "rachaduras/trincas",
+    "trinca": "rachaduras/trincas",
+    "trincas": "rachaduras/trincas",
+    "rachaduras/trincas": "rachaduras/trincas",
+    "rachaduras e trincas": "rachaduras/trincas",
+    "fissuras": "rachaduras/trincas",
 }
 
 _ALIASES_POSITIVOS = {
     "armarios planejados": "armários planejados",
-    "boa iluminacao natural": "boa iluminação natural",
-    "integracao de ambientes": "integração de ambientes",
     "area externa privativa": "área externa privativa",
 }
 
@@ -499,6 +520,29 @@ def _filtrar_controlados(valores, permitidos: list) -> list:
     """Compatibilidade: retorna apenas a parte controlada."""
     controlados, _ = _filtrar_controlados_com_extras(valores, permitidos)
     return controlados
+
+
+def _normalizar_score_llm(valor) -> Optional[float]:
+    """
+    Converte o score_qualitativo que a LLM devolve (esperado 0-100) para 0.0-1.0.
+
+    Tolerante: aceita int/float/string com numero. Retorna None quando ausente ou
+    invalido — nesse caso nao ha score da LLM para comparar. Valores fora de 0-100
+    sao limitados (clamp).
+    """
+    if valor is None or isinstance(valor, bool):
+        return None
+    try:
+        if isinstance(valor, str):
+            m = re.search(r"-?\d+(?:[.,]\d+)?", valor)
+            if not m:
+                return None
+            valor = float(m.group(0).replace(",", "."))
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return None
+    numero = max(0.0, min(100.0, numero))
+    return round(numero / 100.0, 3)
 
 
 def _validar_saida_llm(dados: dict) -> dict:
@@ -569,6 +613,12 @@ def _validar_saida_llm(dados: dict) -> dict:
         + condominio_livre
     )
 
+    # FASE 1 (experimental): score que a propria LLM atribuiu (0-100 -> 0-1).
+    # NAO e usado no calculo oficial; e apenas preservado para comparacao com o
+    # score deterministico. Se ausente/invalido, fica None (sem comparacao).
+    score_llm = _normalizar_score_llm(dados.get("score_qualitativo"))
+    justificativa_score = str(dados.get("justificativa_score") or "").strip()
+
     return {
         "estado_conservacao": estado,
         "padrao_acabamento": padrao,
@@ -584,6 +634,8 @@ def _validar_saida_llm(dados: dict) -> dict:
             "acabamento": _deduplicar_lista(evidencias.get("acabamento", [])),
         },
         "observacoes": observacoes,
+        "score_llm": score_llm,
+        "justificativa_score": justificativa_score,
     }
 
 
@@ -769,8 +821,17 @@ Use exatamente estas chaves:
     "conservacao": [],
     "acabamento": []
   }},
-  "observacoes": []
+  "observacoes": [],
+  "score_qualitativo": 0,
+  "justificativa_score": ""
 }}
+
+SCORE QUALITATIVO (sua avaliacao geral)
+score_qualitativo: INTEIRO de 0 a 100 que resume o quao atrativo/valorizado e o
+imovel qualitativamente (conservacao + padrao + diferenciais - problemas).
+50 = medio/neutro; acima e melhor que a media; abaixo e pior. justificativa_score:
+uma frase objetiva. E a SUA opiniao e sera comparada com um calculo interno; de a
+nota com sinceridade, sem tentar adivinhar formula.
 
 Os textos com "|" acima indicam alternativas permitidas: escolha apenas UMA delas.
 Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSON.
@@ -1354,8 +1415,16 @@ Use exatamente estas chaves:
     "conservacao": [],
     "acabamento": []
   }},
-  "observacoes": []
+  "observacoes": [],
+  "score_qualitativo": 0,
+  "justificativa_score": ""
 }}
+
+SCORE QUALITATIVO (sua avaliacao geral)
+score_qualitativo: INTEIRO de 0 a 100 resumindo o quao atrativo/valorizado e o imovel
+qualitativamente (conservacao + padrao + diferenciais - problemas). 50 = medio/neutro;
+acima e melhor que a media; abaixo e pior. justificativa_score: uma frase objetiva.
+E a SUA opiniao e sera comparada com um calculo interno; de a nota com sinceridade.
 
 Os textos com "|" acima indicam alternativas permitidas: escolha apenas UMA delas.
 Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSON.
@@ -1611,13 +1680,16 @@ Responda SOMENTE com este JSON:
   "negativos": [],
   "garagem": "",
   "observacoes": [],
-  "confianca_extracao": "media"
+  "confianca_extracao": "media",
+  "score_qualitativo": 50,
+  "justificativa_score": ""
 }}
 
 Valores permitidos:
 estado_conservacao: novo, reformado, bom, regular, precisa_reforma, desconhecido
 padrao_acabamento: alto, medio, simples, desconhecido
 confianca_extracao: alta, media, baixa
+score_qualitativo: INTEIRO de 0 a 100 (50 = medio; sua avaliacao geral do imovel)
 
 Nao escreva explicacoes fora do JSON.
 """
@@ -1726,13 +1798,10 @@ def _calcular_score(estado: str, padrao: str,
     # 4. PESOS DOS DIFERENCIAIS POSITIVOS
     # ============================================================
     pesos_positivos_map = {
-        "acabamento diferenciado": 0.05,
         "cozinha planejada": 0.03,
         "armários planejados": 0.03,
         "varanda gourmet": 0.04,
         "vista livre": 0.03,
-        "boa iluminação natural": 0.02,
-        "integração de ambientes": 0.02,
         "área externa privativa": 0.04,
         "churrasqueira privativa": 0.02,
         "piscina privativa": 0.04,
@@ -1744,7 +1813,9 @@ def _calcular_score(estado: str, padrao: str,
     # ============================================================
     pesos_negativos_map = {
         "documentação irregular": -0.20,
+        "rachaduras/trincas": -0.15,
         "infiltração/umidade": -0.15,
+        "mofo/bolor": -0.10,
         "precisa reforma": -0.25,
         "danos visíveis": -0.10,
         "pintura deteriorada": -0.06,
@@ -1957,6 +2028,12 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
     if not isinstance(evidencias, dict):
         evidencias = {}
 
+    # FASE 1: score/justificativa que a propria LLM deu (experimental, so comparacao).
+    score_llm = dados.get("score_llm")
+    if not isinstance(score_llm, (int, float)):
+        score_llm = None
+    justificativa_score_llm = str(dados.get("justificativa_score") or "").strip()
+
     if not isinstance(pontos_pos, list): pontos_pos = []
     if not isinstance(pontos_neg, list): pontos_neg = []
     if not isinstance(caracteristicas_unidade, list): caracteristicas_unidade = []
@@ -2045,6 +2122,10 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
         "justificativa":         justificativa,
         "analise_qualitativa":   analise_qualitativa,
         "limitacoes":            LIMITACOES_PADRAO,
+        # FASE 1 (experimental): score da propria LLM (0-1) + justificativa, apenas
+        # para comparacao com o score_qualitativo deterministico. NAO usado no calculo.
+        "score_llm":             score_llm,
+        "justificativa_score_llm": justificativa_score_llm,
     }
 
 
@@ -2125,13 +2206,19 @@ def analisar_comparaveis(
     logger.info("Analisando imovel alvo...")
     analise_alvo = _analisar_imovel(imovel_alvo, is_alvo=True)
     imovel_alvo["analise_qualitativa"] = analise_alvo
+    _sc_py_alvo = analise_alvo['scores']['score_qualitativo']
+    _sc_llm_alvo = analise_alvo.get('score_llm')
+    _sc_llm_alvo_txt = f"{_sc_llm_alvo:.2f}" if isinstance(_sc_llm_alvo, (int, float)) else "n/d"
     logger.info(f"[Ag3][Alvo] fotos_recebidas={len(imovel_alvo.get('images') or [])} | "
                 f"fotos_enviadas={analise_alvo['fotos_analisadas']} | "
                 f"LLM={analise_alvo.get('llm_usada', 'fallback')} | "
                 f"estado={analise_alvo['estado_conservacao']} | "
                 f"padrao={analise_alvo['padrao_acabamento']} | "
-                f"score={analise_alvo['scores']['score_qualitativo']} | "
+                f"score={_sc_py_alvo} | "
                 f"class={analise_alvo['classificacao_qualitativa']}")
+    logger.info(f"[Ag3][Alvo][Fase1] score_python={_sc_py_alvo} | score_llm={_sc_llm_alvo_txt}"
+                + (f" | diff={abs(_sc_py_alvo - _sc_llm_alvo):.2f}" if isinstance(_sc_llm_alvo, (int, float)) else "")
+                + (f" | justif_llm={analise_alvo.get('justificativa_score_llm')}" if analise_alvo.get('justificativa_score_llm') else ""))
     time.sleep(2.0)  # 2s entre chamadas
 
     # Limita a 10 comparaveis (os mais similares por score/ranking)
@@ -2156,10 +2243,16 @@ def analisar_comparaveis(
         t1 = time.time()
         im["analise_qualitativa"] = analise
         llm_usada = analise.get("llm_usada", "fallback")
+        _sc_py = analise['scores']['score_qualitativo']
+        _sc_llm = analise.get('score_llm')
+        _sc_llm_txt = f"{_sc_llm:.2f}" if isinstance(_sc_llm, (int, float)) else "n/d"
         logger.info(f"[Ag3][Comparavel {idx}/{len(comparaveis)}] LLM={llm_usada} | tempo={t1-t0:.1f}s | "
                     f"estado={analise['estado_conservacao']} | padrao={analise['padrao_acabamento']} | "
                     f"confianca={analise.get('confianca_extracao', 'baixa')} | "
-                    f"score={analise['scores']['score_qualitativo']}")
+                    f"score={_sc_py}")
+        logger.info(f"[Ag3][Comparavel {idx}/{len(comparaveis)}][Fase1] "
+                    f"score_python={_sc_py} | score_llm={_sc_llm_txt}"
+                    + (f" | diff={abs(_sc_py - _sc_llm):.2f}" if isinstance(_sc_llm, (int, float)) else ""))
         if analise["status"] == "ok":
             com_ok += 1
         else:
@@ -2168,17 +2261,46 @@ def analisar_comparaveis(
 
     scores_finais = [c["analise_qualitativa"]["scores"]["score_qualitativo"] for c in comparaveis]
 
+    # FASE 1: comparacao agregada score_python vs score_llm (so onde a LLM deu nota).
+    pares = [
+        (c["analise_qualitativa"]["scores"]["score_qualitativo"], c["analise_qualitativa"].get("score_llm"))
+        for c in comparaveis
+    ]
+    pares_validos = [(py, llm) for py, llm in pares if isinstance(llm, (int, float))]
+    if pares_validos:
+        media_py = sum(py for py, _ in pares_validos) / len(pares_validos)
+        media_llm = sum(llm for _, llm in pares_validos) / len(pares_validos)
+        media_diff = sum(abs(py - llm) for py, llm in pares_validos) / len(pares_validos)
+        comparacao_fase1 = {
+            "comparaveis_com_score_llm": len(pares_validos),
+            "media_score_python": round(media_py, 4),
+            "media_score_llm": round(media_llm, 4),
+            "divergencia_media_abs": round(media_diff, 4),
+        }
+    else:
+        comparacao_fase1 = {"comparaveis_com_score_llm": 0}
+
     resumo = {
         "total_analisados":       len(comparaveis),
         "analisados_ok":          com_ok,
         "descricao_insuficiente": com_insuficiente,
         "filtro":                 "cluster=A + (na_zona ou fallback zona_nao_verificada)",
         "score_qualitativo_medio": round(sum(scores_finais) / len(scores_finais), 4) if scores_finais else None,
+        "comparacao_fase1_llm":   comparacao_fase1,
     }
 
     logger.info("=" * 60)
     logger.info(f"RESULTADO: {com_ok} ok | {com_insuficiente} insuficientes")
     logger.info(f"  Score qualitativo medio: {resumo['score_qualitativo_medio']}")
+    if comparacao_fase1.get("comparaveis_com_score_llm"):
+        logger.info(
+            f"  [Fase1] score_python medio={comparacao_fase1['media_score_python']} | "
+            f"score_llm medio={comparacao_fase1['media_score_llm']} | "
+            f"divergencia media={comparacao_fase1['divergencia_media_abs']} "
+            f"(n={comparacao_fase1['comparaveis_com_score_llm']})"
+        )
+    else:
+        logger.info("  [Fase1] nenhum comparavel retornou score_llm nesta execucao")
     logger.info("=" * 60)
 
     saida = {"imovel_alvo": imovel_alvo, "comparaveis": comparaveis, "resumo": resumo}
