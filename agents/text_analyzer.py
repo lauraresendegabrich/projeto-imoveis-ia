@@ -639,6 +639,35 @@ def _validar_saida_llm(dados: dict) -> dict:
     }
 
 
+def _baixar_imagem(url: str, timeout: float = 10.0) -> tuple[bytes, str] | tuple[None, None]:
+    """
+    Baixa uma imagem de uma URL publica e retorna (bytes, mime_type).
+
+    Usado para o Gemini: enviar as fotos como bytes (Part.from_bytes) em vez de
+    URL (Part.from_uri). O from_uri faz o Google tentar buscar a URL com as
+    credenciais dele e retorna 403 PERMISSION_DENIED para URLs publicas da web.
+    Baixando aqui e mandando os bytes, a analise visual funciona.
+
+    Retorna (None, None) em qualquer falha (o chamador simplesmente pula a foto).
+    """
+    if not url or not isinstance(url, str):
+        return None, None
+    try:
+        import requests
+        r = requests.get(
+            url,
+            timeout=timeout,
+            headers={"User-Agent": "Mozilla/5.0 (ProjetoImoveisIA)"},
+        )
+        content_type = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if r.status_code == 200 and content_type.startswith("image/") and r.content:
+            return r.content, content_type
+        logger.debug(f"[Ag3][Gemini] imagem ignorada | status={r.status_code} | tipo={content_type}")
+    except Exception as e:
+        logger.debug(f"[Ag3][Gemini] falha ao baixar imagem {url[:60]}: {e}")
+    return None, None
+
+
 def _selecionar_fotos(images: list, limite: int) -> list:
     """Seleciona fotos espacadas para evitar varias imagens quase iguais."""
     images = [u for u in (images or []) if isinstance(u, str) and u.strip()]
@@ -1345,7 +1374,17 @@ def _tentar_gemini(
     amenities_txt = "; ".join(amenities) if amenities else "nao informado"
     images = imovel.get("images", []) or []
     fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_GEMINI)
-    qtd_fotos = len(fotos_selecionadas)
+
+    # Baixa as fotos ANTES de montar o prompt e envia como BYTES. O Part.from_uri
+    # com URL publica causa 403 PERMISSION_DENIED (o Google recusa buscar URLs
+    # externas). Fotos que nao baixarem sao puladas, e a contagem no prompt reflete
+    # exatamente quantas imagens realmente vao na chamada.
+    imagens_bytes = []
+    for url in fotos_selecionadas:
+        img_bytes, mime = _baixar_imagem(url)
+        if img_bytes:
+            imagens_bytes.append((img_bytes, mime or "image/jpeg"))
+    qtd_fotos = len(imagens_bytes)
 
     prompt_texto = f"""Voce e um avaliador imobiliario especializado em analise qualitativa de imoveis por texto e imagens.
 Todas as imagens pertencem ao MESMO imovel. Foram fornecidas exatamente {qtd_fotos} imagem(ns).
@@ -1430,12 +1469,13 @@ Os textos com "|" acima indicam alternativas permitidas: escolha apenas UMA dela
 Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSON.
 """
 
+    # Anexa as imagens ja baixadas (bytes) — nao usa from_uri (que daria 403).
     parts = [types.Part.from_text(text=prompt_texto)]
-    for url in fotos_selecionadas:
+    for img_bytes, mime in imagens_bytes:
         try:
-            parts.append(types.Part.from_uri(file_uri=url, mime_type="image/webp"))
-        except Exception:
-            pass
+            parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
+        except Exception as e:
+            logger.debug(f"[Ag3][Gemini] falha ao anexar imagem: {e}")
 
     max_tentativas = max(1, int(max_tentativas))
 
