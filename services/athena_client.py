@@ -156,10 +156,12 @@ class AthenaClient:
             if completo not in variantes:
                 variantes.append(completo)
 
+            # Match EXATO por variante. A base guarda o bairro canonico (ex.: "Centro"),
+            # entao LIKE '%...%' era permissivo demais: "centro" casava "novo centro",
+            # "jardim centro", "esplanada x" casava "esplanada x ii" — bairros distintos.
             for candidato in dict.fromkeys(v for v in variantes if v):
                 lit = cls._sql_escape(candidato)
                 partes.append(f"{expr} = '{lit}'")
-                partes.append(f"{expr} LIKE '%{lit}%'")
 
             # A forma sem prefixo e aceita apenas como igualdade, evitando que
             # Jardim Guanabara case com Vila Guanabara por um LIKE generico.

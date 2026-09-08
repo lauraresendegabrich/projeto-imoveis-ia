@@ -270,12 +270,18 @@ def _mesmo_bairro(valor: object, alvo: object) -> bool:
     b = _chave_bairro(alvo)
     if not a or not b:
         return False
-    if a == b or a in b or b in a:
-        return True
-    # Aceita forma sem prefixo apenas quando um dos lados realmente veio sem prefixo.
-    core_a = _core_bairro(valor)
-    core_b = _core_bairro(alvo)
-    return core_a == core_b and (a == core_a or b == core_b)
+
+    # Match EXATO apos normalizacao. A base guarda o bairro canonico e completo
+    # (ex.: "Centro", "Jardim Piratininga"), e _chave_bairro ja resolve acento,
+    # caixa, pontuacao e abreviacao de prefixo (Jd->Jardim) antes desta comparacao.
+    #
+    # NAO usar substring nem tolerancia com/sem prefixo. Os dados reais mostram
+    # que sao bairros DISTINTOS que coexistem e apenas compartilham um pedaco do nome:
+    #   - "Centro" vs "Novo Centro" / "Jardim Centro"
+    #   - "Esplanada Primo Meneghetti" vs "Esplanada Primo Meneghetti II"
+    #   - "Jardim Lima" vs "Prolongamento Jardim Lima"
+    # Qualquer match parcial confundiria esses vizinhos. So o nome igual e o mesmo bairro.
+    return a == b
 
 
 def _to_float_safe(valor: object, default: float | None = None) -> float | None:
