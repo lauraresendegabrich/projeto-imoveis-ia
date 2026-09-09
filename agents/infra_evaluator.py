@@ -33,6 +33,7 @@ GEOAPIFY:
 """
 
 import os
+import re
 import json
 import math
 import logging
@@ -69,6 +70,23 @@ GEOAPIFY_LIMIT = 20
 RAIO_IMOBILIARIA = 8000
 GEOAPIFY_DETAILS_IMOBILIARIA_MAX = 1
 SCORE_NEUTRO = 0.5
+
+# Nivel 2: a LLM classifica o perfil da regiao e pode ajustar o score determinístico
+# dentro deste limite (para cima ou para baixo). O score numerico e a base auditavel;
+# a LLM apenas calibra na margem para corrigir o ponto cego da contagem de POIs
+# (ex.: bairro nobre com poucos POIs, ou regiao comercial ruidosa para moradia).
+AJUSTE_LLM_MAXIMO = 0.10
+
+# Perfis de regiao que a LLM pode atribuir (validados; fora disso vira "desconhecido").
+PERFIS_REGIAO_VALIDOS = {
+    "residencial_nobre",
+    "residencial_popular",
+    "comercial",
+    "misto",
+    "industrial",
+    "rural_afastado",
+    "desconhecido",
+}
 
 
 GEOAPIFY_GRUPOS = {
@@ -1731,9 +1749,7 @@ def _buscar_transporte(
                 if lon_p is None or lat_p is None:
                     continue
                 lon_p = float(lon_p)
-                lat_p = float(
-                coords[1]
-            )
+                lat_p = float(lat_p)
 
 
             dist = _haversine(
@@ -3362,6 +3378,35 @@ def _parsear_json_interpretacao_qwen(texto: str) -> dict:
     return obj
 
 
+def _normalizar_ajuste_llm(valor) -> float:
+    """
+    Converte e LIMITA (clamp) o ajuste proposto pela LLM ao intervalo
+    [-AJUSTE_LLM_MAXIMO, +AJUSTE_LLM_MAXIMO].
+
+    Trava de seguranca: mesmo que a LLM devolva +0.5 ou lixo, o ajuste nunca
+    ultrapassa o limite. Valor ausente/invalido -> 0.0 (sem ajuste).
+    """
+    if valor is None or isinstance(valor, bool):
+        return 0.0
+    try:
+        if isinstance(valor, str):
+            m = re.search(r"-?\d+(?:[.,]\d+)?", valor)
+            if not m:
+                return 0.0
+            valor = float(m.group(0).replace(",", "."))
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+    # Clamp ao limite permitido.
+    return round(max(-AJUSTE_LLM_MAXIMO, min(AJUSTE_LLM_MAXIMO, numero)), 3)
+
+
+def _normalizar_perfil_regiao(valor) -> str:
+    """Valida o perfil devolvido pela LLM; fora da lista -> 'desconhecido'."""
+    perfil = str(valor or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return perfil if perfil in PERFIS_REGIAO_VALIDOS else "desconhecido"
+
+
 def _chamar_qwen_colab_infra(prompt: str) -> dict:
     """
     Chama o Qwen3-VL-8B hospedado no Google Colab para a interpretacao
@@ -3587,12 +3632,15 @@ def _analisar_infra_llm(
 
 
     prompt = f"""
-Avaliador imobiliario.
+Avaliador imobiliario especializado em analise de localizacao.
 
-Interprete os resultados de infraestrutura abaixo.
+Voce recebe um score de infraestrutura JA CALCULADO por contagem de POIs
+(pontos de interesse) no entorno. Sua tarefa tem DUAS partes:
 
-NAO recalcule valores.
-Apenas interprete.
+1) INTERPRETAR os resultados (pontos fortes, pontos de atencao, descricao, conclusao).
+
+2) CLASSIFICAR o PERFIL da regiao e propor um AJUSTE FINO no score, porque a
+   simples contagem de POIs tem um ponto cego: ela nao entende o CONTEXTO.
 
 Endereco:
 {endereco}
@@ -3603,14 +3651,27 @@ POIs:
 Transporte:
 {resumo_transporte}
 
-Scores:
+Scores por categoria:
 {scores_json}
 
-Score final:
+Score final (deterministico):
 {score_final}
 
-Classificacao:
+Classificacao (deterministica):
 {classificacao}
+
+REGRAS DO AJUSTE (perfil da regiao):
+- perfil_regiao: escolha UM entre: residencial_nobre, residencial_popular,
+  comercial, misto, industrial, rural_afastado, desconhecido.
+- ajuste_score: numero entre -0.10 e +0.10 (pode ser 0). Use com parcimonia:
+  * POSITIVO quando o score subestima o valor da regiao — ex.: bairro claramente
+    residencial NOBRE com poucos POIs (ruas arborizadas, baixa densidade proposital,
+    tranquilidade e como um atributo positivo, nao ausencia de infraestrutura).
+  * NEGATIVO quando o score superestima para fins de MORADIA — ex.: regiao
+    comercial/industrial ruidosa e movimentada, muitos POIs mas baixa qualidade de vida.
+  * PROXIMO DE ZERO quando o perfil e coerente com o score (nao invente ajuste).
+- NAO recalcule o score do zero. O ajuste e apenas uma CORRECAO NA MARGEM.
+- Baseie-se APENAS no que os POIs e o endereco revelam. Nao invente equipamentos.
 
 Retorne JSON:
 
@@ -3618,7 +3679,10 @@ Retorne JSON:
   "pontos_fortes": [],
   "pontos_de_atencao": [],
   "descricao_infraestrutura": "",
-  "conclusao": ""
+  "conclusao": "",
+  "perfil_regiao": "residencial_nobre|residencial_popular|comercial|misto|industrial|rural_afastado|desconhecido",
+  "ajuste_score": 0.0,
+  "justificativa_ajuste": ""
 }}
 """
 
@@ -3987,6 +4051,11 @@ Retorne JSON:
             f"Regiao classificada "
             f"como {classificacao}."
         ),
+
+        # Sem LLM nao ha classificacao de perfil nem ajuste: usa neutro/zero.
+        "perfil_regiao": "desconhecido",
+        "ajuste_score": 0.0,
+        "justificativa_ajuste": "",
     }
 
 
@@ -4460,17 +4529,46 @@ def avaliar_infraestrutura(
 
 
     # ----------------------------------------------------------------
-    # CLASSIFICACAO
+    # NIVEL 2 — AJUSTE DA LLM SOBRE O SCORE DETERMINISTICO
+    # ----------------------------------------------------------------
+    # O score deterministico e a base. A LLM classifica o perfil da regiao e
+    # propoe um ajuste na margem (para corrigir o ponto cego da contagem de POIs).
+    # Travas: o ajuste e limitado a +-AJUSTE_LLM_MAXIMO e o resultado a [0, 1].
+    # Se a LLM falhou (fallback deterministico), ajuste=0 -> score inalterado.
+
+    score_deterministico = scores.get("score_final", SCORE_NEUTRO)
+
+    ajuste_llm = _normalizar_ajuste_llm(analise.get("ajuste_score"))
+    perfil_regiao = _normalizar_perfil_regiao(analise.get("perfil_regiao"))
+    justificativa_ajuste = str(analise.get("justificativa_ajuste") or "").strip()
+
+    # Clamp do resultado ao intervalo valido [0, 1].
+    score_final_ajustado = round(
+        max(0.0, min(1.0, score_deterministico + ajuste_llm)),
+        3
+    )
+
+    logger.info(
+        f"[Ag4][Nivel2] score_deterministico={score_deterministico:.3f} "
+        f"| perfil={perfil_regiao} "
+        f"| ajuste_llm={ajuste_llm:+.3f} "
+        f"| score_final={score_final_ajustado:.3f}"
+        + (f" | justif={justificativa_ajuste}" if justificativa_ajuste else "")
+    )
+
+    # A partir daqui, o score_final oficial e o AJUSTADO. Toda a classificacao,
+    # perfil e impacto sao derivados dele (coerencia).
+    scores["score_final"] = score_final_ajustado
+
+
+    # ----------------------------------------------------------------
+    # CLASSIFICACAO (sobre o score ajustado)
     # ----------------------------------------------------------------
 
     classificacao = (
 
         _classificar_infraestrutura(
-
-            scores.get(
-                "score_final",
-                SCORE_NEUTRO
-            )
+            score_final_ajustado
         )
     )
 
@@ -4489,11 +4587,7 @@ def avaliar_infraestrutura(
     impacto_infraestrutura = (
 
         _calcular_impacto(
-
-            scores.get(
-                "score_final",
-                SCORE_NEUTRO
-            )
+            score_final_ajustado
         )
     )
 
@@ -4565,10 +4659,29 @@ def avaliar_infraestrutura(
 
         "scores": {
 
+            # score_final e o AJUSTADO (deterministico + ajuste da LLM, clampeado).
             "score_final":
             scores[
                 "score_final"
             ],
+
+            # Base auditavel, antes do ajuste da LLM.
+            "score_deterministico":
+            score_deterministico,
+
+            # Ajuste aplicado pela LLM (ja limitado a +-AJUSTE_LLM_MAXIMO).
+            "ajuste_llm":
+            ajuste_llm,
+
+            "ajuste_llm_maximo":
+            AJUSTE_LLM_MAXIMO,
+
+            # Perfil da regiao classificado pela LLM (Nivel 2).
+            "perfil_regiao":
+            perfil_regiao,
+
+            "justificativa_ajuste":
+            justificativa_ajuste,
 
             "classificacao_infraestrutura":
             classificacao,
