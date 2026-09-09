@@ -3847,7 +3847,7 @@ Retorne JSON:
 
                     temperature=0,
 
-                    max_completion_tokens=600,
+                    max_completion_tokens=1500,
                 )
             )
 
@@ -3925,7 +3925,7 @@ Retorne JSON:
 
                 timeout=
                 httpx.Timeout(
-                    30.0,
+                    60.0,
                     connect=10.0
                 ),
 
@@ -3940,7 +3940,7 @@ Retorne JSON:
                 .create(
 
                     model=
-                    "meta/llama-3.1-8b-instruct",
+                    "openai/gpt-oss-20b",
 
                     messages=[{
                         "role":
@@ -3950,7 +3950,7 @@ Retorne JSON:
                         prompt
                     }],
 
-                    max_tokens=600,
+                    max_tokens=1500,
 
                     temperature=0,
                 )
