@@ -906,8 +906,9 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
     Parametros
     ----------
     imovel_alvo_extra : dict (opcional)
-        Campos adicionais do imovel alvo (ex: area_terreno do main.py)
-        que complementam os dados do Ag. 3.
+        Campos adicionais do imovel alvo (ex: area_terreno vindo do main.py/graph.py).
+        Faz merge NAO destrutivo: so preenche chaves ausentes ou None no imovel alvo
+        carregado do disco — nunca sobrescreve um valor ja existente.
     """
     import logging
     logger = logging.getLogger(__name__)

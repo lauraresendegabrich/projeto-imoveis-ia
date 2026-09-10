@@ -81,7 +81,8 @@ FLUXO COMPLETO:
     1. Remove LEILOES: palavras-chave (leilao, judicial, arrematacao,
        caixa economica, lance inicial, etc.) no titulo, no tipo OU na descricao.
        Muitos leiloes so se revelam na descricao, por isso ela tambem e checada.
-    2. Remove sem PRECO (>0) ou sem CIDADE/BAIRRO.
+    2. Remove sem PRECO (>0). Exige localizacao minima: pelo menos UM entre
+       cidade OU bairro (basta um dos campos city/cidade/neighborhood/bairro).
     3. DEDUPLICA com MERGE (combina em vez de descartar) por ID com namespace da
        fonte, depois URL normalizada e, somente quando faltam ambos, fingerprint
        conservadora. O merge preserva o registro mais completo (fotos, descricao,
@@ -95,7 +96,9 @@ FLUXO COMPLETO:
 
   ETAPA 7 — ENRIQUECIMENTO
   ─────────────────────────
-    Imoveis sem fotos: requests.get na URL (VivaReal) para extrair imagens.
+    Imoveis sem fotos cuja URL contem "vivareal": requests.get na pagina para
+    extrair imagens. Observacao: no Streamlit Cloud esse requests.get pode ser
+    bloqueado, entao o enriquecimento nem sempre roda no ambiente hospedado.
 
   ETAPA 8 — ORDENACAO FINAL
   ──────────────────────────
@@ -1302,6 +1305,12 @@ def coletar_imoveis(
     quando a quantidade UTIL e LOCAL do Athena fica abaixo de 10.
 
     Tipos documentados/suportados: "apartment" e "house".
+
+    usar_cache : bool (padrao False)
+        Se True e existir um cache compativel (mesma consulta, validada pelo
+        .meta.json via _cache_compativel), reutiliza `arquivo_processados` do disco
+        e pula a coleta. Se o cache for de outra consulta ou estiver vazio, e ignorado
+        e uma nova coleta e feita. Com False, sempre coleta do zero.
     """
     tipos_suportados = {"apartment", "house"}
     tipo_imovel = (tipo_imovel or "").strip().lower()

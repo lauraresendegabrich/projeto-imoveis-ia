@@ -23,13 +23,20 @@ FLUXO:
     4. Busca imobiliaria separadamente.
     5. Haversine, faixas, pesos, normalizadores e score continuam determinísticos.
     6. Se Geoapify + Google falharem tecnicamente, usa score neutro 0.5.
-    7. LLM apenas interpreta o resultado.
-       Cadeia: Qwen3-VL-8B no Google Colab -> Gemini -> Groq -> NVIDIA.
+    7. NIVEL 2 — a LLM classifica o perfil da regiao e AJUSTA o score deterministico
+       dentro de +-0.10 (AJUSTE_LLM_MAXIMO). O score deterministico continua sendo a
+       base auditavel (preservado como score_deterministico na saida); a LLM calibra na
+       margem para corrigir o ponto cego da contagem de POIs. O ajuste passa por travas:
+       clamp em +-0.10, resultado final clamp em [0,1] e, se a LLM falhar ou vier fora
+       do formato, ajuste = 0 (usa o deterministico puro).
+       Cadeia LLM: Qwen3-VL-8B no Google Colab -> Gemini -> Groq -> NVIDIA
+       (Groq e NVIDIA usam openai/gpt-oss-20b; Gemini usa gemini-3.5-flash-lite).
 
 GEOAPIFY:
     - 20 resultados por consulta.
     - ate 1 credito por consulta.
-    - ate 8 creditos nas buscas base + ate 3 creditos opcionais de Place Details para imobiliaria.
+    - ate 8 creditos nas buscas base + ate 1 credito opcional de Place Details
+      para a imobiliaria (GEOAPIFY_DETAILS_IMOBILIARIA_MAX = 1).
 """
 
 import os

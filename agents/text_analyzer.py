@@ -19,6 +19,8 @@ FLUXO:
     2. Filtra: cluster="A" E (classificacao_zona="na_zona" OU incluido_por_fallback_zona).
        O fallback cobre o caso de amostra escassa (Opcao B), em que imoveis
        "zona_nao_verificada" sao anexados aos confirmados com confianca baixa.
+       Limite: analisa no maximo MAX_COMPARAVEIS_AG3 (10) comparaveis, priorizando
+       os de melhor ranking_llm (menor = melhor); o excedente e truncado.
     3. Para cada imovel:
          a. Seleciona fotos espacadas conforme o provedor (Qwen Colab 4, Gemini 4, Groq 2, NVIDIA 1)
          b. Monta prompt com titulo, descricao, campos estruturados e fotos
@@ -32,8 +34,8 @@ CADEIA DE FALLBACK (LLMs):
     COMPARAVEIS: Qwen3-VL-8B Colab -> Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
     Qwen3-VL-8B Colab: ate 4 fotos por URL + JSON solicitado no prompt
     Gemini: ate 4 fotos + JSON
-    Groq qwen3.8-27b: ate 2 fotos + JSON Object Mode
-    NVIDIA NIM llama-3.2-11b-vision: 1 foto + JSON solicitado no prompt
+    Groq: ate 2 fotos + JSON Object Mode
+    NVIDIA NIM meta/llama-3.2-11b-vision-instruct: 1 foto + JSON solicitado no prompt
 
 SAIDA ESTRUTURADA:
     - Qwen3-VL-8B Colab: JSON solicitado no prompt; validacao final em Python
@@ -46,8 +48,9 @@ CALCULO DO SCORE (deterministico, Python — score OFICIAL):
     + ajuste conservacao: novo(+0.20), reformado(+0.15), bom(+0.10), regular(-0.08), precisa_reforma(-0.25)
     + ajuste padrao: alto_padrao(+0.15), medio(+0.07), simples(-0.03)
     + bonus positivos (amenidades): varanda gourmet(+0.04), piscina privativa(+0.04), etc. (max +0.15)
-    + penalizacoes: documentacao_irregular(-0.20), rachaduras/trincas(-0.15), infiltracao(-0.15),
-      mofo/bolor(-0.10), precisa_reforma(-0.25), etc. (max -0.30)
+    + penalizacoes: "documentação irregular"(-0.20), "rachaduras/trincas"(-0.15),
+      "infiltração/umidade"(-0.15), "mofo/bolor"(-0.10), "precisa reforma"(-0.25),
+      etc. (max -0.30). Os termos exatos estao em PONTOS_NEGATIVOS_CONTROLADOS.
     Score final: clamp [0.0, 1.0]
 
 SCORE DA LLM (Fase 1 — experimental, NAO usado no calculo oficial):

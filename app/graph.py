@@ -9,32 +9,40 @@ RESPONSABILIDADE:
 
 PIPELINE:
     Agente 1 — Coletor (sequencial)
-        → Coleta imóveis via Apify (VivaReal, LugarCerto)
-        → Enriquece com publishedAt, description e URLs de imagens
+        → Fonte principal: Amazon Athena (tabela vivareal em S3/Parquet)
+        → Fallback: Apify/ocrad (VivaReal, LugarCerto) quando o Athena
+          util/local fica abaixo de 10 resultados
+        → Normaliza campos, filtra leilões/duplicatas, enriquece fotos
+        ↓  data/imoveis_coletados_ag1.json
         ↓  data/imoveis_completos_ag1.json
 
     Agente 2 — Comparáveis (sequencial, depende do Ag. 1)
         → Separa terrenos do clustering
-        → Score numérico de similaridade
-        → Clustering via LLM (Groq, llama-3.3-70b-versatile)
-        → Zona homogênea (Google Maps + Groq Vision)
+        → Pré-classificação determinística + score numérico de similaridade
+        → Clustering via LLM (cadeia Qwen3-VL-8B Colab → Groq openai/gpt-oss-120b
+          → Groq_2 → Gemini gemini-3.5-flash-lite → NVIDIA openai/gpt-oss-20b)
+        → Zona homogênea (Google Maps + LLM de visão sobre imagem de satélite)
         ↓  data/imoveis_comparaveis_ag2.json
         ↓  data/zona_homogenea_ag2.json
 
     Agente 3 — Analisador Qualitativo (PARALELO, depende do Ag. 2)
-        → Analisa texto + 8 fotos via NVIDIA NIM (ministral-14b)
-        → Score qualitativo por imóvel
+        → Analisa texto + fotos (multimodal). Cadeia: Qwen3-VL-8B Colab → Groq
+          → NVIDIA meta/llama-3.2-11b-vision-instruct → Gemini
+        → Fotos por provider: Qwen 4, Gemini 4, Groq 2, NVIDIA 1 (interface aceita até 8)
+        → Score qualitativo determinístico por imóvel (+ score_llm comparativo)
         ↓  data/imoveis_analisados_ag3.json
 
     Agente 4 — Infraestrutura (PARALELO, depende do Ag. 2)
-        → Busca POIs via osmnx (OpenStreetMap) em 3 faixas
-        → Score de infraestrutura multifaixa
+        → Busca POIs via Geoapify Places (fallback Google Places) em 3 faixas
+        → Score de infraestrutura determinístico multifaixa
+        → Nível 2: LLM classifica perfil da região e ajusta o score em ±0.10
+          (cadeia Qwen → Gemini → Groq → NVIDIA)
         ↓  data/infra_avaliada_ag4.json
 
     Agente 5 — Estimador de Preço (sequencial, depende dos Ag. 3 e 4)
         → Calcula valor m² da zona (terreno + construção por padrão)
-        → Estima valor mínimo, médio e de liquidez
-        → Estima tempo de venda
+        → Estima valor mínimo, médio e de liquidez (TRIMMEAN 0.5, desconto 10%)
+        → Estima tempo de venda (liquidez experimental)
         ↓  data/preco_liquidez_ag5.json
 
 PENDENTE:
@@ -82,15 +90,19 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
 
     Retorna
     -------
-    dict com:
-        status            : "parcial" ou "completo"
-        imovel_alvo       : identificação do imóvel
-        comparaveis       : lista ranqueada (Cluster A + B + terrenos)
-        terrenos          : terrenos separados (para zona homogênea)
-        zona_homogenea    : resultado da validação geográfica (se disponível)
-        resumo            : totais e método usado
-        preco_estimado    : None (preenchido pelo Agente 5)
-        liquidez          : None (preenchido pelo Agente 5)
+    dict com (no sucesso, Agentes 1 a 5 executados):
+        status              : "completo — ..." ou "parcial — N falha(s): ..."
+        imovel_alvo         : identificação do imóvel (rua — bairro)
+        comparaveis         : lista ranqueada (Cluster A + B)
+        terrenos            : terrenos separados (para zona homogênea)
+        zona_homogenea      : resultado da validação geográfica (ou None)
+        analise_qualitativa : saída do Agente 3
+        infraestrutura      : saída do Agente 4
+        preco_estimado      : saída do Agente 5 (avaliação + liquidez)
+        resumo              : totais e método usado
+
+    Em erro precoce (Ag. 1 sem imóveis ou Ag. 2 sem comparáveis), retorna um
+    dict reduzido com status de erro e preco_estimado=None.
     """
     logger.info("=" * 55)
     logger.info("PIPELINE MULTIAGENTE — PRECIFICAÇÃO IMOBILIÁRIA")
@@ -105,7 +117,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
 
     # ------------------------------------------------------------------
     # AGENTE 1 — Coleta de imóveis comparáveis
-    # Apify (ocrad) → VivaReal + LugarCerto
+    # Athena (fonte principal) → fallback Apify/ocrad (VivaReal + LugarCerto)
     # Enriquece com publishedAt e description via requests.get
     # ------------------------------------------------------------------
     from agents.collector import coletar_imoveis

@@ -38,10 +38,16 @@ FLUXO COMPLETO:
 
     A media e descritiva. O corte usa a area REAL do imovel alvo.
 
-    Regra eliminatoria de area:
+    Regra eliminatoria de area (LIMITE_AREA_PRE_CLASSIFICACAO = 0.30):
       - area construida: diferenca > 30% em relacao ao alvo -> incompatível
       - area de terreno: diferenca > 30% em relacao ao alvo -> incompatível
         (aplicada para casas quando alvo e candidato possuem o dado)
+
+    Relaxamento adaptativo:
+      Se o limite de 30% deixar menos que MIN_ELEGIVEIS_PRE_CLASSIFICACAO (8)
+      candidatos elegiveis, a pre-classificacao e refeita com um limite mais
+      generoso (LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO = 0.45), para nao
+      estrangular a amostra em bairros com poucos anuncios comparaveis.
 
     Caracteristicas objetivas comparadas:
       - piscina
@@ -84,22 +90,32 @@ FLUXO COMPLETO:
       - nao existe limite total de candidatos para a LLM
       - o score numerico serve apenas para ordenar a sequencia dos lotes
 
-    Cadeia de fallback:
+    Cadeia de fallback (clustering):
       1. Qwen3-VL-8B — Google Colab
       2. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
       3. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b
       4. Gemini — gemini-3.5-flash-lite
       5. NVIDIA NIM — openai/gpt-oss-20b
       6. Toda resposta e validada integralmente antes de ser aceita.
-      7. Se NENHUM candidato for julgado por LLM, usa top 20 do ranking Python como fallback.
+      7. Se NENHUM candidato for julgado por LLM, usa top TOP_N_FALLBACK_PYTHON (20)
+         do ranking Python como fallback.
 
     A LLM recebe somente candidatos sem incompatibilidade objetiva detectada
     e realiza o julgamento final de comparabilidade.
 
   ETAPA 5 — ZONA HOMOGENEA
   ─────────────────────────
-    Mantem a logica existente: geocodificacao do alvo, imagem hybrid,
-    analise visual da zona e classificacao por distancia.
+    Geocodificacao do alvo, imagem de satelite (hybrid) e analise visual da zona
+    por LLM de visao (cadeia Qwen3-VL-8B Colab -> Gemini -> Groq -> NVIDIA), que
+    escolhe um raio livre (limitado por sanidade a RAIO_MINIMO/MAXIMO_SEGURANCA:
+    100..3000 m). Cada comparavel e classificado por distancia Haversine:
+    na_zona / fora_zona / zona_nao_verificada (geocodificado so por bairro).
+
+    Fallback de amostra escassa (Opcao B):
+      Se menos de MIN_CONFIRMADOS_ZONA (3) comparaveis forem confirmados na zona,
+      os imoveis "zona_nao_verificada" sao anexados aos confirmados com
+      incluido_por_fallback_zona=True e confianca baixa, para nao deixar os
+      Agentes 3 e 5 sem amostra.
 
 QUEM USA A SAIDA:
 ─────────────────
@@ -1258,7 +1274,30 @@ def identificar_comparaveis(
     usar_llm: bool = True,
     run_id: str | None = None,
 ) -> dict:
-    """Identifica comparaveis com pre-classificacao + score Python + julgamento LLM validado."""
+    """
+    Identifica comparaveis com pre-classificacao + score Python + julgamento LLM validado.
+
+    Parametros
+    ----------
+    imovel_alvo : dict
+        Imovel de referencia (tipo, area, cidade e demais caracteristicas).
+    imoveis_coletados : list[dict], opcional
+        Saida do Agente 1. Se None, carrega de `arquivo_entrada`
+        (fallback para imoveis_coletados_ag1.json).
+    arquivo_entrada / arquivo_saida : str
+        Nomes dos JSONs de entrada/saida (relativos ao diretorio da execucao).
+    usar_llm : bool
+        Se False, usa apenas o ranking Python (sem clustering por LLM).
+    run_id : str | None
+        Isola os arquivos da avaliacao em data/run_<run_id>/; sem run_id
+        mantem os caminhos legados em data/.
+
+    Retorna
+    -------
+    dict com: comparaveis (Cluster A + B ranqueados), terrenos (separados),
+    resumo (totais e metodo). A zona homogenea e gerada por
+    `analisar_zona_homogenea`, chamada separadamente pelo orquestrador.
+    """
     logger.info("=" * 60)
     logger.info("AGENTE 2: IDENTIFICADOR DE COMPARAVEIS")
     logger.info("=" * 60)
