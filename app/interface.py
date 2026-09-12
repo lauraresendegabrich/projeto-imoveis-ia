@@ -140,7 +140,7 @@ if not submitted:
     col_info1, col_info2, col_info3 = st.columns(3)
     with col_info1:
         st.markdown("### 🔍 Coleta")
-        st.write("Busca imóveis similares à venda na mesma região")
+        st.write("Reúne imóveis similares à venda na mesma região, a partir de uma base de dados de anúncios e de coleta complementar quando necessário")
     with col_info2:
         st.markdown("### 🧠 Análise")
         st.write("Avalia qualidade, infraestrutura e padrão da vizinhança")
@@ -149,7 +149,7 @@ if not submitted:
         st.write("Calcula valor de mercado e tempo estimado de venda")
 
     st.divider()
-    st.caption("Cidades disponíveis no banco: Campinas, Indaiatuba, Guarulhos, Americana, Cotia, Jacareí, Bauru, Barueri, Atibaia, Itu (SP). Outras cidades usam coleta em tempo real.")
+    st.caption("O sistema usa uma base de dados de anúncios como fonte principal e complementa com coleta em tempo real quando há poucos imóveis na região.")
 
 elif submitted:
     # Validação dos campos obrigatórios
@@ -321,7 +321,7 @@ elif submitted:
         progress.progress(pct)
         if restante > 0:
             if restante > 90:
-                status_box.info(f"🔍 **Agente Coletor de Dados** | Acessando portais imobiliários... Faltam ~{int(restante)}s")
+                status_box.info(f"🔍 **Agente Coletor de Dados** | Consultando a base de dados de anúncios... Faltam ~{int(restante)}s")
             elif restante > 60:
                 status_box.info(f"🔍 **Agente Coletor de Dados** | Lendo anúncios de casas e terrenos... Faltam ~{int(restante)}s")
             elif restante > 30:
@@ -404,7 +404,7 @@ elif submitted:
             fora = zona_resultado.get("fora_zona", [])
             tempo_zona = time.time() - t2z
             total_analisados_zona = len(confirmados) + len(fora)
-            raio_usado = zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros") or zona_resultado.get("zona_homogenea", {}).get("raio_metros") or 700
+            raio_usado = zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros") or zona_resultado.get("zona_homogenea", {}).get("raio_metros") or 500
             with log_area:
                 # Separa comparaveis e terrenos na zona pra log claro
                 terrenos_na_zona = [c for c in confirmados if (c.get("propertyType", "") or "").lower() in ("terrenos", "terreno", "lote", "residential_allotment_land", "allotment_land")]
@@ -540,16 +540,16 @@ elif submitted:
     # Conta portais (normaliza nomes)
     portais_count = {}
     for im in imoveis_coletados:
-        portal = im.get("portal") or im.get("source") or "Athena/S3"
-        # Normaliza variações
-        portal_lower = portal.lower()
-        if "vivareal" in portal_lower or "viva real" in portal_lower:
-            portal = "VivaReal"
-        elif "lugar" in portal_lower:
-            portal = "LugarCerto"
-        elif "athena" in portal_lower or "s3" in portal_lower:
-            portal = "Banco próprio"
-        portais_count[portal] = portais_count.get(portal, 0) + 1
+        # Os agentes gravam a origem em "source"; nenhum produz "portal".
+        origem = str(im.get("source") or "").strip() or "Banco próprio"
+        origem_lower = origem.lower()
+        if "vivareal" in origem_lower or "viva real" in origem_lower:
+            origem = "VivaReal"
+        elif "lugar" in origem_lower:
+            origem = "LugarCerto"
+        elif "athena" in origem_lower or "s3" in origem_lower:
+            origem = "Banco próprio"
+        portais_count[origem] = portais_count.get(origem, 0) + 1
     resumo["portais"] = portais_count
     # Conta na rua vs bairro
     na_rua_count = sum(1 for im in imoveis_coletados if rua and rua.lower() in (im.get("street") or im.get("rua") or "").lower())
@@ -592,16 +592,40 @@ if "resultado" in st.session_state:
         avaliacao = preco.get("avaliacao_planilha") or preco.get("avaliacao", {})
         liquidez_info = preco.get("liquidez_experimental") or preco.get("liquidez", {})
 
+        # O Ag5 sinaliza quando nao teve amostra suficiente ou o valor deu <= 0.
+        # Nesses casos NAO mostramos "R$ 0" como se fosse um resultado valido.
+        avaliacao_confiavel = preco.get("avaliacao_confiavel", True)
+        status_avaliacao = preco.get("status_avaliacao", "ok")
+
+        if not avaliacao_confiavel:
+            if status_avaliacao == "sem_amostra":
+                st.warning(
+                    "⚠️ **Não foi possível estimar o valor deste imóvel.** "
+                    "Não encontramos comparáveis suficientes na vizinhança (a região "
+                    "tem poucos anúncios próximos ao endereço). Tente um bairro ou "
+                    "cidade com mais imóveis à venda."
+                )
+            else:
+                st.warning(
+                    "⚠️ **A estimativa não é confiável para este imóvel.** "
+                    "Os dados disponíveis não permitiram um cálculo consistente "
+                    "(verifique a área informada e se há comparáveis na região)."
+                )
+            for _aviso in preco.get("avisos", []):
+                st.caption(f"• {_aviso}")
+
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             valor_medio = avaliacao.get("valor_medio_imovel", 0)
-            st.metric("💰 Valor Médio Estimado", f"{fmt_brl(valor_medio)}")
+            valor_medio_txt = fmt_brl(valor_medio) if avaliacao_confiavel else "—"
+            st.metric("💰 Valor Médio Estimado", valor_medio_txt)
         with col_b:
             valor_liq = avaliacao.get("valor_liquidez", 0)
-            st.metric("⚡ Valor de Liquidez (-10%)", f"{fmt_brl(valor_liq)}")
+            valor_liq_txt = fmt_brl(valor_liq) if avaliacao_confiavel else "—"
+            st.metric("⚡ Valor de Liquidez (-10%)", valor_liq_txt)
         with col_c:
             tempo = liquidez_info.get("tempo_estimado", "?")
-            st.metric("⏱️ Tempo Estimado de Venda", tempo)
+            st.metric("⏱️ Tempo Estimado de Venda", tempo if avaliacao_confiavel else "—")
 
         # ==============================================================
         # COMO CHEGAMOS NESTE VALOR
@@ -611,7 +635,7 @@ if "resultado" in st.session_state:
 
         zona = resultado.get("zona_homogenea", {})
         zh = zona.get("zona_homogenea", {}) if zona else {}
-        raio = zh.get("raio_metros") or zh.get("raio_sugerido_metros") or 400
+        raio = zh.get("raio_metros") or zh.get("raio_sugerido_metros") or 500
         confirmados = zona.get("comparaveis_confirmados", []) if zona else []
         fora_zona = zona.get("fora_zona", []) if zona else []
         ag3_data = resultado.get("analise_qualitativa", {})
@@ -689,10 +713,11 @@ if "resultado" in st.session_state:
                 if justificativa_zh:
                     st.write(f"- Justificativa: {justificativa_zh}")
 
-            # Imagem de satélite
+            # Imagem de satélite: usa o caminho que o Ag2 gravou no resultado da zona
+            # (suporta run_id); cai no caminho legado so se o campo nao existir.
             import os
-            img_path = "data/satelite_zona_homogenea_ag2.png"
-            if os.path.exists(img_path):
+            img_path = (zona.get("imagem_satelite") if zona else None) or "data/satelite_zona_homogenea_ag2.png"
+            if img_path and os.path.exists(img_path):
                 st.image(img_path, caption="Imagem de satélite com marcador no imóvel alvo", use_container_width=True)
 
         # Ag.3
@@ -867,15 +892,36 @@ if "resultado" in st.session_state:
         with st.expander("🏥 Agente Avaliador de Infraestrutura"):
             st.write(f"O entorno do seu imóvel tem infraestrutura **{classif_infra}** (score {score_final_infra:.2f}).")
 
-            # Explicação do score
-            if score_final_infra >= 0.70:
-                st.success("Região com excelente infraestrutura — tem escolas, hospitais, comércio e transporte perto.")
-            elif score_final_infra >= 0.50:
-                st.info("Região com boa infraestrutura — tem o básico por perto, mas pode faltar algo em alguma categoria.")
-            elif score_final_infra >= 0.30:
-                st.warning("Região com infraestrutura regular — poucas opções de serviços no entorno.")
+            # Mensagem alinhada a classificacao real do Ag4 (5 niveis:
+            # excelente >=0.85, boa >=0.70, moderada >=0.50, basica >=0.30, insuficiente <0.30)
+            if classif_infra == "excelente":
+                st.success("Região com infraestrutura excelente — escolas, hospitais, comércio e transporte fartos no entorno.")
+            elif classif_infra == "boa":
+                st.success("Região com boa infraestrutura — tem o essencial por perto e boa cobertura na maioria das categorias.")
+            elif classif_infra == "moderada":
+                st.info("Região com infraestrutura moderada — tem o básico por perto, mas pode faltar algo em alguma categoria.")
+            elif classif_infra == "basica":
+                st.warning("Região com infraestrutura básica — poucas opções de serviços no entorno.")
             else:
                 st.error("Região com infraestrutura insuficiente — pouco comércio, transporte ou serviços próximos.")
+
+            # Nivel 2: perfil da regiao classificado pela LLM + ajuste aplicado ao score
+            perfil_regiao = scores_infra.get("perfil_regiao")
+            ajuste_llm = scores_infra.get("ajuste_llm")
+            score_det = scores_infra.get("score_deterministico")
+            justif_ajuste = scores_infra.get("justificativa_ajuste")
+            if perfil_regiao and perfil_regiao != "desconhecido":
+                perfil_label = perfil_regiao.replace("_", " ")
+                if ajuste_llm and abs(float(ajuste_llm)) >= 0.001 and score_det is not None:
+                    sinal = "aumentou" if float(ajuste_llm) > 0 else "reduziu"
+                    st.caption(
+                        f"🧭 A IA classificou a região como **{perfil_label}** e {sinal} o score "
+                        f"em {abs(float(ajuste_llm)):.2f} (de {float(score_det):.2f} para {score_final_infra:.2f})."
+                    )
+                    if justif_ajuste:
+                        st.caption(f"_{justif_ajuste}_")
+                else:
+                    st.caption(f"🧭 A IA classificou a região como **{perfil_label}** (sem ajuste no score).")
 
             # Gráfico radar
             infra_full = resultado.get("infraestrutura", {})
@@ -1016,7 +1062,23 @@ if "resultado" in st.session_state:
 
         st.divider()
 
-        # ── BOTÃO EXPORTAR PDF ─────────────────────────────────────
+        # ── BOTÃO EXPORTAR LAUDO (TXT) ─────────────────────────────
+        # No TXT usamos "R$" limpo (sem o escape \$ de markdown do fmt_brl).
+        def _brl_txt(v):
+            return fmt_brl(v).replace("R\\$", "R$")
+
+        if avaliacao_confiavel:
+            bloco_resultado = (
+                f"Valor Médio Estimado: {_brl_txt(avaliacao.get('valor_medio_imovel', 0))}\n"
+                f"Valor de Liquidez (-10%): {_brl_txt(avaliacao.get('valor_liquidez', 0))}\n"
+                f"Tempo Estimado de Venda: {liquidez_info.get('tempo_estimado', '?')}"
+            )
+        else:
+            bloco_resultado = (
+                "Não foi possível estimar um valor confiável para este imóvel "
+                "(comparáveis insuficientes na região)."
+            )
+
         laudo_texto = f"""LAUDO DE AVALIAÇÃO IMOBILIÁRIA
 {'='*50}
 
@@ -1026,9 +1088,7 @@ Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas}
 
 RESULTADO DA AVALIAÇÃO
 {'-'*50}
-Valor Médio Estimado: {fmt_brl(avaliacao.get('valor_medio_imovel', 0))}
-Valor de Liquidez (-10%): {fmt_brl(avaliacao.get('valor_liquidez', 0))}
-Tempo Estimado de Venda: {liquidez_info.get('tempo_estimado', '?')}
+{bloco_resultado}
 
 MÉTODO
 {'-'*50}
