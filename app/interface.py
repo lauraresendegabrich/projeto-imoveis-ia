@@ -814,6 +814,7 @@ if "resultado" in st.session_state:
                             preco_val = float(preco_val)
                         except (ValueError, TypeError):
                             preco_val = 0
+                        eh_alvo = comp.get("eh_anuncio_do_alvo", False)
                         dados_tabela.append({
                             "Preço": f"{fmt_brl(preco_val)}" if preco_val else "-",
                             "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
@@ -822,10 +823,21 @@ if "resultado" in st.session_state:
                             "Estado": estado_cons,
                             "Padrão": padrao_tab,
                             "Score": score_q,
+                            "Obs": "🎯 seu anúncio" if eh_alvo else "",
                             "Anúncio": link,
                         })
                     df = pd.DataFrame(dados_tabela)
                     st.markdown(df.to_markdown(index=False), unsafe_allow_html=True)
+
+                    # Legenda quando o proprio anuncio do alvo foi identificado
+                    n_alvo = sum(1 for c in comparaveis_tabela if c.get("eh_anuncio_do_alvo"))
+                    if n_alvo:
+                        plural = "anúncios identificados" if n_alvo > 1 else "anúncio identificado"
+                        st.caption(
+                            f"🎯 {n_alvo} {plural} como o do **seu próprio imóvel**. "
+                            f"Ele aparece aqui para comparação, mas **não entrou no cálculo do preço** "
+                            f"(evita que o valor pedido no anúncio influencie a estimativa)."
+                        )
 
                     # Gráfico scatter: Preço × Área
                     precos_scatter = []
@@ -1046,6 +1058,14 @@ if "resultado" in st.session_state:
                 st.caption(f"Terreno separado no cálculo (lote de {calc_terreno.get('area_terreno_m2', 0):.0f}m²)")
 
             st.caption(f"Método: {preco.get('metodo_estatistico', '?')}")
+
+            # Se o proprio anuncio do alvo foi identificado, avisa que ele nao entrou no calculo.
+            n_alvo_calc = resultado.get("resumo", {}).get("anuncios_do_alvo_marcados", 0)
+            if n_alvo_calc:
+                st.caption(
+                    f"🎯 {n_alvo_calc} anúncio(s) identificado(s) como o do seu próprio imóvel "
+                    f"foram **excluídos deste cálculo** para não ancorar o valor no preço pedido."
+                )
 
             # Comparação com preço anunciado
             if imovel_alvo_export.get("price") and imovel_alvo_export["price"] > 0:

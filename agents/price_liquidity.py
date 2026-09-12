@@ -316,7 +316,15 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
             "propertyType", "price", "area", "bedrooms", "bathrooms", "street", "neighborhood"
         ))
 
+    excluidos_anuncio_alvo = 0
     for imovel in todos_comparaveis:
+        # O Ag2 marca o proprio anuncio do imovel-alvo (quando ele aparece entre os
+        # coletados). Ele e excluido do CALCULO de preco para nao ancorar a estimativa
+        # no preco pedido pelo usuario. Continua disponivel nos demais agentes/interface.
+        if imovel.get("eh_anuncio_do_alvo"):
+            excluidos_anuncio_alvo += 1
+            continue
+
         chave = _chave_dedup(imovel)
         if chave in chaves_vistas:
             continue
@@ -327,6 +335,13 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
             terrenos_zona.append(imovel)
         else:
             comparaveis_zona.append(imovel)
+
+    if excluidos_anuncio_alvo:
+        import logging as _log_alvo
+        _log_alvo.getLogger(__name__).info(
+            f"[Ag5] {excluidos_anuncio_alvo} anuncio(s) do proprio alvo excluido(s) do "
+            f"calculo de preco (marcados pelo Ag2 como eh_anuncio_do_alvo)"
+        )
 
     # Agente 3 (analise qualitativa)
     dados_ag3 = carregar_json(CAMINHO_AG3)
