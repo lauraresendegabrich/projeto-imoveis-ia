@@ -89,9 +89,20 @@ LIQUIDEZ EXPERIMENTAL (separada da planilha):
 
 SAIDA JSON:
 ───────────
+    "avaliacao_confiavel": bool — False quando nao houve amostra (terreno+construcao)
+                           ou o valor final ficou <= 0
+    "status_avaliacao": "ok" | "sem_amostra" | "valor_nao_estimado"
     "avaliacao_planilha": { valor_minimo, valor_medio, desconto, valor_liquidez }
     "liquidez_experimental": { score, classificacao, tempo_estimado, aviso }
-    "auditoria": { todos os valores intermediarios }
+    "auditoria": { todos os valores intermediarios + total_amostras +
+                   comparaveis_terreno_maior_que_imovel }
+
+ROBUSTEZ:
+─────────
+    - Terreno estimado > preco do anuncio: em vez de descartar a construcao (o que
+      inflaria o valor final para so o terreno), usa preco/m2 total do comparavel.
+    - Sem nenhuma amostra valida OU valor final <= 0: marca avaliacao_confiavel=False
+      e status_avaliacao correspondente, em vez de devolver R$ 0 como sucesso.
 
 QUEM USA:
 ─────────
@@ -679,6 +690,7 @@ def executar_agente5(
 
     valores_m2_construcao_min_terreno = []
     valores_m2_construcao_med_terreno = []
+    comparaveis_terreno_maior = 0  # comparaveis onde o terreno estimado > preco do anuncio
 
     for imovel in comparaveis_zona:
         tipo_comp = normalizar_tipo(imovel.get("propertyType", ""))
@@ -710,14 +722,27 @@ def executar_agente5(
             # Serie MIN/TERRENO
             valor_terreno_est_min = menor_m2_terreno * area_terreno_comp
             valor_constr_min = preco_comp - valor_terreno_est_min
-            if valor_constr_min > 0:
-                valores_m2_construcao_min_terreno.append(valor_constr_min / area_construida_comp)
 
             # Serie MED/TERRENO
             valor_terreno_est_med = medio_m2_terreno * area_terreno_comp
             valor_constr_med = preco_comp - valor_terreno_est_med
+
+            # Quando o terreno estimado vale MAIS que o proprio anuncio, a construcao
+            # descontada fica <= 0. Antes esses valores eram simplesmente descartados;
+            # se isso acontecesse com todos os comparaveis, a serie de construcao ficava
+            # vazia e o valor final virava so o terreno (superestimado). Agora, quando
+            # ambas as series dariam <= 0 para este imovel, usamos preco/area total como
+            # fallback para nao perder a amostra e nao inflar o valor.
+            if valor_constr_min > 0:
+                valores_m2_construcao_min_terreno.append(valor_constr_min / area_construida_comp)
             if valor_constr_med > 0:
                 valores_m2_construcao_med_terreno.append(valor_constr_med / area_construida_comp)
+
+            if valor_constr_min <= 0 and valor_constr_med <= 0:
+                comparaveis_terreno_maior += 1
+                m2_valor = preco_comp / area_construida_comp
+                valores_m2_construcao_min_terreno.append(m2_valor)
+                valores_m2_construcao_med_terreno.append(m2_valor)
         else:
             # Nao separa terreno: preco/area direto
             m2_valor = preco_comp / area_construida_comp
@@ -738,11 +763,36 @@ def executar_agente5(
                 "Nao foram encontrados imoveis comparaveis para calcular o valor m2 da construcao."
             )
 
+    if comparaveis_terreno_maior > 0:
+        avisos.append(
+            f"{comparaveis_terreno_maior} comparavel(is) tinham o terreno estimado valendo mais "
+            f"que o proprio anuncio; para esses foi usado o preco/m2 total (evita superestimar o "
+            f"valor da construcao). Reveja se o m2 de terreno da zona esta coerente."
+        )
+
     # ========================================================
     # 4. CALCULO DO TERRENO
     # ========================================================
 
-    if separar_terreno:
+    if eh_terreno:
+        # Alvo e terreno puro: o valor e so o terreno (m2 da zona * area do lote).
+        # A decisao de "separar" nao se aplica; o terreno E o proprio imovel.
+        if valores_m2_terreno and area_terreno_alvo > 0:
+            valor_terreno_minimo = menor_m2_terreno * area_terreno_alvo
+            valor_terreno_medio = medio_m2_terreno * area_terreno_alvo
+            terreno_aplicado = True
+        else:
+            valor_terreno_minimo = 0.0
+            valor_terreno_medio = 0.0
+            terreno_aplicado = False
+            if not valores_m2_terreno:
+                avisos.append(
+                    "Alvo e terreno, mas nao ha terrenos comparaveis na zona para "
+                    "estimar o valor do m2."
+                )
+            elif area_terreno_alvo <= 0:
+                avisos.append("Area do terreno alvo nao informada.")
+    elif separar_terreno:
         valor_terreno_minimo = menor_m2_terreno * area_terreno_alvo
         valor_terreno_medio = medio_m2_terreno * area_terreno_alvo
         terreno_aplicado = True
@@ -787,6 +837,32 @@ def executar_agente5(
     valor_liquidez = valor_medio_imovel * (1 - desconto_liquidez)
 
     # ========================================================
+    # 6b. CONFIABILIDADE DA AVALIACAO
+    # Sem amostra de terreno E de construcao, ou valor final <= 0, o resultado
+    # nao e confiavel. Antes isso saia como R$ 0,00 com status de sucesso, o que
+    # enganava a interface. Agora sinalizamos explicitamente.
+    # ========================================================
+
+    total_amostras = len(valores_m2_terreno) + len(todos_valores_construcao)
+    avaliacao_confiavel = True
+    status_avaliacao = "ok"
+
+    if total_amostras == 0:
+        avaliacao_confiavel = False
+        status_avaliacao = "sem_amostra"
+        avisos.append(
+            "Nenhum comparavel valido (terreno ou construcao) foi encontrado na zona. "
+            "Nao foi possivel estimar o valor do imovel."
+        )
+    elif valor_medio_imovel <= 0:
+        avaliacao_confiavel = False
+        status_avaliacao = "valor_nao_estimado"
+        avisos.append(
+            "O calculo resultou em valor zero ou negativo. A avaliacao nao e confiavel "
+            "(verifique area do alvo e os comparaveis da zona)."
+        )
+
+    # ========================================================
     # 7. LIQUIDEZ EXPERIMENTAL (nao faz parte da planilha)
     # Heuristica multiagente para discussao metodologica.
     # NAO modifica valor_minimo, valor_medio nem valor_liquidez.
@@ -802,6 +878,8 @@ def executar_agente5(
     resultado = {
         "agente": "Agente 5 - Estimador de Preco e Liquidez",
         "metodo": "Valor m2 da zona homogenea (terreno + construcao por padrao)",
+        "avaliacao_confiavel": avaliacao_confiavel,
+        "status_avaliacao": status_avaliacao,
         "excluir_extremos": True,
         "metodo_estatistico": "TRIMMEAN(0.5) — remove 25% menores e 25% maiores",
         "imovel_alvo": {
@@ -879,6 +957,8 @@ def executar_agente5(
             "valores_m2_construcao_combinados": [round(v, 2) for v in todos_valores_construcao],
             "valor_m2_construcao_minimo": round(menor_m2_construcao, 2),
             "valor_m2_construcao_medio": round(medio_m2_construcao, 2),
+            "total_amostras": total_amostras,
+            "comparaveis_terreno_maior_que_imovel": comparaveis_terreno_maior,
         },
         "avisos": avisos,
         "justificativa": (
