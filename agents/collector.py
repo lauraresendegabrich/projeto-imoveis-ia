@@ -1244,19 +1244,51 @@ def _coletar_ocrad(
 # BLOCO 3 - ORDENACAO E ESCOPO
 # =============================================================================
 
-def _filtrar_matches_locais(imoveis: list[dict], rua: str, bairro: str) -> list[dict]:
-    """Retorna somente matches reais de rua/bairro, sem fallback para cidade."""
+def _cidade_incompativel(imovel: dict, cidade_alvo: str) -> bool:
+    """
+    True quando o imovel declara uma cidade DIFERENTE da cidade alvo.
+
+    Protege contra bairros HOMONIMOS em cidades diferentes (ex.: "Jardim Paulista"
+    existe em Paraiso do Tocantins e em Sao Paulo capital). O match de bairro sozinho
+    casaria os dois; aqui descartamos quando a cidade do anuncio existe e nao bate.
+
+    Tolerante a dado ausente: se o imovel nao trouxe cidade, NAO descarta (da o
+    beneficio da duvida; a validacao geografica do Agente 2 ainda atua depois).
+    """
+    if not cidade_alvo:
+        return False
+    cidade_imovel = _normalizar_texto(imovel.get("city") or imovel.get("cidade") or "")
+    if not cidade_imovel:
+        return False  # sem cidade declarada -> nao penaliza
+    return cidade_imovel != _normalizar_texto(cidade_alvo)
+
+
+def _filtrar_matches_locais(imoveis: list[dict], rua: str, bairro: str, cidade: str = "") -> list[dict]:
+    """
+    Retorna somente matches reais de rua/bairro, sem fallback para cidade.
+    Descarta imoveis cuja cidade declarada difere da cidade alvo (bairros homonimos).
+    """
     if not rua and not bairro:
         return list(imoveis)
 
     resultado = []
+    descartados_cidade = 0
     for imovel in imoveis:
+        # Barreira de cidade: bairro homonimo de outra cidade nao e comparavel.
+        if _cidade_incompativel(imovel, cidade):
+            descartados_cidade += 1
+            continue
         na_rua = bool(rua) and _mesma_rua(imovel.get("street") or imovel.get("rua"), rua)
         no_bairro = bool(bairro) and _mesmo_bairro(
             imovel.get("neighborhood") or imovel.get("bairro"), bairro
         )
         if na_rua or no_bairro:
             resultado.append(imovel)
+    if descartados_cidade:
+        logger.info(
+            f"[Ag1][Escopo] {descartados_cidade} imovel(is) descartado(s) por cidade "
+            f"diferente de {cidade!r} (bairro homonimo de outra cidade)"
+        )
     return resultado
 
 
@@ -1276,16 +1308,30 @@ def _ordenar_por_proximidade(imoveis: list[dict], rua: str, bairro: str) -> list
     return ordenados
 
 
-def _aplicar_escopo(imoveis: list[dict], rua: str, bairro: str) -> tuple[list[dict], str]:
-    """Mantem rua/bairro quando houver match; caso contrario usa cidade inteira."""
-    resultado = _filtrar_matches_locais(imoveis, rua=rua, bairro=bairro)
+def _filtrar_por_cidade(imoveis: list[dict], cidade: str) -> list[dict]:
+    """Mantem so imoveis cuja cidade bate com a alvo (ou sem cidade declarada)."""
+    if not cidade:
+        return list(imoveis)
+    return [im for im in imoveis if not _cidade_incompativel(im, cidade)]
+
+
+def _aplicar_escopo(imoveis: list[dict], rua: str, bairro: str, cidade: str = "") -> tuple[list[dict], str]:
+    """
+    Mantem rua/bairro quando houver match; caso contrario usa a cidade inteira.
+    Em ambos os casos, imoveis de OUTRA cidade sao descartados (bairro homonimo).
+    """
+    resultado = _filtrar_matches_locais(imoveis, rua=rua, bairro=bairro, cidade=cidade)
     if rua or bairro:
         if resultado:
             logger.info(f"Escopo: RUA+BAIRRO -> {len(resultado)} imoveis")
             return resultado, "rua+bairro"
-        logger.info(f"Escopo: CIDADE -> {len(imoveis)} imoveis (nenhum match local)")
-        return imoveis, "cidade"
-    return imoveis, "cidade"
+        # Fallback cidade: sem match de rua/bairro, usa a cidade toda MAS ainda
+        # exige que os imoveis sejam da cidade alvo (nao traz outra cidade de volta).
+        na_cidade = _filtrar_por_cidade(imoveis, cidade)
+        logger.info(f"Escopo: CIDADE -> {len(na_cidade)} imoveis (nenhum match local)")
+        return na_cidade, "cidade"
+    na_cidade = _filtrar_por_cidade(imoveis, cidade)
+    return na_cidade, "cidade"
 
 
 # =============================================================================
@@ -1553,7 +1599,7 @@ def coletar_imoveis(
     # ── FALLBACK: mede Athena UTIL + LOCAL, nao o bruto ───────────────
     athena_validos = [i for i in athena_imoveis if _campos_ok(i) and not _eh_leilao(i)]
     athena_validos = _remover_duplicatas_url(athena_validos)
-    athena_locais = _filtrar_matches_locais(athena_validos, rua=rua, bairro=bairro)
+    athena_locais = _filtrar_matches_locais(athena_validos, rua=rua, bairro=bairro, cidade=cidade_nome)
     qtd_util_fallback = len(athena_locais) if (rua or bairro) else len(athena_validos)
 
     ocrad: list[dict] = []
@@ -1587,7 +1633,7 @@ def coletar_imoveis(
     logger.info(f"Apos filtros (validos, sem leilao, sem duplicatas fortes): {len(combinados)}")
 
     # ── ESCOPO ────────────────────────────────────────────────────────
-    combinados, escopo = _aplicar_escopo(combinados, rua=rua, bairro=bairro)
+    combinados, escopo = _aplicar_escopo(combinados, rua=rua, bairro=bairro, cidade=cidade_nome)
     logger.info(f"Escopo final: {escopo.upper()} | {len(combinados)} candidatos para o Agente 2")
 
     # ── ENRIQUECIMENTO ────────────────────────────────────────────────
