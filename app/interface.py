@@ -1157,10 +1157,7 @@ if "resultado" in st.session_state:
 
                 import pandas as _pd
 
-                n_suspeitos = 0
-
                 def _linhas_usados(lista, rotulo):
-                    nonlocal n_suspeitos
                     linhas = []
                     for u in lista:
                         preco_u = u.get("preco") or 0
@@ -1176,8 +1173,6 @@ if "resultado" in st.session_state:
                             alertas.append("🎯 seu anúncio")
                         if u.get("suspeita_leilao"):
                             alertas.append("⚠️ leilão?")
-                        if alertas:
-                            n_suspeitos += 1
                         linhas.append({
                             "Tipo": rotulo,
                             "Preço": fmt_brl(preco_u) if preco_u else "-",
@@ -1197,6 +1192,7 @@ if "resultado" in st.session_state:
                         f"{len(usados_constr)} imóvel(is) usado(s) no m² da construção e "
                         f"{len(usados_terr)} no m² do terreno. São exatamente os anúncios que entraram na média."
                     )
+                    n_suspeitos = sum(1 for linha in linhas_all if linha["Alerta"])
                     if n_suspeitos:
                         st.warning(
                             f"⚠️ {n_suspeitos} imóvel(is) usado(s) no cálculo têm sinal de alerta "
