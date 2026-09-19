@@ -103,12 +103,20 @@ with st.sidebar:
         tipo = st.selectbox("Tipo", ["Casa", "Apartamento"], index=["Casa", "Apartamento"].index(preset.get("tipo", "Casa")))
         col_a, col_b = st.columns(2)
         with col_a:
-            area = st.number_input("Área construída (m²)", min_value=0, value=preset.get("area", 0))
+            # value/min_value/step em float para aceitar casas decimais (ex.: 399,99 m²).
+            # Se fossem int, o Streamlit forcaria numeros inteiros.
+            area = st.number_input(
+                "Área construída (m²)", min_value=0.0,
+                value=float(preset.get("area", 0) or 0), step=0.01, format="%.2f",
+            )
             quartos = st.number_input("Quartos", min_value=0, value=preset.get("quartos", 0))
             vagas = st.number_input("Vagas", min_value=0, value=preset.get("vagas", 0))
         with col_b:
-            terreno_default = 0 if tipo == "Apartamento" else preset.get("area_terreno", 0)
-            area_terreno = st.number_input("Terreno (m²)", min_value=0, value=terreno_default)
+            terreno_default = 0.0 if tipo == "Apartamento" else float(preset.get("area_terreno", 0) or 0)
+            area_terreno = st.number_input(
+                "Terreno (m²)", min_value=0.0,
+                value=terreno_default, step=0.01, format="%.2f",
+            )
             banheiros = st.number_input("Banheiros", min_value=0, value=preset.get("banheiros", 0))
             preco_anunciado = st.number_input("Preço (R$, opcional)", min_value=0, value=0, step=1000)
 
