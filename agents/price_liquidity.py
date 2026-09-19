@@ -481,13 +481,17 @@ def extrair_score_ag4(dados_ag4: Dict) -> Optional[float]:
 # CALCULO DO M2 DA ZONA HOMOGENEA
 # ============================================================
 
-def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]]) -> List[float]:
+def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]], coletar_usados: bool = False):
     """
     Calcula o valor do m2 dos terrenos da zona homogenea.
     valor_m2_terreno = preco / area
     Se topografia = "Aclive/Declive acentuado", aplica fator 0.80 (desconto 20%).
+
+    Se coletar_usados=True, retorna (valores, terrenos_usados) — a lista dos
+    terrenos que efetivamente entraram no calculo (para exibir na interface).
     """
     valores = []
+    usados = []
     descartados = 0
     for terreno in terrenos:
         preco = extrair_preco(terreno)
@@ -500,6 +504,7 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]]) -> List[float]:
             val_direto = converter_numero(terreno.get("pricePerSqm"))
             if val_direto and M2_TERRENO_MIN <= val_direto <= M2_TERRENO_MAX:
                 valores.append(val_direto)
+                usados.append(terreno)
             else:
                 descartados += 1
             continue
@@ -517,6 +522,7 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]]) -> List[float]:
             continue
 
         valores.append(valor_m2)
+        usados.append(terreno)
 
     if descartados:
         import logging
@@ -525,6 +531,8 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]]) -> List[float]:
             f"faixa R$ {M2_TERRENO_MIN:.0f}-{M2_TERRENO_MAX:.0f} ou area < {AREA_MINIMA_VALIDA:.0f}m2"
         )
 
+    if coletar_usados:
+        return valores, usados
     return valores
 
 
@@ -679,6 +687,37 @@ def executar_agente5(
     avisos = []
     metodo_media = "media_aparada"
 
+    def _cheira_leilao(im: Dict[str, Any]) -> bool:
+        """Heuristica leve de auditoria: o texto do imovel tem cara de leilao?"""
+        termos = (
+            "leilao", "leilão", "leiloes", "leilões", "leiloeiro", "judicial",
+            "arremat", "licitac", "licitaç", "venda direta", "retomad",
+            "alienacao fiduciaria", "alienação fiduciária", "hasta publica",
+            "wiser", "sodre santoro", "zukerman", "mega leiloes",
+        )
+        texto = " ".join([
+            str(im.get("title") or im.get("titulo") or ""),
+            str(im.get("description") or im.get("descricao") or ""),
+            str(im.get("source") or im.get("source_site") or ""),
+        ]).lower()
+        return any(t in texto for t in termos)
+
+    def _resumo_imovel(im: Dict[str, Any]) -> Dict[str, Any]:
+        """Resumo enxuto de um comparavel para exibir na interface (com link + auditoria)."""
+        return {
+            "url": im.get("url") or "",
+            "rua": im.get("street") or im.get("rua") or "",
+            "bairro": im.get("neighborhood") or im.get("bairro") or "",
+            "preco": extrair_preco(im),
+            "area": extrair_area(im),
+            "area_terreno": extrair_area_terreno_imovel(im),
+            "quartos": im.get("bedrooms") or im.get("quartos"),
+            "tipo": im.get("propertyType") or im.get("tipo") or "",
+            # Sinais de auditoria: nao deveriam estar no calculo se True.
+            "eh_anuncio_do_alvo": bool(im.get("eh_anuncio_do_alvo")),
+            "suspeita_leilao": _cheira_leilao(im),
+        }
+
     # Tipo do imovel alvo
     tipo_alvo = normalizar_tipo(
         imovel_alvo.get("propertyType", "") or imovel_alvo.get("tipo", "")
@@ -702,7 +741,7 @@ def executar_agente5(
     # 1. VALOR M2 DO TERRENO DA ZONA HOMOGENEA
     # ========================================================
 
-    valores_m2_terreno = calcular_valores_m2_terreno(terrenos_zona)
+    valores_m2_terreno, usados_terreno = calcular_valores_m2_terreno(terrenos_zona, coletar_usados=True)
 
     if valores_m2_terreno:
         menor_m2_terreno = min(valores_m2_terreno)
@@ -741,6 +780,7 @@ def executar_agente5(
     valores_m2_construcao_med_terreno = []
     comparaveis_terreno_maior = 0  # comparaveis onde o terreno estimado > preco do anuncio
     construcao_descartados = 0     # m2 de construcao fora da faixa de sanidade
+    usados_construcao = []         # imoveis que efetivamente entraram no m2 de construcao
 
     def _add_sanidade(lista, valor):
         """Adiciona so se o m2 de construcao for fisicamente plausivel."""
@@ -761,6 +801,9 @@ def executar_agente5(
         # Area minima valida: descarta anuncio com area corrompida (ex.: "1 m2").
         if not preco_comp or not area_construida_comp or area_construida_comp < AREA_MINIMA_VALIDA:
             continue
+
+        # Registra o imovel como usado no calculo de construcao (uma vez por imovel).
+        usados_construcao.append(_resumo_imovel(imovel))
 
         # Apartamento/Sala: preco/area direto (terreno = 0)
         if tipo_comp in TIPOS_CONDOMINIAIS:
@@ -1037,6 +1080,10 @@ def executar_agente5(
             "score_agente3_usado": round(score_agente3, 3) if score_agente3 is not None else None,
             "score_agente4_usado": round(score_agente4, 3) if score_agente4 is not None else None,
             "aviso": "Resultado experimental ainda nao validado com Days on Market dos comparaveis.",
+        },
+        "comparaveis_usados": {
+            "construcao": usados_construcao,
+            "terreno": [_resumo_imovel(t) for t in usados_terreno],
         },
         "auditoria": {
             "valores_m2_terreno": [round(v, 2) for v in valores_m2_terreno],

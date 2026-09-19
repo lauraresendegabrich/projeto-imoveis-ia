@@ -1147,6 +1147,64 @@ if "resultado" in st.session_state:
                     f"foram **excluídos deste cálculo** para não ancorar o valor no preço pedido."
                 )
 
+            # ── COMPARÁVEIS USADOS NO CÁLCULO (com link) ──────────────
+            usados = preco.get("comparaveis_usados", {}) or {}
+            usados_constr = usados.get("construcao", []) or []
+            usados_terr = usados.get("terreno", []) or []
+            if usados_constr or usados_terr:
+                st.markdown("---")
+                st.markdown("**🏘️ Imóveis usados neste cálculo**")
+
+                import pandas as _pd
+
+                n_suspeitos = 0
+
+                def _linhas_usados(lista, rotulo):
+                    nonlocal n_suspeitos
+                    linhas = []
+                    for u in lista:
+                        preco_u = u.get("preco") or 0
+                        try:
+                            preco_u = float(preco_u)
+                        except (ValueError, TypeError):
+                            preco_u = 0
+                        area_u = u.get("area") or u.get("area_terreno") or 0
+                        url_u = u.get("url") or ""
+                        # Sinais de auditoria: nao deveriam estar no calculo.
+                        alertas = []
+                        if u.get("eh_anuncio_do_alvo"):
+                            alertas.append("🎯 seu anúncio")
+                        if u.get("suspeita_leilao"):
+                            alertas.append("⚠️ leilão?")
+                        if alertas:
+                            n_suspeitos += 1
+                        linhas.append({
+                            "Tipo": rotulo,
+                            "Preço": fmt_brl(preco_u) if preco_u else "-",
+                            "Área": f"{float(area_u):.0f}m²" if area_u else "-",
+                            "Rua": u.get("rua") or "-",
+                            "Bairro": u.get("bairro") or "-",
+                            "Alerta": " ".join(alertas) if alertas else "",
+                            "Anúncio": f"[ver]({url_u})" if url_u else "-",
+                        })
+                    return linhas
+
+                linhas_all = _linhas_usados(usados_constr, "Construção") + _linhas_usados(usados_terr, "Terreno")
+                if linhas_all:
+                    df_usados = _pd.DataFrame(linhas_all)
+                    st.markdown(df_usados.to_markdown(index=False), unsafe_allow_html=True)
+                    st.caption(
+                        f"{len(usados_constr)} imóvel(is) usado(s) no m² da construção e "
+                        f"{len(usados_terr)} no m² do terreno. São exatamente os anúncios que entraram na média."
+                    )
+                    if n_suspeitos:
+                        st.warning(
+                            f"⚠️ {n_suspeitos} imóvel(is) usado(s) no cálculo têm sinal de alerta "
+                            f"(🎯 = seu próprio anúncio; ⚠️ = possível leilão). "
+                            f"Confira o anúncio pelo link — imóveis assim distorcem o valor e "
+                            f"idealmente não deveriam entrar na média."
+                        )
+
             # Avisos do Ag5 (amostra insuficiente, terrenos descartados por sanidade, etc.)
             avisos_ag5 = preco.get("avisos", []) or []
             if avisos_ag5:
