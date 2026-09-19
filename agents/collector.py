@@ -196,6 +196,46 @@ AUCTION_KEYWORDS = [
 ]
 
 
+# Cidades com slug de mais de uma palavra — ajuda a extrair a cidade do slug da URL
+# do imovel (onde bairro e cidade vem grudados: "vila-ipiranga-porto-alegre").
+CIDADES_COMPOSTAS_SLUG = [
+    "porto-alegre", "belo-horizonte", "sao-paulo", "rio-de-janeiro",
+    "campo-grande", "feira-de-santana", "juiz-de-fora", "ribeirao-preto",
+    "sao-jose-dos-campos", "sao-bernardo-do-campo", "paraiso-do-tocantins",
+    "caxias-do-sul", "novo-hamburgo", "santo-andre", "sao-jose-do-rio-preto",
+    "praia-grande", "mogi-das-cruzes", "aparecida-de-goiania", "santa-maria",
+    "governador-valadares", "volta-redonda", "santa-barbara-doeste",
+]
+
+
+def _extrair_cidade_da_url(url: str) -> str | None:
+    """
+    Extrai a cidade a partir do slug da URL INDIVIDUAL do imovel.
+
+    Fonte confiavel: a URL do proprio anuncio (VivaReal/LugarCerto) traz
+    bairro+cidade no slug, ex.:
+      .../imovel/casa-3-quartos-vila-ipiranga-porto-alegre-com-garagem-170m2-...
+    Diferente da URL de BUSCA (from_url), que sempre tem a cidade pesquisada e por
+    isso etiqueta errado imoveis de outra cidade que o portal devolve como "sugestao".
+    """
+    if not url:
+        return None
+    u = str(url).lower()
+    m = re.search(r"/imovel/(.+?)(?:-com-|-venda|-compra|-\d+m2|-id-)", u)
+    if not m:
+        return None
+    miolo = m.group(1)
+    miolo = re.sub(r"^(casa|apartamento|sobrado|terreno|lote|cobertura|kitnet|flat|sala|loja)s?-", "", miolo)
+    miolo = re.sub(r"^\d+-quartos?-", "", miolo)
+    miolo = re.sub(r"-zona-(oeste|leste|norte|sul|central)", "", miolo)
+    miolo = re.sub(r"-bairros?", "", miolo)
+    for cidade in CIDADES_COMPOSTAS_SLUG:
+        if miolo.endswith(cidade):
+            return cidade.replace("-", " ")
+    partes = [p for p in miolo.split("-") if p]
+    return partes[-1] if partes else None
+
+
 # =============================================================================
 # BLOCO 1 - UTILITARIOS COMUNS
 # =============================================================================
@@ -996,6 +1036,14 @@ def _normalizar_ocrad(imovel: dict) -> dict:
                 city = " ".join(w.capitalize() for w in m.group(2).split("-"))
                 if not neighborhood:
                     neighborhood = " ".join(w.capitalize() for w in m.group(3).split("-"))
+
+    # PRIORIDADE: cidade extraida da URL INDIVIDUAL do imovel (fonte confiavel).
+    # A URL do proprio anuncio traz a cidade real no slug; o from_url (busca) sempre
+    # traz a cidade pesquisada e por isso etiqueta errado imoveis de outra cidade que
+    # o portal devolve como "sugestao" (ex.: imovel de Porto Alegre numa busca de Lajeado).
+    cidade_da_url = _extrair_cidade_da_url(url)
+    if cidade_da_url:
+        city = " ".join(w.capitalize() for w in cidade_da_url.split())
 
     if state is None:
         # Extrai estado da URL (VivaReal: /minas-gerais/, /sao-paulo/, etc.)
