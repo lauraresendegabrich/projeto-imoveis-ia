@@ -138,6 +138,22 @@ TIPOS_TERRENO = {
     "terreno", "lote", "terrenos",
 }
 
+# ------------------------------------------------------------
+# FAIXAS DE SANIDADE (anti-dado-corrompido)
+# Anuncios com area errada (ex.: terreno cadastrado como 1-2 m2) ou preco em
+# unidade errada geram m2 fisicamente impossiveis. Em amostras pequenas o
+# TRIMMEAN nao consegue filtrar (precisa de 4+ valores), entao um unico outlier
+# multiplica o valor final. Estas faixas descartam o que e claramente lixo antes
+# de qualquer media. Sao largas de proposito: cobrem do interior barato ao bairro
+# nobre, so cortam o impossivel.
+# ------------------------------------------------------------
+AREA_MINIMA_VALIDA = 10.0          # m2: abaixo disso e erro de cadastro
+M2_TERRENO_MIN = 50.0              # R$/m2 de terreno plausivel (minimo)
+M2_TERRENO_MAX = 30000.0          # R$/m2 de terreno plausivel (maximo)
+M2_CONSTRUCAO_MIN = 500.0         # R$/m2 de construcao plausivel (minimo)
+M2_CONSTRUCAO_MAX = 50000.0       # R$/m2 de construcao plausivel (maximo)
+MIN_AMOSTRAS_CONFIAVEL = 3        # abaixo disso a estimativa e marcada baixa confianca
+
 CAMINHO_ZONA = "data/zona_homogenea_ag2.json"
 CAMINHO_AG3 = "data/imoveis_analisados_ag3.json"
 CAMINHO_AG4 = "data/infra_avaliada_ag4.json"
@@ -472,14 +488,20 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]]) -> List[float]:
     Se topografia = "Aclive/Declive acentuado", aplica fator 0.80 (desconto 20%).
     """
     valores = []
+    descartados = 0
     for terreno in terrenos:
         preco = extrair_preco(terreno)
         area = extrair_area(terreno)
-        if not preco or not area or area <= 0:
-            # Tenta pricePerSqm direto
+
+        # Area minima valida: abaixo disso e erro de cadastro (ex.: terreno "1 m2"),
+        # que geraria um m2 gigante. Nesses casos, so aproveita pricePerSqm se vier
+        # explicito e plausivel.
+        if not preco or not area or area < AREA_MINIMA_VALIDA:
             val_direto = converter_numero(terreno.get("pricePerSqm"))
-            if val_direto and val_direto > 0:
+            if val_direto and M2_TERRENO_MIN <= val_direto <= M2_TERRENO_MAX:
                 valores.append(val_direto)
+            else:
+                descartados += 1
             continue
 
         valor_m2 = preco / area
@@ -489,7 +511,19 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]]) -> List[float]:
         if "acentuado" in topografia:
             valor_m2 *= 0.80
 
+        # Filtro de sanidade: descarta m2 fisicamente impossivel (dado corrompido).
+        if valor_m2 < M2_TERRENO_MIN or valor_m2 > M2_TERRENO_MAX:
+            descartados += 1
+            continue
+
         valores.append(valor_m2)
+
+    if descartados:
+        import logging
+        logging.getLogger(__name__).info(
+            f"[Ag5][Sanidade] {descartados} terreno(s) descartado(s) por m2 fora da "
+            f"faixa R$ {M2_TERRENO_MIN:.0f}-{M2_TERRENO_MAX:.0f} ou area < {AREA_MINIMA_VALIDA:.0f}m2"
+        )
 
     return valores
 
@@ -706,6 +740,16 @@ def executar_agente5(
     valores_m2_construcao_min_terreno = []
     valores_m2_construcao_med_terreno = []
     comparaveis_terreno_maior = 0  # comparaveis onde o terreno estimado > preco do anuncio
+    construcao_descartados = 0     # m2 de construcao fora da faixa de sanidade
+
+    def _add_sanidade(lista, valor):
+        """Adiciona so se o m2 de construcao for fisicamente plausivel."""
+        nonlocal construcao_descartados
+        if M2_CONSTRUCAO_MIN <= valor <= M2_CONSTRUCAO_MAX:
+            lista.append(valor)
+            return True
+        construcao_descartados += 1
+        return False
 
     for imovel in comparaveis_zona:
         tipo_comp = normalizar_tipo(imovel.get("propertyType", ""))
@@ -714,14 +758,15 @@ def executar_agente5(
 
         preco_comp = extrair_preco(imovel)
         area_construida_comp = extrair_area(imovel)
-        if not preco_comp or not area_construida_comp or area_construida_comp <= 0:
+        # Area minima valida: descarta anuncio com area corrompida (ex.: "1 m2").
+        if not preco_comp or not area_construida_comp or area_construida_comp < AREA_MINIMA_VALIDA:
             continue
 
         # Apartamento/Sala: preco/area direto (terreno = 0)
         if tipo_comp in TIPOS_CONDOMINIAIS:
             m2_valor = preco_comp / area_construida_comp
-            valores_m2_construcao_min_terreno.append(m2_valor)
-            valores_m2_construcao_med_terreno.append(m2_valor)
+            _add_sanidade(valores_m2_construcao_min_terreno, m2_valor)
+            _add_sanidade(valores_m2_construcao_med_terreno, m2_valor)
             continue
 
         # Casa/Loja/Galpao: desconta terreno
@@ -730,8 +775,8 @@ def executar_agente5(
             if not area_terreno_comp or area_terreno_comp <= 0:
                 # Sem area terreno: usa preco/area como fallback
                 m2_valor = preco_comp / area_construida_comp
-                valores_m2_construcao_min_terreno.append(m2_valor)
-                valores_m2_construcao_med_terreno.append(m2_valor)
+                _add_sanidade(valores_m2_construcao_min_terreno, m2_valor)
+                _add_sanidade(valores_m2_construcao_med_terreno, m2_valor)
                 continue
 
             # Serie MIN/TERRENO
@@ -749,20 +794,27 @@ def executar_agente5(
             # ambas as series dariam <= 0 para este imovel, usamos preco/area total como
             # fallback para nao perder a amostra e nao inflar o valor.
             if valor_constr_min > 0:
-                valores_m2_construcao_min_terreno.append(valor_constr_min / area_construida_comp)
+                _add_sanidade(valores_m2_construcao_min_terreno, valor_constr_min / area_construida_comp)
             if valor_constr_med > 0:
-                valores_m2_construcao_med_terreno.append(valor_constr_med / area_construida_comp)
+                _add_sanidade(valores_m2_construcao_med_terreno, valor_constr_med / area_construida_comp)
 
             if valor_constr_min <= 0 and valor_constr_med <= 0:
                 comparaveis_terreno_maior += 1
                 m2_valor = preco_comp / area_construida_comp
-                valores_m2_construcao_min_terreno.append(m2_valor)
-                valores_m2_construcao_med_terreno.append(m2_valor)
+                _add_sanidade(valores_m2_construcao_min_terreno, m2_valor)
+                _add_sanidade(valores_m2_construcao_med_terreno, m2_valor)
         else:
             # Nao separa terreno: preco/area direto
             m2_valor = preco_comp / area_construida_comp
-            valores_m2_construcao_min_terreno.append(m2_valor)
-            valores_m2_construcao_med_terreno.append(m2_valor)
+            _add_sanidade(valores_m2_construcao_min_terreno, m2_valor)
+            _add_sanidade(valores_m2_construcao_med_terreno, m2_valor)
+
+    if construcao_descartados:
+        import logging as _log_c
+        _log_c.getLogger(__name__).info(
+            f"[Ag5][Sanidade] {construcao_descartados} valor(es) de m2 de construcao "
+            f"descartado(s) por estar fora da faixa R$ {M2_CONSTRUCAO_MIN:.0f}-{M2_CONSTRUCAO_MAX:.0f}"
+        )
 
     # Combina as duas series para MIN e MEDIA
     todos_valores_construcao = valores_m2_construcao_min_terreno + valores_m2_construcao_med_terreno
@@ -859,6 +911,10 @@ def executar_agente5(
     # ========================================================
 
     total_amostras = len(valores_m2_terreno) + len(todos_valores_construcao)
+    # Numero de comparaveis DISTINTOS por serie (a serie min tem 1 valor por
+    # comparavel; a lista combinada dobra, entao usamos a serie unica para contar).
+    n_construcao = len(valores_m2_construcao_min_terreno)
+    n_terreno = len(valores_m2_terreno)
     avaliacao_confiavel = True
     status_avaliacao = "ok"
 
@@ -876,6 +932,25 @@ def executar_agente5(
             "O calculo resultou em valor zero ou negativo. A avaliacao nao e confiavel "
             "(verifique area do alvo e os comparaveis da zona)."
         )
+    else:
+        # Amostra pequena: o valor sai, mas nao e estatisticamente solido. Com poucos
+        # comparaveis o TRIMMEAN nao filtra outliers e um unico anuncio domina a media.
+        motivos_baixa = []
+        if not eh_terreno and n_construcao < MIN_AMOSTRAS_CONFIAVEL:
+            motivos_baixa.append(f"apenas {n_construcao} comparavel(is) de construcao")
+        if separar_terreno and n_terreno < MIN_AMOSTRAS_CONFIAVEL:
+            motivos_baixa.append(f"apenas {n_terreno} terreno(s) comparavel(is)")
+        if eh_terreno and n_terreno < MIN_AMOSTRAS_CONFIAVEL:
+            motivos_baixa.append(f"apenas {n_terreno} terreno(s) comparavel(is)")
+        if motivos_baixa:
+            avaliacao_confiavel = False
+            status_avaliacao = "amostra_insuficiente"
+            avisos.append(
+                "Amostra insuficiente para uma estimativa confiavel ("
+                + "; ".join(motivos_baixa)
+                + f"; minimo desejado={MIN_AMOSTRAS_CONFIAVEL}). "
+                "O valor exibido e uma referencia fraca, baseada em poucos anuncios."
+            )
 
     # ========================================================
     # 7. LIQUIDEZ EXPERIMENTAL (nao faz parte da planilha)
