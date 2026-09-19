@@ -1056,16 +1056,88 @@ if "resultado" in st.session_state:
             st.write(f"- Valor de liquidez: **{fmt_brl(valor_liq)}** (valor sugerido para venda rápida — desconto de 10%)")
             st.write(f"- Tempo estimado de venda: **{tempo}**")
 
-            # Detalhes do cálculo (simplificado)
+            # ── PASSO A PASSO DO CÁLCULO ──────────────────────────────
             st.markdown("---")
+            st.markdown("**🧮 Como chegamos neste valor (passo a passo)**")
+
             calc_terreno = preco.get("calculo_terreno", {})
             calc_constr_det = preco.get("calculo_construcao", {})
             terreno_aplicado = calc_terreno.get("aplicado", False)
+            vmz = preco.get("valor_m2_zona_homogenea", {})
+            vmz_terreno = vmz.get("terreno", {})
+            vmz_constr = vmz.get("construcao", {}).get("combinados", {})
 
+            n_terreno = vmz_terreno.get("quantidade_amostras", 0)
+            n_constr = vmz_constr.get("quantidade_total", 0)
+
+            # Passo 1 — amostra usada
+            st.markdown(
+                f"**1. Imóveis usados como referência**  \n"
+                f"O valor vem dos anúncios comparáveis na sua zona homogênea. "
+                f"Construção: **{n_constr} amostras** de m². "
+                + (f"Terreno: **{n_terreno} amostras** de m²." if terreno_aplicado else
+                   "Terreno não entrou (imóvel condominial ou sem terreno/comparáveis de terreno).")
+            )
+
+            # Passo 2 — m2 de construcao
+            m2c_menor = vmz_constr.get("menor_valor_m2", 0) or 0
+            m2c_ref = vmz_constr.get("valor_m2_referencia", 0) or 0
+            st.markdown(
+                f"**2. Valor do m² da construção**  \n"
+                f"Faixa dos comparáveis: de {fmt_brl(m2c_menor, 2)} (mínimo) até a referência "
+                f"**{fmt_brl(m2c_ref, 2)}** (média que remove os 25% mais baratos e 25% mais caros)."
+            )
+
+            # Passo 3 — terreno (se aplicável)
             if terreno_aplicado:
-                st.caption(f"Terreno separado no cálculo (lote de {calc_terreno.get('area_terreno_m2', 0):.0f}m²)")
+                m2t_ref = calc_terreno.get("valor_m2_referencia", 0) or 0
+                area_ter = calc_terreno.get("area_terreno_m2", 0) or 0
+                val_ter = calc_terreno.get("valor_terreno_medio", 0) or 0
+                st.markdown(
+                    f"**3. Valor do terreno**  \n"
+                    f"m² de terreno da zona: **{fmt_brl(m2t_ref, 2)}** × {area_ter:.0f}m² do seu lote "
+                    f"= **{fmt_brl(val_ter)}**."
+                )
+                val_constr = calc_constr_det.get("valor_construcao_medio", 0) or 0
+                st.markdown(
+                    f"**4. Valor da construção**  \n"
+                    f"{fmt_brl(m2c_ref, 2)} × {area_calc:.0f}m² construídos = **{fmt_brl(val_constr)}**."
+                )
+                st.markdown(
+                    f"**5. Valor final** = terreno + construção = "
+                    f"{fmt_brl(val_ter)} + {fmt_brl(val_constr)} = **{fmt_brl(valor_med)}**."
+                )
+            else:
+                st.markdown(
+                    f"**3. Valor final**  \n"
+                    f"{fmt_brl(m2c_ref, 2)} × {area_calc:.0f}m² = **{fmt_brl(valor_med)}**."
+                )
 
-            st.caption(f"Método: {preco.get('metodo_estatistico', '?')}")
+            # Faixa mínimo / médio (transparencia da estimativa)
+            valor_min = avaliacao.get("valor_minimo_imovel", 0) or 0
+            if valor_min and valor_min != valor_med:
+                st.caption(
+                    f"Faixa da estimativa: de {fmt_brl(valor_min)} (cenário conservador) "
+                    f"a {fmt_brl(valor_med)} (referência)."
+                )
+
+            st.caption(f"Método estatístico: {preco.get('metodo_estatistico', '?')}")
+
+            # Como o tempo de venda foi estimado
+            liq = preco.get("liquidez_experimental", {})
+            sc3 = liq.get("score_agente3_usado")
+            sc4 = liq.get("score_agente4_usado")
+            partes_liq = []
+            if sc3 is not None:
+                partes_liq.append(f"qualidade {sc3:.2f}")
+            if sc4 is not None:
+                partes_liq.append(f"infraestrutura {sc4:.2f}")
+            if partes_liq:
+                st.caption(
+                    f"⏱️ Tempo de venda ({tempo}) estimado a partir de: "
+                    + " + ".join(partes_liq)
+                    + " (peso: qualidade 35%, infraestrutura 40%, preço 25%). Estimativa experimental."
+                )
 
             # Se o proprio anuncio do alvo foi identificado, avisa que ele nao entrou no calculo.
             n_alvo_calc = resultado.get("resumo", {}).get("anuncios_do_alvo_marcados", 0)
@@ -1074,6 +1146,14 @@ if "resultado" in st.session_state:
                     f"🎯 {n_alvo_calc} anúncio(s) identificado(s) como o do seu próprio imóvel "
                     f"foram **excluídos deste cálculo** para não ancorar o valor no preço pedido."
                 )
+
+            # Avisos do Ag5 (amostra insuficiente, terrenos descartados por sanidade, etc.)
+            avisos_ag5 = preco.get("avisos", []) or []
+            if avisos_ag5:
+                st.markdown("---")
+                st.markdown("**⚠️ Observações sobre a confiabilidade**")
+                for _av in avisos_ag5:
+                    st.caption(f"• {_av}")
 
             # Comparação com preço anunciado
             if imovel_alvo_export.get("price") and imovel_alvo_export["price"] > 0:
