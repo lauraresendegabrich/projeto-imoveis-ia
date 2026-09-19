@@ -173,10 +173,26 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # Palavras que indicam leilao - precos artificialmente baixos distorcem a analise
 AUCTION_KEYWORDS = [
-    "leilao", "leilão", "hasta publica", "hasta pública",
-    "judicial", "extrajudicial", "arrematacao", "arrematação",
+    # Leilao / hasta (singular e plural)
+    "leilao", "leilão", "leiloes", "leilões",
+    "leiloeiro", "leiloeira", "leiloeiros",
+    "hasta publica", "hasta pública",
+    # Processo judicial / arrematacao
+    "judicial", "extrajudicial", "arrematacao", "arrematação", "arrematante",
     "lance inicial", "lance minimo", "lance mínimo",
+    # Licitacao
+    "licitacao", "licitação", "licitacoes", "licitações", "licitacao aberta", "licitação aberta",
+    # Venda direta / imoveis retomados de banco
+    "venda direta", "imoveis retomados", "imóveis retomados", "imovel retomado", "imóvel retomado",
+    "retomado de banco", "retomados de bancos", "retomados pelos bancos",
+    "recuperacao de credito", "recuperação de crédito",
+    "alienacao fiduciaria", "alienação fiduciária",
+    "consolidada em nome do banco", "consolidado em nome do banco",
+    "consolidadas em nome dos bancos",
+    # Instituicoes/plataformas de leilao (nome do anunciante)
     "caixa economica", "caixa econômica", "banco imoveis",
+    "wiser", "sodre santoro", "sodré santoro", "zukerman", "mega leiloes", "mega leilões",
+    "portal zuk", "biasi leiloes", "freitas leiloeiro",
 ]
 
 
@@ -427,10 +443,14 @@ def _eh_leilao(imovel: dict) -> bool:
     Leiloes sao removidos porque seus precos sao artificialmente baixos
     e distorceriam a estimativa de valor justo.
     """
+    # Inclui source/anunciante: leiloeiras (ex.: "Wiser BTG") identificam o leilao
+    # mesmo quando a descricao nao chegou ou e generica.
     texto = " ".join([
         str(imovel.get("title") or imovel.get("titulo") or ""),
         str(imovel.get("propertyType") or imovel.get("tipo") or ""),
         str(imovel.get("description") or imovel.get("descricao") or ""),
+        str(imovel.get("source") or imovel.get("source_site") or ""),
+        str(imovel.get("anunciante") or imovel.get("advertiser") or ""),
     ]).lower()
     return any(kw in texto for kw in AUCTION_KEYWORDS)
 
@@ -1654,8 +1674,30 @@ def coletar_imoveis(
                 im["publishedAt"] = dados_pagina["publishedAt"]
             if dados_pagina.get("description") and not im.get("description"):
                 im["description"] = dados_pagina["description"]
+            # A rua completa tambem pode chegar so agora (VivaReal traz street/streetNumber).
+            if not im.get("street") and dados_pagina.get("street"):
+                street = dados_pagina["street"]
+                if dados_pagina.get("streetNumber"):
+                    street += ", " + dados_pagina["streetNumber"]
+                im["street"] = street
             time.sleep(0.5)
         logger.info(f"Enriquecimento: {enriq_ok}/{len(sem_fotos)} imoveis com fotos")
+
+    # ── RE-FILTRO POS-ENRIQUECIMENTO ──────────────────────────────────
+    # Leilao e escopo rodaram ANTES do enriquecimento, quando a descricao e a rua
+    # completas ainda nao tinham chegado. Muitos leiloes so se revelam na descricao
+    # (ex.: "Valor de leilao", "imoveis retomados de bancos") e alguns imoveis so
+    # ganham rua agora. Por isso reaplicamos os dois filtros com os dados completos.
+    antes_refiltro = len(combinados)
+    combinados = [i for i in combinados if not _eh_leilao(i)]
+    removidos_leilao = antes_refiltro - len(combinados)
+    if removidos_leilao:
+        logger.info(
+            f"[Ag1][Re-filtro] {removidos_leilao} leilao(oes) removido(s) apos enriquecimento "
+            f"(so revelados na descricao completa)"
+        )
+    combinados, escopo = _aplicar_escopo(combinados, rua=rua, bairro=bairro, cidade=cidade_nome)
+    logger.info(f"[Ag1][Re-filtro] escopo reaplicado: {escopo.upper()} | {len(combinados)} candidatos")
 
     # ── ORDENACAO ─────────────────────────────────────────────────────
     combinados = _ordenar_por_proximidade(combinados, rua=rua, bairro=bairro)
