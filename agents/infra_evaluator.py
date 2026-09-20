@@ -3448,7 +3448,9 @@ def _chamar_qwen_colab_infra(prompt: str) -> dict:
             f"{url}/gerar",
             json=payload,
             headers=headers,
-            timeout=(5, 180),
+            # Read-timeout de 60s (era 180s): desiste rapido do Qwen lento e cai pro
+            # Gemini/Groq, evitando travar minutos por requisicao.
+            timeout=(5, 60),
         )
 
         if response.status_code != 200:

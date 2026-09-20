@@ -1053,8 +1053,10 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
             f"{url}/gerar",
             json=payload,
             headers=headers,
-            # O Colab ainda precisa baixar ate 4 imagens e executar a inferencia.
-            timeout=(5, 300),
+            # Read-timeout de 90s (era 300s). O Ag3 envia ate 4 imagens (mais pesado
+            # que Ag2/Ag4), por isso um pouco maior; mas 5 min travava demais quando o
+            # Qwen (Colab/T4) estava lento. Em 90s ele desiste e cai pro fallback.
+            timeout=(5, 90),
         )
 
         if response.status_code != 200:

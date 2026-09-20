@@ -977,9 +977,11 @@ def _chamar_qwen_colab(
             json=payload,
             headers=headers,
 
-            # 5s para conectar.
-            # Ate 180s para a inferencia.
-            timeout=(5, 180),
+            # 5s para conectar. Read-timeout de 60s: se o Qwen (Colab/T4, lento e
+            # instavel) nao responder nesse tempo, desiste rapido e cai pro Groq
+            # (que responde em 2-3s). Antes eram 180s, o que travava ate 3 min por
+            # lote quando o Qwen estava sobrecarregado.
+            timeout=(5, 60),
         )
 
         if response.status_code != 200:
