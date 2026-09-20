@@ -1050,6 +1050,15 @@ if "resultado" in st.session_state:
         valor_med = avaliacao.get("valor_medio_imovel", 0)
         valor_liq = avaliacao.get("valor_liquidez", 0)
         with st.expander("💰 Agente Estimador de Preço"):
+          if not avaliacao_confiavel:
+            # Sem amostra suficiente: nao mostra passo a passo com R$ 0 (seria enganoso).
+            st.warning(
+                "Não foi possível estimar um valor confiável para este imóvel — "
+                "não há comparáveis suficientes na zona homogênea."
+            )
+            for _av in (preco.get("avisos", []) or []):
+                st.caption(f"• {_av}")
+          else:
             st.write(f"Com base nos imóveis da vizinhança, o valor médio do m² da construção é **{fmt_brl(m2_ref, 2)}**.")
             st.write(f"Para o seu imóvel de {area_calc:.0f}m²:")
             st.write(f"- Valor médio estimado: **{fmt_brl(valor_med)}**")
@@ -1067,15 +1076,18 @@ if "resultado" in st.session_state:
             vmz_terreno = vmz.get("terreno", {})
             vmz_constr = vmz.get("construcao", {}).get("combinados", {})
 
-            n_terreno = vmz_terreno.get("quantidade_amostras", 0)
-            n_constr = vmz_constr.get("quantidade_total", 0)
+            # Conta IMOVEIS distintos (bate com a tabela "Imoveis usados"), nao os
+            # valores de m2 das duas series combinadas (que dobram a contagem).
+            _usados_ag5 = preco.get("comparaveis_usados", {}) or {}
+            n_constr = len(_usados_ag5.get("construcao", []) or [])
+            n_terreno = len(_usados_ag5.get("terreno", []) or [])
 
-            # Passo 1 — amostra usada
+            # Passo 1 — imoveis usados
             st.markdown(
                 f"**1. Imóveis usados como referência**  \n"
                 f"O valor vem dos anúncios comparáveis na sua zona homogênea. "
-                f"Construção: **{n_constr} amostras** de m². "
-                + (f"Terreno: **{n_terreno} amostras** de m²." if terreno_aplicado else
+                f"Construção: **{n_constr} imóvel(is)**. "
+                + (f"Terreno: **{n_terreno} imóvel(is)**." if terreno_aplicado else
                    "Terreno não entrou (imóvel condominial ou sem terreno/comparáveis de terreno).")
             )
 
