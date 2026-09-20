@@ -198,7 +198,11 @@ def normalizar_tipo(tipo: str) -> str:
     tipo = str(tipo or "").strip().lower()
     if "apart" in tipo or tipo == "apto":
         return "apartamento"
-    if "terreno" in tipo or "lote" in tipo:
+    # Terreno/lote — reconhece tambem as nomenclaturas do Athena (allotment_land,
+    # residential_allotment_land, land, lot). Mantido em sincronia com _eh_terreno
+    # do Agente 2, senao um terreno confirmado na zona "sumiria" aqui no calculo.
+    tipo_tokens = tipo.replace("_", " ").replace("-", " ")
+    if re.search(r"\b(terreno|terrenos|lote|lotes|land|lot|allotment)\b", tipo_tokens):
         return "terreno"
     if "casa" in tipo or "sobrado" in tipo:
         return "casa"
