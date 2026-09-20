@@ -350,15 +350,35 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
             continue
         chaves_vistas.add(chave)
 
-        tipo = normalizar_tipo(imovel.get("propertyType", ""))
-        if tipo in TIPOS_TERRENO:
+        # Le o tipo de AMBOS os campos (propertyType e tipo). Terrenos do Athena
+        # podem trazer 'Terrenos' em propertyType e 'residential_allotment_land' em tipo,
+        # ou vice-versa; checar os dois evita que o terreno "vaze" para construidos.
+        tipo_bruto = imovel.get("propertyType") or imovel.get("tipo") or ""
+        tipo_bruto_alt = imovel.get("tipo") or ""
+        eh_terreno = (
+            normalizar_tipo(tipo_bruto) in TIPOS_TERRENO
+            or normalizar_tipo(tipo_bruto_alt) in TIPOS_TERRENO
+        )
+        if eh_terreno:
             terrenos_zona.append(imovel)
         else:
             comparaveis_zona.append(imovel)
 
+    # LOG DE RASTREAMENTO (auditoria da separacao terreno x construcao).
+    import logging as _log_ag5
+    _lg = _log_ag5.getLogger(__name__)
+    _lg.info("[Ag5][Separacao] === ENTRADA (comparaveis_confirmados da zona) ===")
+    for _i, _im in enumerate(todos_comparaveis):
+        _lg.info(
+            f"[Ag5][Separacao] [{_i}] propertyType={_im.get('propertyType')!r} | tipo={_im.get('tipo')!r} "
+            f"| normalizado={normalizar_tipo(_im.get('propertyType') or _im.get('tipo'))!r} "
+            f"| classificacao_zona={_im.get('classificacao_zona')!r} "
+            f"| preco={_im.get('price') or _im.get('preco')} | url={str(_im.get('url'))[:60]}"
+        )
+    _lg.info(f"[Ag5][Separacao] RESULTADO -> CONSTRUCOES={len(comparaveis_zona)} | TERRENOS={len(terrenos_zona)}")
+
     if excluidos_anuncio_alvo:
-        import logging as _log_alvo
-        _log_alvo.getLogger(__name__).info(
+        _lg.info(
             f"[Ag5] {excluidos_anuncio_alvo} anuncio(s) do proprio alvo excluido(s) do "
             f"calculo de preco (marcados pelo Ag2 como eh_anuncio_do_alvo)"
         )
