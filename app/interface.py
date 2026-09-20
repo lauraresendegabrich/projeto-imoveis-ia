@@ -1006,8 +1006,16 @@ if "resultado" in st.session_state:
                     if linhas_destaque:
                         st.markdown("\n\n".join(linhas_destaque))
 
-                    # Resumo total
-                    total_all = sum(len(v) for fd in pois.values() for v in fd.values() if isinstance(v, list))
+                    # Resumo total — MESMA base das categorias exibidas acima:
+                    # POIs por faixa + transporte (que vem de campo separado e tambem
+                    # aparece na lista). Antes o total ignorava transporte, gerando
+                    # divergencia (soma das categorias != total).
+                    total_pois_faixa = sum(
+                        len(v) for fd in pois.values() for v in fd.values() if isinstance(v, list)
+                    )
+                    _trans = infra_full.get("transporte", {})
+                    total_transporte = len(_trans.get("paradas", []) or []) + len(_trans.get("estacoes", []) or [])
+                    total_all = total_pois_faixa + total_transporte
                     st.caption(f"Total: {total_all} pontos de interesse mapeados até 1500m")
 
                 # Imobiliária mais próxima
