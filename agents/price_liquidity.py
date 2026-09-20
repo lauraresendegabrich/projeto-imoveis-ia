@@ -556,7 +556,7 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]], coletar_usados: 
         )
 
     if coletar_usados:
-        return valores, usados
+        return valores, usados, descartados
     return valores
 
 
@@ -765,7 +765,9 @@ def executar_agente5(
     # 1. VALOR M2 DO TERRENO DA ZONA HOMOGENEA
     # ========================================================
 
-    valores_m2_terreno, usados_terreno = calcular_valores_m2_terreno(terrenos_zona, coletar_usados=True)
+    valores_m2_terreno, usados_terreno, terrenos_descartados_sanidade = calcular_valores_m2_terreno(
+        terrenos_zona, coletar_usados=True
+    )
 
     if valores_m2_terreno:
         menor_m2_terreno = min(valores_m2_terreno)
@@ -774,9 +776,20 @@ def executar_agente5(
         menor_m2_terreno = 0.0
         medio_m2_terreno = 0.0
         if not eh_condominial and area_terreno_alvo > 0:
-            avisos.append(
-                "Nao foram encontrados terrenos comparaveis para calcular o valor m2 do terreno."
-            )
+            if terrenos_descartados_sanidade > 0:
+                # Transparencia: havia terreno na zona, mas com preco/area gerando um
+                # valor de m2 fora do plausivel (ex.: regiao muito barata ou dado
+                # inconsistente do anuncio). Foi descartado para nao distorcer o calculo.
+                avisos.append(
+                    f"{terrenos_descartados_sanidade} terreno(s) estava(m) na zona, mas foi(ram) "
+                    f"descartado(s) por ter preco/area que resulta em valor de m2 fora da faixa "
+                    f"plausivel (R$ {M2_TERRENO_MIN:.0f} a R$ {M2_TERRENO_MAX:.0f}/m2). "
+                    f"Pode ser regiao muito barata ou dado inconsistente do anuncio."
+                )
+            else:
+                avisos.append(
+                    "Nao foram encontrados terrenos comparaveis para calcular o valor m2 do terreno."
+                )
 
     # ========================================================
     # 2. DECISAO: SEPARAR TERRENO OU NAO
@@ -1120,6 +1133,8 @@ def executar_agente5(
             "valor_m2_construcao_medio": round(medio_m2_construcao, 2),
             "total_amostras": total_amostras,
             "comparaveis_terreno_maior_que_imovel": comparaveis_terreno_maior,
+            "terrenos_descartados_sanidade": terrenos_descartados_sanidade,
+            "construcao_descartados_sanidade": construcao_descartados,
         },
         "avisos": avisos,
         "justificativa": (
