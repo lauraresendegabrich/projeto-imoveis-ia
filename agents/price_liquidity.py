@@ -737,8 +737,10 @@ def executar_agente5(
             "area_terreno": extrair_area_terreno_imovel(im),
             "quartos": im.get("bedrooms") or im.get("quartos"),
             "tipo": im.get("propertyType") or im.get("tipo") or "",
-            # Sinais de auditoria: nao deveriam estar no calculo se True.
+            # Sinais de auditoria: eh_anuncio_do_alvo=True e excluido do calculo;
+            # possivel_anuncio_do_alvo=True PERMANECE no calculo (so alerta).
             "eh_anuncio_do_alvo": bool(im.get("eh_anuncio_do_alvo")),
+            "possivel_anuncio_do_alvo": bool(im.get("possivel_anuncio_do_alvo")),
             "suspeita_leilao": _cheira_leilao(im),
         }
 

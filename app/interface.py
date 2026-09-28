@@ -823,6 +823,13 @@ if "resultado" in st.session_state:
                         except (ValueError, TypeError):
                             preco_val = 0
                         eh_alvo = comp.get("eh_anuncio_do_alvo", False)
+                        possivel_alvo = comp.get("possivel_anuncio_do_alvo", False)
+                        if eh_alvo:
+                            obs_alvo = "🎯 seu anúncio"
+                        elif possivel_alvo:
+                            obs_alvo = "⚠️ possível (não confirmado)"
+                        else:
+                            obs_alvo = ""
                         dados_tabela.append({
                             "Preço": f"{fmt_brl(preco_val)}" if preco_val else "-",
                             "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
@@ -831,7 +838,7 @@ if "resultado" in st.session_state:
                             "Estado": estado_cons,
                             "Padrão": padrao_tab,
                             "Score": score_q,
-                            "Obs": "🎯 seu anúncio" if eh_alvo else "",
+                            "Obs": obs_alvo,
                             "Anúncio": link,
                         })
                     df = pd.DataFrame(dados_tabela)
@@ -845,6 +852,16 @@ if "resultado" in st.session_state:
                             f"🎯 {n_alvo} {plural} como o do **seu próprio imóvel**. "
                             f"Ele aparece aqui para comparação, mas **não entrou no cálculo do preço** "
                             f"(evita que o valor pedido no anúncio influencie a estimativa)."
+                        )
+                    # Legenda para SUSPEITOS (perfil compativel, identidade nao confirmada)
+                    n_susp = sum(1 for c in comparaveis_tabela if c.get("possivel_anuncio_do_alvo"))
+                    if n_susp:
+                        plural_s = "anúncios têm" if n_susp > 1 else "anúncio tem"
+                        st.caption(
+                            f"⚠️ {n_susp} {plural_s} perfil muito parecido com o do seu imóvel "
+                            f"(mesmo bairro, área e preço), mas **sem prova de que seja o mesmo anúncio** "
+                            f"(o portal não expõe rua/número/unidade). Por segurança, **continuam no cálculo** — "
+                            f"marcamos apenas para transparência."
                         )
 
                     # Gráfico scatter: Preço × Área
@@ -1191,6 +1208,8 @@ if "resultado" in st.session_state:
                         alertas = []
                         if u.get("eh_anuncio_do_alvo"):
                             alertas.append("🎯 seu anúncio")
+                        elif u.get("possivel_anuncio_do_alvo"):
+                            alertas.append("⚠️ possível alvo (perfil)")
                         if u.get("suspeita_leilao"):
                             alertas.append("⚠️ leilão?")
                         linhas.append({
