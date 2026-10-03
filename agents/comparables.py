@@ -607,7 +607,9 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
             sinais.append("mesma_rua")
 
     # --- Coordenadas quase iguais (~30 m) + area compativel ---
-    lat_a, lon_a = _coordenada(imovel_alvo.get("lat")), _coordenada(imovel_alvo.get("lon"))
+    # Do alvo, so a coordenada obtida por rua+numero (ver _geocodificar_alvo_identidade).
+    lat_a = _coordenada(imovel_alvo.get("lat_identidade"))
+    lon_a = _coordenada(imovel_alvo.get("lon_identidade"))
     lat_c, lon_c = _coordenada(comparavel.get("lat")), _coordenada(comparavel.get("lon"))
     if None not in (lat_a, lon_a, lat_c, lon_c):
         if abs(lat_a - lat_c) <= 0.0003 and abs(lon_a - lon_c) <= 0.0003:
@@ -679,10 +681,13 @@ def _geocodificar_alvo_identidade(imovel_alvo: dict) -> None:
     """
     Coordenada do alvo para o teste de identidade (sinal "coordenadas_iguais").
     So aceita geocodificacao por rua + numero: um ponto de rua ou o centro do
-    bairro nao identifica um imovel. Grava lat/lon no proprio dict do alvo, que o
-    orquestrador repassa para a zona homogenea (evita geocodificar duas vezes).
+    bairro nao identifica um imovel. Grava em lat_identidade/lon_identidade,
+    separado de lat/lon: a interface ja preenche lat/lon do alvo com qualquer
+    precisao (sem numero, um ponto qualquer da rua), o que serve para a zona mas
+    confirmaria vizinhos da mesma rua como "o anuncio do alvo". Quando o alvo ainda
+    nao tem lat/lon, preenche tambem para a zona reaproveitar.
     """
-    if _coordenada(imovel_alvo.get("lat")) is not None and _coordenada(imovel_alvo.get("lon")) is not None:
+    if _coordenada(imovel_alvo.get("lat_identidade")) is not None:
         return
     rua = imovel_alvo.get("rua") or imovel_alvo.get("street") or ""
     numero = _obter_numero_endereco(imovel_alvo)
@@ -700,8 +705,10 @@ def _geocodificar_alvo_identidade(imovel_alvo: dict) -> None:
     if lat is None or lon is None:
         logger.info(f"[Ag2][AutoMatch] alvo nao geocodificado por rua+numero ({endereco!r})")
         return
-    imovel_alvo["lat"], imovel_alvo["lon"] = lat, lon
-    imovel_alvo["geocodificacao_nivel"] = "rua_numero"
+    imovel_alvo["lat_identidade"], imovel_alvo["lon_identidade"] = lat, lon
+    if _coordenada(imovel_alvo.get("lat")) is None or _coordenada(imovel_alvo.get("lon")) is None:
+        imovel_alvo["lat"], imovel_alvo["lon"] = lat, lon
+        imovel_alvo["geocodificacao_nivel"] = "rua_numero"
     logger.info(f"[Ag2][AutoMatch] alvo geocodificado por rua+numero: {lat:.6f}, {lon:.6f}")
 
 

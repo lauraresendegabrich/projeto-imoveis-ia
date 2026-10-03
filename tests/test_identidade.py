@@ -199,15 +199,25 @@ def test_alvo_veto_de_vagas_com_preco_identico_fica_suspeito():
 
 
 def test_alvo_casa_coordenadas_iguais_e_area_confirmam():
-    alvo = alvo_casa(lat=-19.9400, lon=-43.9300, rua="", numero="")
+    alvo = alvo_casa(lat_identidade=-19.9400, lon_identidade=-43.9300, rua="", numero="")
     comp = casa(lat=-19.94005, lon=-43.93004, rua="")
     eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
     assert eh and "coordenadas_iguais" in sinais, sinais
 
 
+def test_alvo_coordenada_da_interface_sem_numero_nao_confirma():
+    # Caso real (casa no Santa Monica): a interface preenche lat/lon do alvo mesmo
+    # sem numero (ponto qualquer da rua). Isso nao pode confirmar identidade.
+    alvo = alvo_casa(lat=-19.9400, lon=-43.9300, numero="", price=900000)
+    comp = casa(lat=-19.94005, lon=-43.93004)
+    comparables._marcar_anuncio_do_alvo(alvo, [comp])
+    assert "lat_identidade" not in alvo
+    assert not comp.get("eh_anuncio_do_alvo"), comp.get("match_alvo_sinais")
+
+
 def test_alvo_apto_coordenadas_iguais_so_suspeito():
     # No apto a coordenada e a do predio: vale para todas as unidades.
-    alvo = alvo_apto(lat=-19.9400, lon=-43.9300, rua="", numero="")
+    alvo = alvo_apto(lat_identidade=-19.9400, lon_identidade=-43.9300, rua="", numero="")
     comp = anuncio(lat=-19.94005, lon=-43.93004, rua="", bairro="")
     eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
     assert not eh and poss and "coordenadas_iguais" in sinais, sinais
