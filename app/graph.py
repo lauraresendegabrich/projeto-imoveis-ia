@@ -9,7 +9,8 @@ RESPONSABILIDADE:
 
 PIPELINE:
     Agente 1 — Coletor (sequencial)
-        → Fonte principal: Amazon Athena (tabela vivareal em S3/Parquet)
+        → Fonte principal: Amazon Athena (tabela anuncios em S3/Parquet: VivaReal,
+          Lugar Certo, ImovelWeb e Chaves na Mão, coleta mais recente de cada)
         → Fallback: Apify/ocrad (VivaReal, LugarCerto) quando o Athena
           util/local fica abaixo de 10 resultados
         → Normaliza campos, filtra leilões/duplicatas, enriquece fotos

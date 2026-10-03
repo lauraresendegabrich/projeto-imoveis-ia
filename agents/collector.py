@@ -22,20 +22,21 @@ FLUXO COMPLETO:
 
   ETAPA 1 — ATHENA (fonte principal)
   ───────────────────────────────────
-    Consulta SQL na tabela vivareal (S3/Parquet).
+    Consulta SQL na tabela anuncios (S3/Parquet): VivaReal, Lugar Certo,
+    ImovelWeb e Chaves na Mao, so a coleta mais recente de cada portal.
     Para cada tipo de imovel, busca com limite proprio (rua + bairro somados):
 
     Para house:
-      casa                        → limite 200
-      two_story_house             → limite 50
-      village_house               → limite 50
-      residential_allotment_land  → limite 60
-      allotment_land              → limite 60
+      casa     → limite 200
+      terreno  → limite 120 (inclui residential_allotment_land/allotment_land,
+                 nomes antigos que sobraram em linhas do VivaReal)
 
     Para apartment:
       apartamento  → limite 200
       flat         → limite 50
       cobertura    → limite 50
+
+    `source` recebe o nome do portal (coluna portal) e `fonte_dados`="Athena/S3".
 
     Logica por tipo:
       1. Uma query unificada por subtipo busca RUA OU BAIRRO.
@@ -83,8 +84,8 @@ FLUXO COMPLETO:
        Muitos leiloes so se revelam na descricao, por isso ela tambem e checada.
     2. Remove sem PRECO (>0). Exige localizacao minima: pelo menos UM entre
        cidade OU bairro (basta um dos campos city/cidade/neighborhood/bairro).
-    3. DEDUPLICA com MERGE (combina em vez de descartar) por ID com namespace da
-       fonte, depois URL normalizada e, somente quando faltam ambos, fingerprint
+    3. DEDUPLICA com MERGE (combina em vez de descartar) por ID com namespace do
+       portal, depois URL normalizada e, somente quando faltam ambos, fingerprint
        conservadora. O merge preserva o registro mais completo (fotos, descricao,
        lat/lon, publishedAt, banheiros, vagas).
 
@@ -170,6 +171,14 @@ URLS_LISTAGEM_PORTAIS = {
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Coluna `portal` da tabela anuncios -> nome exibido em `source` (mesmos nomes do Apify).
+NOMES_PORTAIS = {
+    "vivareal": "VivaReal",
+    "lugarcerto": "Lugar Certo",
+    "imovelweb": "ImovelWeb",
+    "chavesnamao": "Chaves na Mão",
+}
 
 # Palavras que indicam leilao - precos artificialmente baixos distorcem a analise
 AUCTION_KEYWORDS = [
@@ -554,9 +563,13 @@ def _remover_duplicatas_url(imoveis: list[dict]) -> list[dict]:
     """
 
     def _namespace_id(imovel: dict) -> str:
-        source = _normalizar_texto(imovel.get("source") or imovel.get("source_site") or "")
-        # A tabela Athena deste agente e a tabela vivareal; permite casar Athena com VivaReal.
-        if source in {"athena s3", "vivareal", "viva real"}:
+        # listing_id so e unico dentro do portal. A coluna `portal` do Athena e o
+        # `source` do Apify viram a mesma chave ("Lugar Certo" e "lugarcerto" ->
+        # "lugarcerto"), o que permite casar o mesmo anuncio vindo das duas fontes.
+        source = _normalizar_texto(
+            imovel.get("portal") or imovel.get("source") or imovel.get("source_site") or ""
+        ).replace(" ", "")
+        if source in {"athenas3", "vivareal"}:  # "Athena/S3": registros da tabela antiga
             return "vivareal"
         return source or "desconhecida"
 
@@ -1502,18 +1515,18 @@ def coletar_imoveis(
         f"tipo={tipo_imovel} | bairro={bairro} | rua={rua}"
     )
 
+    # Tipos da tabela anuncios (padronizados nos 4 portais). Terreno inclui os nomes
+    # em ingles que sobraram em ~170 mil linhas antigas do VivaReal (dados nao serao
+    # corrigidos). Chave = nome do subtipo no log; valor = (nomes no Athena, limite).
     LIMITES_POR_TIPO = {
         "house": {
-            "casa": 200,
-            "two_story_house": 50,
-            "village_house": 50,
-            "residential_allotment_land": 60,
-            "allotment_land": 60,
+            "casa": (("casa",), 200),
+            "terreno": (("terreno", "residential_allotment_land", "allotment_land"), 120),
         },
         "apartment": {
-            "apartamento": 200,
-            "flat": 50,
-            "cobertura": 50,
+            "apartamento": (("apartamento",), 200),
+            "flat": (("flat",), 50),
+            "cobertura": (("cobertura",), 50),
         },
     }
     limites = LIMITES_POR_TIPO[tipo_imovel]
@@ -1529,7 +1542,7 @@ def coletar_imoveis(
         client = AthenaClient()
         queries_executadas = 0
 
-        for tipo_sql, limite_tipo in limites.items():
+        for tipo_sql, (nomes_tipo, limite_tipo) in limites.items():
             try:
                 if bairro or rua:
                     resultado_tipo = client.buscar_bairro_rua(
@@ -1537,14 +1550,14 @@ def coletar_imoveis(
                         bairro=bairro,
                         rua=rua,
                         estado=estado_nome,
-                        tipo=tipo_sql,
+                        tipo=nomes_tipo,
                         limit=limite_tipo,
                     )
                 else:
                     resultado_tipo = client.buscar_cidade(
                         cidade=cidade_nome,
                         estado=estado_nome,
-                        tipo=tipo_sql,
+                        tipo=nomes_tipo,
                         limit=limite_tipo,
                     )
                 queries_executadas += 1
@@ -1570,12 +1583,12 @@ def coletar_imoveis(
         # Se nenhuma busca local retornou nada, consulta TODOS os subtipos na cidade.
         if not athena_imoveis and (bairro or rua):
             logger.info("[Ag1][Athena] Nenhum resultado local; expandindo todos os subtipos para a cidade")
-            for tipo_sql, limite_tipo in limites.items():
+            for tipo_sql, (nomes_tipo, limite_tipo) in limites.items():
                 try:
                     resultado_cidade = client.buscar_cidade(
                         cidade=cidade_nome,
                         estado=estado_nome,
-                        tipo=tipo_sql,
+                        tipo=nomes_tipo,
                         limit=limite_tipo,
                     )
                     queries_executadas += 1
@@ -1591,7 +1604,9 @@ def coletar_imoveis(
         for idx_athena, original in enumerate(athena_imoveis):
             try:
                 im = dict(original)
-                im["source"] = "Athena/S3"
+                portal = (im.get("portal") or "vivareal").strip().lower()
+                im["source"] = NOMES_PORTAIS.get(portal, portal)
+                im["fonte_dados"] = "Athena/S3"
 
                 fotos_raw = im.get("fotos_urls") or ""
                 fotos_list = []
@@ -1659,7 +1674,7 @@ def coletar_imoveis(
                     im["propertyType"] = "Casas"
                 elif tipo_raw in ("apartamento", "flat", "cobertura"):
                     im["propertyType"] = "Apartamentos"
-                elif tipo_raw in ("residential_allotment_land", "allotment_land"):
+                elif tipo_raw in ("terreno", "residential_allotment_land", "allotment_land"):
                     im["propertyType"] = "Terrenos"
                 elif not im.get("propertyType"):
                     im["propertyType"] = tipo_raw
@@ -1683,7 +1698,7 @@ def coletar_imoveis(
             for im in athena_imoveis:
                 lid = im.get("listing_id") or im.get("id")
                 if lid:
-                    ids.append(str(lid))
+                    ids.append(f"{im.get('portal')}::{lid}")
             logger.info(
                 f"[Ag1][Athena][Dedup-Diag] total={len(athena_imoveis)} | "
                 f"ids={len(ids)} | ids_duplicados={len(ids)-len(set(ids))}"

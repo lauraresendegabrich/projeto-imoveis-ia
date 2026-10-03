@@ -30,7 +30,7 @@ casas = [i for i in resultado_casa if i.get("propertyType") == "Casas"]
 terrenos = [i for i in resultado_casa if i.get("propertyType") == "Terrenos"]
 outros = [i for i in resultado_casa if i.get("propertyType") not in ("Casas", "Terrenos")]
 print(f"  Casas: {len(casas)} | Terrenos: {len(terrenos)} | Outros: {len(outros)}")
-athena = sum(1 for i in resultado_casa if i.get("source") == "Athena/S3")
+athena = sum(1 for i in resultado_casa if i.get("fonte_dados") == "Athena/S3")
 apify = len(resultado_casa) - athena
 print(f"  Fontes: {athena} Athena | {apify} Apify")
 for i, im in enumerate(resultado_casa[:5]):
@@ -54,7 +54,7 @@ print(f"\nRESULTADO APARTAMENTO: {len(resultado_apto)} imóveis")
 aptos = [i for i in resultado_apto if i.get("propertyType") == "Apartamentos"]
 outros_a = [i for i in resultado_apto if i.get("propertyType") != "Apartamentos"]
 print(f"  Apartamentos: {len(aptos)} | Outros: {len(outros_a)}")
-athena_a = sum(1 for i in resultado_apto if i.get("source") == "Athena/S3")
+athena_a = sum(1 for i in resultado_apto if i.get("fonte_dados") == "Athena/S3")
 apify_a = len(resultado_apto) - athena_a
 print(f"  Fontes: {athena_a} Athena | {apify_a} Apify")
 for i, im in enumerate(resultado_apto[:5]):

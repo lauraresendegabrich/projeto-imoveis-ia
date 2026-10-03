@@ -12,6 +12,12 @@ Principais garantias desta versao:
 - filtra por estado quando informado;
 - compara rua/bairro de forma tolerante a caixa, acentos e prefixos;
 - nao agrupa todos os registros sem URL na mesma particao de deduplicacao.
+
+Tabela: imoveis.anuncios (4 portais, particionada por portal/coleta/estado).
+Toda consulta filtra as particoes: so a coleta MAIS RECENTE de cada portal
+(lida de "anuncios$partitions", que nao le os dados) e o estado pedido. Sem
+esse filtro o Athena leria a tabela inteira (~13 GB por consulta). A tabela
+antiga (vivareal, sem particoes) ainda pode ser usada com ATHENA_TABLE=vivareal.
 """
 
 import logging
@@ -25,6 +31,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+PORTAIS = ("vivareal", "lugarcerto", "imovelweb", "chavesnamao")
+
+# Coleta mais recente de cada portal, compartilhada entre instancias (o Streamlit
+# cria um cliente por avaliacao). Revalidada a cada TTL para enxergar coletas novas.
+_CACHE_COLETAS: dict = {"coletas": None, "lido_em": 0.0}
+TTL_COLETAS_SEGUNDOS = 3600
 
 
 class AthenaClient:
@@ -43,7 +56,9 @@ class AthenaClient:
             "s3://athena-results-imoveis/",
         )
         self.workgroup = os.getenv("ATHENA_WORKGROUP", "").strip() or None
-        self.table = "vivareal"
+        self.table = os.getenv("ATHENA_TABLE", "").strip() or "anuncios"
+        # A tabela antiga nao tem as colunas de particao portal/coleta.
+        self.particionada = self.table != "vivareal"
 
     # ------------------------------------------------------------------
     # Utilitarios SQL
@@ -196,33 +211,92 @@ class AthenaClient:
 
     def _chave_dedup_sql(self) -> str:
         """
-        URL > listing_id > fingerprint extensa.
+        portal::listing_id > URL > fingerprint extensa.
+
+        listing_id so e unico dentro do mesmo portal, por isso leva o portal junto.
+        O mesmo anuncio pode aparecer em 2 linhas da mesma coleta (preco mudou
+        durante a coleta); a ordenacao por data_coleta (ver _ordem_dedup_sql)
+        mantem a linha mais recente.
 
         O fallback inclui muitos campos para nao transformar todos os NULL URLs em
         uma unica particao e para evitar apagar anuncios diferentes por acidente.
         """
-        return """
+        portal = "CAST(portal AS VARCHAR)" if self.particionada else "'vivareal'"
+        return f"""
             COALESCE(
-                NULLIF(TRIM(CAST(url AS VARCHAR)), ''),
                 CASE
-                    WHEN listing_id IS NOT NULL
-                        THEN CONCAT('__listing__', CAST(listing_id AS VARCHAR))
-                    ELSE CONCAT(
-                        '__fallback__|',
-                        COALESCE(CAST(cidade AS VARCHAR), ''), '|',
-                        COALESCE(CAST(bairro AS VARCHAR), ''), '|',
-                        COALESCE(CAST(rua AS VARCHAR), ''), '|',
-                        COALESCE(CAST(tipo AS VARCHAR), ''), '|',
-                        COALESCE(CAST(preco AS VARCHAR), ''), '|',
-                        COALESCE(CAST(area_construida AS VARCHAR), ''), '|',
-                        COALESCE(CAST(quartos AS VARCHAR), ''), '|',
-                        COALESCE(CAST(titulo AS VARCHAR), ''), '|',
-                        COALESCE(CAST(data_publicacao AS VARCHAR), ''), '|',
-                        COALESCE(CAST(fotos_urls AS VARCHAR), '')
-                    )
-                END
+                    WHEN NULLIF(TRIM(CAST(listing_id AS VARCHAR)), '') IS NOT NULL
+                        THEN CONCAT('__listing__', {portal}, '::', TRIM(CAST(listing_id AS VARCHAR)))
+                END,
+                NULLIF(TRIM(CAST(url AS VARCHAR)), ''),
+                CONCAT(
+                    '__fallback__|',
+                    COALESCE(CAST(cidade AS VARCHAR), ''), '|',
+                    COALESCE(CAST(bairro AS VARCHAR), ''), '|',
+                    COALESCE(CAST(rua AS VARCHAR), ''), '|',
+                    COALESCE(CAST(tipo AS VARCHAR), ''), '|',
+                    COALESCE(CAST(preco AS VARCHAR), ''), '|',
+                    COALESCE(CAST(area_construida AS VARCHAR), ''), '|',
+                    COALESCE(CAST(quartos AS VARCHAR), ''), '|',
+                    COALESCE(CAST(titulo AS VARCHAR), ''), '|',
+                    COALESCE(CAST(data_publicacao AS VARCHAR), ''), '|',
+                    COALESCE(CAST(fotos_urls AS VARCHAR), '')
+                )
             )
         """.strip()
+
+    @staticmethod
+    def _ordem_dedup_sql() -> str:
+        """Dentro de um mesmo anuncio, fica a linha coletada por ultimo."""
+        return "data_coleta DESC NULLS LAST, data_publicacao DESC NULLS LAST"
+
+    def _coletas_recentes(self) -> dict[str, str]:
+        """
+        {portal: coleta mais recente}, lido da lista de particoes (nao le dados).
+        Fica em cache por TTL_COLETAS_SEGUNDOS para nao repetir a consulta a cada
+        busca; depois disso e relido para enxergar coletas novas.
+        """
+        agora = time.monotonic()
+        if (
+            _CACHE_COLETAS["coletas"] is not None
+            and agora - _CACHE_COLETAS["lido_em"] < TTL_COLETAS_SEGUNDOS
+        ):
+            return _CACHE_COLETAS["coletas"]
+
+        linhas = self.executar_query(
+            f'SELECT portal, max(coleta) AS coleta FROM "{self.table}$partitions" '
+            "GROUP BY portal",
+            timeout=60,
+        )
+        coletas = {
+            r["portal"]: r["coleta"]
+            for r in linhas
+            if r.get("portal") in PORTAIS and r.get("coleta")
+        }
+        if not coletas:
+            raise RuntimeError(f"Nenhuma coleta encontrada nas particoes de {self.table}")
+        logger.info(f"[Athena] coletas em uso: {coletas}")
+        _CACHE_COLETAS.update(coletas=coletas, lido_em=agora)
+        return coletas
+
+    def _condicao_particoes(self, estado: str = None) -> str:
+        """Restringe a leitura a coleta mais recente de cada portal (e ao estado)."""
+        partes = []
+        if self.particionada:
+            por_portal = [
+                f"(portal = '{self._sql_escape(p)}' AND coleta = '{self._sql_escape(c)}')"
+                for p, c in sorted(self._coletas_recentes().items())
+            ]
+            partes.append("(" + " OR ".join(por_portal) + ")")
+        if estado:
+            partes.append(f"estado = '{self._sql_escape(str(estado).upper())}'")
+        return " AND ".join(partes) or "TRUE"
+
+    def _condicao_tipo(self, tipo) -> str:
+        """tipo = 'x' ou tipo IN (...) quando vier uma lista de nomes equivalentes."""
+        tipos = [tipo] if isinstance(tipo, str) else list(tipo)
+        literais = ", ".join(f"'{self._sql_escape(t)}'" for t in tipos)
+        return f"tipo IN ({literais})"
 
     # ------------------------------------------------------------------
     # Execucao
@@ -255,6 +329,10 @@ class AthenaClient:
             state = status_query["State"]
 
             if state == "SUCCEEDED":
+                # Custo do Athena e por dado lido: registra para auditar os filtros.
+                lidos = (status["QueryExecution"].get("Statistics") or {}).get("DataScannedInBytes")
+                if lidos is not None:
+                    logger.info(f"[Athena] consulta {query_id[:8]} leu {lidos / 1e6:.1f} MB")
                 break
 
             if state in {"FAILED", "CANCELLED"}:
@@ -332,8 +410,7 @@ class AthenaClient:
             "finalidade = 'venda'",
         ]
 
-        if estado:
-            conditions.append(f"estado = '{self._sql_escape(str(estado).upper())}'")
+        conditions.append(self._condicao_particoes(estado))
         if quartos_min is not None:
             conditions.append(f"quartos >= {int(quartos_min)}")
         if preco_max is not None:
@@ -341,7 +418,7 @@ class AthenaClient:
         if preco_min is not None:
             conditions.append(f"preco >= {float(preco_min)}")
         if tipo:
-            conditions.append(f"tipo = '{self._sql_escape(tipo)}'")
+            conditions.append(self._condicao_tipo(tipo))
 
         where = " AND ".join(conditions)
         chave = self._chave_dedup_sql()
@@ -350,7 +427,7 @@ class AthenaClient:
                 SELECT *,
                        ROW_NUMBER() OVER (
                            PARTITION BY {chave}
-                           ORDER BY data_publicacao DESC NULLS LAST
+                           ORDER BY {self._ordem_dedup_sql()}
                        ) AS rn
                 FROM {self.table}
                 WHERE {where}
@@ -377,7 +454,8 @@ class AthenaClient:
 
         - mesma rua: prioridade 0;
         - mesmo bairro: prioridade 1;
-        - deduplica por URL/listing_id/fallback seguro;
+        - deduplica por portal+listing_id/URL/fallback seguro (fica a linha mais recente);
+        - tipo aceita um nome ou uma lista de nomes equivalentes (tipo IN (...));
         - tolera caixa, acentos e prefixos comuns (Rua/R., Jardim/Jd. etc.).
         """
         limit = self._normalizar_limit(limit)
@@ -408,10 +486,9 @@ class AthenaClient:
             "finalidade = 'venda'",
             local_cond,
         ]
-        if estado:
-            conditions.append(f"estado = '{self._sql_escape(str(estado).upper())}'")
+        conditions.append(self._condicao_particoes(estado))
         if tipo:
-            conditions.append(f"tipo = '{self._sql_escape(tipo)}'")
+            conditions.append(self._condicao_tipo(tipo))
 
         where = " AND ".join(conditions)
         chave = self._chave_dedup_sql()
@@ -424,7 +501,7 @@ class AthenaClient:
                 SELECT *,
                        ROW_NUMBER() OVER (
                            PARTITION BY {chave}
-                           ORDER BY prioridade ASC, data_publicacao DESC NULLS LAST
+                           ORDER BY prioridade ASC, {self._ordem_dedup_sql()}
                        ) AS rn
                 FROM candidatos
             )
@@ -483,8 +560,7 @@ class AthenaClient:
             "finalidade = 'venda'",
             "preco > 0",
         ]
-        if estado:
-            conditions.append(f"estado = '{self._sql_escape(str(estado).upper())}'")
+        conditions.append(self._condicao_particoes(estado))
         where = " AND ".join(conditions)
         chave = self._chave_dedup_sql()
 
@@ -493,7 +569,7 @@ class AthenaClient:
                 SELECT *,
                        ROW_NUMBER() OVER (
                            PARTITION BY {chave}
-                           ORDER BY data_publicacao DESC NULLS LAST
+                           ORDER BY {self._ordem_dedup_sql()}
                        ) AS rn
                 FROM {self.table}
                 WHERE {where}
@@ -518,8 +594,7 @@ class AthenaClient:
             "bairro IS NOT NULL",
             "bairro != ''",
         ]
-        if estado:
-            conditions.append(f"estado = '{self._sql_escape(str(estado).upper())}'")
+        conditions.append(self._condicao_particoes(estado))
         where = " AND ".join(conditions)
         chave = self._chave_dedup_sql()
 
@@ -528,7 +603,7 @@ class AthenaClient:
                 SELECT *,
                        ROW_NUMBER() OVER (
                            PARTITION BY {chave}
-                           ORDER BY data_publicacao DESC NULLS LAST
+                           ORDER BY {self._ordem_dedup_sql()}
                        ) AS rn
                 FROM {self.table}
                 WHERE {where}
@@ -542,17 +617,17 @@ class AthenaClient:
         return self.executar_query(sql)
 
     def listar_cidades(self, estado: str = "SP") -> list[dict]:
-        estado_sql = self._sql_escape(str(estado).upper())
+        particoes = self._condicao_particoes(estado)
         chave = self._chave_dedup_sql()
         sql = f"""
             WITH base AS (
                 SELECT *,
                        ROW_NUMBER() OVER (
                            PARTITION BY {chave}
-                           ORDER BY data_publicacao DESC NULLS LAST
+                           ORDER BY {self._ordem_dedup_sql()}
                        ) AS rn
                 FROM {self.table}
-                WHERE estado = '{estado_sql}' AND finalidade = 'venda'
+                WHERE {particoes} AND finalidade = 'venda'
             )
             SELECT cidade, COUNT(*) AS total, AVG(preco) AS preco_medio
             FROM base

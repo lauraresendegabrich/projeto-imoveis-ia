@@ -38,6 +38,6 @@ if len(resultado) > 15:
     print(f"  ... e mais {len(resultado) - 15}")
 
 # Contagem por fonte
-athena_count = sum(1 for im in resultado if im.get("source") == "Athena/S3")
+athena_count = sum(1 for im in resultado if im.get("fonte_dados") == "Athena/S3")
 apify_count = len(resultado) - athena_count
 print(f"\nFontes: {athena_count} Athena | {apify_count} Apify")
