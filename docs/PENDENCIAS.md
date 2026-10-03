@@ -5,10 +5,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, remova-o daqui
 
 ## Migração para a tabela `anuncios` (branch `migracao-tabela-anuncios`)
 
-- [ ] **Não unir ao `main` antes de as coletas terminarem.** ImovelWeb (faltam
-  estados, inclusive SP) e Chaves na Mão ainda coletando em 03/10/2026. A aplicação
-  usa sempre a coleta mais recente de cada portal; com a coleta incompleta, alguns
-  estados ficam sem anúncios desses portais.
+- [ ] **Não unir ao `main` antes de as coletas terminarem.** O push no `main`
+  atualiza o app publicado no Streamlit Cloud automaticamente. Em 03/10/2026:
+  ImovelWeb sem SC, SP, RO, RR, SE, TO; Chaves na Mão sem SP (6 partes), RJ, PR,
+  RS, SC, MS. A aplicação usa sempre a coleta mais recente de cada portal; com a
+  coleta incompleta, esses estados ficam sem anúncios desses portais.
+  Decidido esperar e subir tudo junto. No dia:
+  1. `.venv/Scripts/python.exe -m tools.atualizar_particoes`
+  2. avaliação completa de teste (de preferência em SP)
+  3. merge de `migracao-tabela-anuncios` no `main`
 - [ ] **Registrar estados novos no Athena** quando as coletas avançarem:
   `.venv/Scripts/python.exe -m tools.atualizar_particoes` (só roda
   `MSCK REPAIR TABLE`). Ideal: a coleta (repositório scraper-imoveis) rodar isso
