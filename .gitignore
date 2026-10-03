@@ -24,6 +24,7 @@ vectorstore/
 data/imoveis_brutos_ocrad_ag1.json
 data/imoveis_coletados_ag1.json
 data/imoveis_completos_ag1.json
+data/duplicatas_descartadas_ag1.json
 data/imoveis_comparaveis_ag2.json
 data/zona_homogenea_ag2.json
 data/satelite_zona_homogenea_ag2.png
