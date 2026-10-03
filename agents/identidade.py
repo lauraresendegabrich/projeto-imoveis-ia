@@ -34,6 +34,11 @@ Diferencas em relacao a proposta original:
     em blocos de milhar diferentes e nunca eram comparados).
   - deduplicar devolve tambem os anuncios descartados completos (auditoria).
   - Portal normalizado ("Lugar Certo" do Apify = "lugarcerto" do Athena).
+  - Casa com mesma rua + mesmo numero + preco identico + area <=2% e o mesmo
+    imovel sem exigir descricao parecida (cada portal reescreve o texto). Nao vale
+    quando o anuncio pode ser de condominio de casas (numero compartilhado).
+    Na calibracao de BH nao mudou as taxas (quase nenhum par tinha numero nos dois
+    lados); no Santa Monica juntou 16 anuncios a mais.
 
 Limitacoes: calibrado so em BH/venda; poucos pares de casa (61); terreno e
 comercial nao tem regra calibrada e nunca sao fundidos.
@@ -52,6 +57,9 @@ APTO_AREA = 0.02                            # apto: area ate 2% OU descricao >= 
 APTO_DESC = 0.60
 CASA_AREA = 0.01                            # casa: area ate 1% E descricao >= CASA_DESC
 CASA_DESC = 0.75
+# Casa com mesma rua E mesmo numero dispensa a descricao (cada portal reescreve o
+# texto; casas vizinhas iguais de construtora tem numeros diferentes).
+CASA_AREA_COM_NUMERO = 0.02
 
 SUFIXOS_ANUNCIANTE = {"ltda", "me", "eireli", "sa", "epp", "s", "a"}
 PREFIXOS_RUA = {"rua", "r", "avenida", "av", "alameda", "al", "travessa", "tv",
@@ -128,6 +136,17 @@ def _em_condominio(d: dict) -> bool:
     return "condomin" in _norm(_campo(d, "property_sub_type"))
 
 
+def _pode_ser_condominio(d: dict) -> bool:
+    """
+    Casas de um condominio (ou varias casas no mesmo lote) dividem o numero da rua.
+    ImovelWeb/Lugar Certo nao marcam o subtipo, entao procura tambem no texto.
+    """
+    if _em_condominio(d):
+        return True
+    texto = _norm(" ".join(str(_campo(d, c) or "") for c in ("rua", "street", "titulo", "title", "descricao", "description")))
+    return bool(re.search(r"\bcondomini|\bcasa \d|\bunidade\b|\bbloco\b|\blote \d", texto))
+
+
 def regra_do_par(a: dict, b: dict) -> tuple[str | None, str]:
     """
     Qual regra usar para o par: ("apto" | "casa", "") ou (None, motivo do veto).
@@ -161,11 +180,21 @@ def rua(d: dict) -> str | None:
     valor = _campo(d, "rua", "street")
     if valor is None:
         return None
-    nome = re.split(r",\s*\d", str(valor))[0]
+    nome = re.split(r",\s*(?:n[º°o.]*\s*)?\d", str(valor), flags=re.I)[0]
     partes = _norm(nome).split()
     while partes and partes[0] in PREFIXOS_RUA:
         partes.pop(0)
     return " ".join(partes) or None
+
+
+def numero(d: dict) -> str | None:
+    """Numero do endereco: campo proprio ou 'Rua X, 123' / 'Rua X, n. 123' na rua."""
+    for chave in ("numero", "streetNumber", "street_number", "addressNumber"):
+        v = d.get(chave)
+        if not _vazio(v) and re.fullmatch(r"\d{1,6}", str(v).strip()):
+            return str(v).strip().lstrip("0") or None
+    m = re.search(r",\s*(?:n[º°o.]*\s*)?(\d{1,6})\b", str(_campo(d, "rua", "street") or ""), re.I)
+    return m.group(1).lstrip("0") or None if m else None
 
 
 def _bairros(d: dict) -> set[str]:
@@ -279,6 +308,11 @@ def mesmo_imovel(a: dict, b: dict) -> tuple[bool, str]:
     else:
         if area_ok and area_dif <= CASA_AREA and desc >= CASA_DESC:
             return True, f"casa_preco_area_descricao(area_dif={_fmt(area_dif)}, desc={desc})"
+        num = numero(a)
+        if (area_ok and area_dif <= CASA_AREA_COM_NUMERO and num and num == numero(b)
+                and rua(a) and rua(a) == rua(b)
+                and not _pode_ser_condominio(a) and not _pode_ser_condominio(b)):
+            return True, f"casa_preco_area_rua_numero(area_dif={_fmt(area_dif)}, numero={num})"
     return False, f"sem_prova(area_dif={_fmt(area_dif)}, desc={desc})"
 
 

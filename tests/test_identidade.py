@@ -71,10 +71,29 @@ def test_apto_unidades_diferentes_mesmo_predio_vetadas_por_vagas():
 
 def test_casa_geminada_mesmo_preco_sem_descricao_nao_e_fundida():
     # Casa exige preco + area + descricao: casas vizinhas da mesma construtora
-    # tem preco e area iguais, mas sem descricao parecida nao ha prova.
+    # tem preco e area iguais, mas sem descricao parecida nao ha prova. Num
+    # condominio de casas o numero da rua e o mesmo para todas: nao serve de prova.
     a = casa(codigo_imovel_anunciante=None)
     b = casa(codigo_imovel_anunciante=None, portal="imovelweb", anunciante_nome="Beta",
              descricao="Casa nova em condominio fechado, acabamento de primeira, entrega imediata.")
+    igual, motivo = mesmo_imovel(a, b)
+    assert not igual and motivo.startswith("sem_prova"), motivo
+
+
+def test_casa_mesma_rua_e_numero_dispensa_descricao():
+    # Mesma casa em 2 portais, cada um com seu texto: rua+numero+preco+area bastam.
+    a = casa(codigo_imovel_anunciante=None, rua="Rua Manoel Cesario Franca, 168", area_construida=179.0)
+    b = casa(codigo_imovel_anunciante=None, portal="imovelweb", anunciante_nome="Beta",
+             rua="R. Manoel Cesario Franca, nº 168", area_construida=181.0,
+             descricao="Otima casa, venha conhecer, aceita financiamento bancario e FGTS, agende sua visita.")
+    igual, motivo = mesmo_imovel(a, b)
+    assert igual and motivo.startswith("casa_preco_area_rua_numero"), motivo
+
+
+def test_casas_vizinhas_numeros_diferentes_nao_sao_fundidas():
+    a = casa(codigo_imovel_anunciante=None, rua="Rua Lirica, 50")
+    b = casa(codigo_imovel_anunciante=None, portal="imovelweb", anunciante_nome="Beta",
+             rua="Rua Lirica, 52", descricao="Casa nova de construtora, entrega imediata, financiamento.")
     igual, motivo = mesmo_imovel(a, b)
     assert not igual and motivo.startswith("sem_prova"), motivo
 

@@ -280,7 +280,9 @@ anúncios e mantém **um por imóvel** (o mais completo). Regras (calibradas em 
 5. Vetos: área > 10% (casa) / > 3% (apto), quartos diferentes; apto também vagas,
    suítes, andar.
 6. Preço ≤ 0,5% e: apto → área ≤ 2% **ou** descrição ≥ 0,60; casa → área ≤ 1% **e**
-   descrição ≥ 0,75. Casa em condomínio dos dois lados usa a regra de apto.
+   descrição ≥ 0,75 — **ou** casa com mesma rua + mesmo número e área ≤ 2% (sem
+   exigir descrição; não vale quando o anúncio pode ser de condomínio de casas).
+   Casa em condomínio dos dois lados usa a regra de apto.
 
 O representante recebe `duplicatas` (portal, id, url, motivo e os campos de identidade
 de cada absorvido) e `fontes_origem`. Os descartados vão **completos** para
