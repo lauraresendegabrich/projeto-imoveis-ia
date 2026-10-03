@@ -312,7 +312,8 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
 
     Sem fusao em cadeia: um anuncio so entra num grupo se for o mesmo imovel que o
     REPRESENTANTE do grupo (se A=B e B=C por criterios diferentes, C nao e
-    arrastado para o grupo de A).
+    arrastado para o grupo de A). Tambem nao entra se o grupo ja tem um anuncio do
+    mesmo portal e anunciante com outro codigo (sao unidades diferentes).
 
     Para nao comparar todos com todos, compara dentro de blocos com o mesmo numero
     de quartos e preco no mesmo milhar ou nos milhares vizinhos (a regra exige
@@ -349,6 +350,15 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
         vizinhos = [_bloco_preco(d, -1), _bloco_preco(d, 1)] if _num(preco(d)) else []
         return [_bloco_preco(d)] + vizinhos + _bloco_codigo(d)
 
+    def _unidades_diferentes(x, y):
+        # Regra 2 aplicada DENTRO do grupo: o representante pode ser de outro portal
+        # (sem veto com ninguem), mas dois membros do mesmo portal + anunciante com
+        # codigos diferentes sao unidades diferentes (ex.: lancamento com dezenas
+        # de unidades de mesmo preco/area) e nao podem ser o mesmo imovel.
+        cx, cy = _codigo(x), _codigo(y)
+        return bool(cx and cy and cx != cy and portal(x) == portal(y)
+                    and _anunciante(x) and _anunciante(x) == _anunciante(y))
+
     ordem = sorted(range(len(anuncios)), key=lambda k: -_completude(anuncios[k]))
     representantes: dict[tuple, list[int]] = {}   # bloco -> representantes nele
     membros: dict[int, list[tuple[int, str]]] = {}
@@ -363,7 +373,7 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
                     continue
                 vistos.add(r)
                 igual, motivo = mesmo_imovel(anuncios[r], d)
-                if igual:
+                if igual and not any(_unidades_diferentes(anuncios[m], d) for m, _ in membros[r]):
                     destino = r
                     break
             if destino is not None:

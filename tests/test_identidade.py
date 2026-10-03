@@ -124,6 +124,19 @@ def test_deduplicar_compara_milhares_vizinhos():
     assert len(unicos) == 1 and len(descartados) == 1
 
 
+def test_deduplicar_nao_junta_unidades_do_mesmo_anunciante_via_outro_portal():
+    # Lancamento: o anuncio do VivaReal bate com 2 unidades do ImovelWeb (mesmo
+    # preco/area), mas as 2 sao do mesmo anunciante com codigos diferentes =
+    # unidades diferentes. So uma pode ficar no grupo.
+    rep = anuncio(codigo_imovel_anunciante=None, anunciante_nome="Construtora X")
+    u1 = anuncio(portal="imovelweb", source="ImovelWeb", anunciante_nome="Inova",
+                 codigo_imovel_anunciante="U101", listing_id="a", url="https://iw/a", descricao="")
+    u2 = anuncio(portal="imovelweb", source="ImovelWeb", anunciante_nome="Inova",
+                 codigo_imovel_anunciante="U102", listing_id="b", url="https://iw/b", descricao="")
+    unicos, descartados = deduplicar([rep, u1, u2])
+    assert len(descartados) == 1 and len(unicos) == 2
+
+
 # ---------------------------------------------------------------- alvo (Ag2)
 def alvo_apto(**campos):
     base = {
