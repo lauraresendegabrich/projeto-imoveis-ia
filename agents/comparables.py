@@ -134,6 +134,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from agents import identidade
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -333,6 +335,15 @@ def _para_float(valor) -> float | None:
         return None
 
 
+def _coordenada(valor) -> float | None:
+    """Latitude/longitude (negativas no Brasil; _para_float descarta negativos)."""
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return None
+    return numero if numero == numero and numero != 0 else None
+
+
 def _obter_area_construida(imovel: dict) -> float | None:
     """Busca a melhor chave disponivel para area construida/privativa."""
     for chave in ("area", "area_construida", "usableArea", "usable_area", "builtArea", "built_area"):
@@ -388,6 +399,10 @@ def _numero_endereco_ou_descricao(imovel: dict) -> str:
     num = _obter_numero_endereco(imovel)
     if num:
         return num
+    # Formato dos portais na coluna rua: "Rua Espirito Santo, 1059".
+    m = re.search(r",\s*(\d{1,6})\b", str(imovel.get("street") or imovel.get("rua") or ""))
+    if m:
+        return m.group(1)
     texto = " ".join([
         str(imovel.get("street") or imovel.get("rua") or ""),
         str(imovel.get("title") or imovel.get("titulo") or ""),
@@ -485,102 +500,110 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     Decide se um comparavel coletado E o proprio anuncio do imovel-alvo, em DOIS
     niveis, para nao contaminar o calculo de preco com o preco pedido:
 
-      - eh_alvo=True  -> IDENTIDADE confirmada. Exige pelo menos um sinal
-        IDENTIFICADOR forte (algo que aponta o anuncio especifico, nao o tipo de
-        imovel). O Ag5 EXCLUI do calculo.
-      - possivel_alvo=True -> SUSPEITA (perfil compativel). Combinacao de sinais
-        de perfil (bairro + area + preco + comodos) que descrevem o "produto",
-        nao a identidade. NAO exclui do calculo; so gera alerta de auditoria.
+      - eh_alvo=True  -> IDENTIDADE confirmada. O Ag5 EXCLUI do calculo.
+      - possivel_alvo=True -> SUSPEITA (perfil compativel). NAO exclui do calculo;
+        so gera alerta de auditoria.
 
-    Retorna (eh_alvo, possivel_alvo, sinais, score). O score continua existindo
-    apenas para auditoria/ordenacao — NAO decide sozinho a exclusao.
+    Retorna (eh_alvo, possivel_alvo, sinais, score). O score existe apenas para
+    auditoria/ordenacao — NAO decide sozinho.
 
-    Por que dois niveis: 'mesmo bairro + area + preco' e a assinatura de um TIPO
-    de imovel (num condominio pode haver varias casas de 65 m2 a R$ 450 mil), nao
-    de UM anuncio. Confirmar identidade so com isso descartaria comparaveis
-    legitimos. Identidade exige prova do anuncio: rua+numero (para apto tambem a
-    unidade), descricao praticamente identica, ou coordenadas quase iguais.
+    Regras (agents/identidade.py, calibradas em anuncios de venda de BH):
 
-    Sinais IDENTIFICADORES (podem confirmar eh_alvo):
-      - descricao quase identica (>=0.88) + area compativel
-      - mesma rua E mesmo numero      (CASA: confirma;  APTO: exige tambem unidade)
-      - mesma rua + numero + unidade   (APTO: confirma)
-      - coordenadas quase iguais (~30 m) + area compativel
-    Sinais de PERFIL (so suspeita, nunca confirmam sozinhos):
-      - mesmo bairro / area igual / comodos iguais / preco identico ou proximo
+      Vetos (qualquer um => nem alvo nem suspeito): tipo diferente (casa x apto;
+      terreno/comercial nunca), bairro E rua incompativeis, quartos diferentes,
+      area > 10% (casa) / > 3% (apto); no apto tambem vagas/suites diferentes.
+      Vagas=0 do alvo e o padrao do formulario e conta como "nao informado".
+
+      Identidade confirmada (passados os vetos), qualquer um:
+        - preco informado pelo usuario identico (<=0,5%) e
+            casa: area <=1% E descricao >=0,75
+            apto: area <=2% OU descricao >=0,60
+          (a descricao so conta se o usuario escreveu uma; a gerada pela
+          interface e generica)
+        - mesma rua + mesmo numero (apto: tambem a mesma unidade)
+        - coordenadas quase iguais (~30 m) + area <=2%; o alvo so tem coordenada
+          aqui quando foi geocodificado por rua+numero (ver _geocodificar_alvo_identidade)
+      Sem preco do alvo, so rua+numero(+unidade) e coordenadas confirmam.
+
+      Suspeita (perfil, nao exclui): mesmo bairro + area <=2% + (preco identico ou
+      proximo, ou comodos iguais), sem identidade confirmada.
     """
     sinais: list[str] = []
     score = 0.0
     tem_identificador = False   # ao menos um sinal que prova a identidade do anuncio
 
-    eh_casa_alvo = _eh_casa(imovel_alvo)
-    eh_apto_alvo = not eh_casa_alvo and not _eh_terreno(imovel_alvo)
+    g, motivo = identidade.regra_do_par(imovel_alvo, comparavel)
+    if g is None:
+        return (False, False, [motivo], 0.0)
+    if not identidade.local_compativel(imovel_alvo, comparavel):
+        return (False, False, ["veto_local"], 0.0)
+    # O formulario tem vagas=0 como padrao: nao da para distinguir "sem vaga" de
+    # "nao informado", entao vagas=0 do alvo nao veta.
+    ignorar = () if _para_float(imovel_alvo.get("parkingSpaces") or imovel_alvo.get("vagas")) else ("vagas",)
+    veto = identidade.motivo_veto(imovel_alvo, comparavel, g, ignorar=ignorar)
+    if veto:
+        return (False, False, [veto], 0.0)
 
-    # Area compativel (<=2%): usada como REFORCO de sinais identificadores.
-    area_alvo = _obter_area_construida(imovel_alvo)
-    area_comp = _obter_area_construida(comparavel)
-    area_compativel = False
-    if area_alvo and area_comp:
-        area_compativel = abs(area_alvo - area_comp) / max(area_alvo, area_comp) <= 0.02
+    area_dif = identidade.dif_relativa(identidade.area(imovel_alvo), identidade.area(comparavel))
+    area_compativel = area_dif is not None and area_dif <= 0.02
 
     # =====================================================================
     # (A) SINAIS IDENTIFICADORES — provam o anuncio especifico
     # =====================================================================
 
-    # --- Descricao quase identica (vale para casa E apartamento) ---
-    sim_desc = _similaridade_descricao(
-        imovel_alvo.get("description") or imovel_alvo.get("descricao") or "",
-        comparavel.get("description") or comparavel.get("descricao") or "",
-    )
-    if sim_desc >= 0.88:
-        score += 1.00
-        sinais.append(f"descricao_quase_identica({sim_desc})")
-        # Confirma se a area for compativel OU desconhecida. Se a area diverge,
-        # provavelmente e texto padronizado de construtora — nao confirma sozinho.
-        if area_compativel or not (area_alvo and area_comp):
+    # --- Preco identico (so quando o usuario informou o preco) ---
+    preco_dif = identidade.dif_relativa(identidade.preco(imovel_alvo), identidade.preco(comparavel))
+    sim_desc = 0.0
+    if not imovel_alvo.get("descricao_gerada"):
+        sim_desc = _similaridade_descricao(
+            imovel_alvo.get("description") or imovel_alvo.get("descricao") or "",
+            comparavel.get("description") or comparavel.get("descricao") or "",
+        )
+    if preco_dif is not None and preco_dif <= identidade.PRECO_IDENTICO:
+        if g == "apto" and (
+            (area_dif is not None and area_dif <= identidade.APTO_AREA) or sim_desc >= identidade.APTO_DESC
+        ):
+            score += 1.00
+            sinais.append(f"apto_preco_identico(area_dif={area_dif}, desc={sim_desc})")
             tem_identificador = True
-    elif sim_desc >= 0.75:
-        score += 0.40
-        sinais.append(f"descricao_similar({sim_desc})")  # reforca, mas nao confirma
+        elif g == "casa" and (
+            area_dif is not None and area_dif <= identidade.CASA_AREA and sim_desc >= identidade.CASA_DESC
+        ):
+            score += 1.00
+            sinais.append(f"casa_preco_area_descricao(area_dif={area_dif}, desc={sim_desc})")
+            tem_identificador = True
 
     # --- Rua + numero (+ unidade para apartamento) ---
-    rua_alvo_norm = _normalizar_texto(imovel_alvo.get("rua") or imovel_alvo.get("street") or "")
-    rua_comp_norm = _normalizar_texto(comparavel.get("street") or comparavel.get("rua") or "")
-    mesma_rua = bool(rua_alvo_norm) and bool(rua_comp_norm) and rua_alvo_norm == rua_comp_norm
-    if mesma_rua:
+    rua_alvo = identidade.rua(imovel_alvo)
+    if rua_alvo and rua_alvo == identidade.rua(comparavel):
         num_alvo = _numero_endereco_ou_descricao(imovel_alvo)
         num_comp = _numero_endereco_ou_descricao(comparavel)
-        mesmo_numero = bool(num_alvo) and bool(num_comp) and num_alvo == num_comp
-        if mesmo_numero:
+        if num_alvo and num_alvo == num_comp:
             score += 0.70
             sinais.append("mesma_rua_e_numero")
-            if eh_apto_alvo:
+            if g == "apto":
                 # Predio: rua+numero NAO basta (dezenas de unidades). Exige unidade.
                 uni_alvo = _extrair_unidade(imovel_alvo)
                 uni_comp = _extrair_unidade(comparavel)
-                if uni_alvo and uni_comp and uni_alvo == uni_comp:
+                if uni_alvo and uni_alvo == uni_comp:
                     score += 0.40
                     sinais.append(f"mesma_unidade({uni_alvo})")
-                    tem_identificador = True   # rua+numero+unidade = a unidade exata
-                # sem unidade compativel: fica so como sinal, NAO confirma apto
+                    tem_identificador = True
             else:
-                # Casa na mesma rua e numero: identidade confirmada.
                 tem_identificador = True
-        elif eh_casa_alvo:
-            # So a rua (sem numero) — fraco, so para casa; nao confirma sozinho.
+        elif g == "casa":
+            # So a rua (sem numero) — fraco; nao confirma sozinho.
             score += 0.30
             sinais.append("mesma_rua")
 
     # --- Coordenadas quase iguais (~30 m) + area compativel ---
-    lat_a, lon_a = _para_float(imovel_alvo.get("lat")), _para_float(imovel_alvo.get("lon"))
-    lat_c, lon_c = _para_float(comparavel.get("lat")), _para_float(comparavel.get("lon"))
-    if lat_a and lon_a and lat_c and lon_c:
+    lat_a, lon_a = _coordenada(imovel_alvo.get("lat")), _coordenada(imovel_alvo.get("lon"))
+    lat_c, lon_c = _coordenada(comparavel.get("lat")), _coordenada(comparavel.get("lon"))
+    if None not in (lat_a, lon_a, lat_c, lon_c):
         if abs(lat_a - lat_c) <= 0.0003 and abs(lon_a - lon_c) <= 0.0003:
             score += 0.60
             sinais.append("coordenadas_iguais")
             if area_compativel:
-                # Coordenada quase identica + area compativel: identidade confirmada
-                # (para apto, o mesmo ponto + area praticamente aponta a unidade).
                 tem_identificador = True
 
     # =====================================================================
@@ -611,14 +634,11 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
         score += 0.30
         sinais_perfil.append("comodos_iguais")
 
-    preco_alvo = _para_float(imovel_alvo.get("price") or imovel_alvo.get("preco"))
-    preco_comp = _para_float(comparavel.get("price") or comparavel.get("preco"))
-    if preco_alvo and preco_comp:
-        dif_preco = abs(preco_alvo - preco_comp) / max(preco_alvo, preco_comp)
-        if dif_preco <= 0.005:
+    if preco_dif is not None:
+        if preco_dif <= identidade.PRECO_IDENTICO:
             score += 0.40
             sinais_perfil.append("preco_identico")
-        elif dif_preco <= 0.03:
+        elif preco_dif <= 0.03:
             score += 0.20
             sinais_perfil.append("preco_proximo")
 
@@ -627,10 +647,7 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     # =====================================================================
     # DECISAO
     # =====================================================================
-    # Identidade (exclui): precisa de um sinal IDENTIFICADOR forte.
     eh_alvo = tem_identificador
-    # Suspeita (nao exclui): perfil compativel forte (mesmo bairro + area + mais
-    # um sinal de perfil), quando a identidade nao foi confirmada.
     possivel_alvo = False
     if not eh_alvo:
         tem_bairro = "mesmo_bairro" in sinais_perfil
@@ -641,6 +658,36 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     return (eh_alvo, possivel_alvo, sinais, round(score, 3))
 
 
+def _geocodificar_alvo_identidade(imovel_alvo: dict) -> None:
+    """
+    Coordenada do alvo para o teste de identidade (sinal "coordenadas_iguais").
+    So aceita geocodificacao por rua + numero: um ponto de rua ou o centro do
+    bairro nao identifica um imovel. Grava lat/lon no proprio dict do alvo, que o
+    orquestrador repassa para a zona homogenea (evita geocodificar duas vezes).
+    """
+    if _coordenada(imovel_alvo.get("lat")) is not None and _coordenada(imovel_alvo.get("lon")) is not None:
+        return
+    rua = imovel_alvo.get("rua") or imovel_alvo.get("street") or ""
+    numero = _obter_numero_endereco(imovel_alvo)
+    if not rua or not numero:
+        logger.info("[Ag2][AutoMatch] alvo sem rua+numero: criterio de coordenadas desligado")
+        return
+    endereco = ", ".join(str(p).strip() for p in (
+        rua, numero,
+        imovel_alvo.get("bairro") or imovel_alvo.get("neighborhood"),
+        imovel_alvo.get("cidade") or imovel_alvo.get("city"),
+        imovel_alvo.get("estado") or imovel_alvo.get("state"),
+        "Brasil",
+    ) if p and str(p).strip())
+    lat, lon = _geocodificar(endereco)
+    if lat is None or lon is None:
+        logger.info(f"[Ag2][AutoMatch] alvo nao geocodificado por rua+numero ({endereco!r})")
+        return
+    imovel_alvo["lat"], imovel_alvo["lon"] = lat, lon
+    imovel_alvo["geocodificacao_nivel"] = "rua_numero"
+    logger.info(f"[Ag2][AutoMatch] alvo geocodificado por rua+numero: {lat:.6f}, {lon:.6f}")
+
+
 def _marcar_anuncio_do_alvo(imovel_alvo: dict, imoveis: list[dict]) -> int:
     """
     Marca (nao remove) os coletados em dois niveis:
@@ -648,11 +695,34 @@ def _marcar_anuncio_do_alvo(imovel_alvo: dict, imoveis: list[dict]) -> int:
       - possivel_anuncio_do_alvo=True: suspeita de perfil -> NAO exclui, so alerta.
     Grava tambem match_alvo_sinais/score para auditoria. Retorna a contagem de
     identidades CONFIRMADAS (as que o Ag5 vai excluir).
+
+    Cada imovel pode representar varios anuncios (o Ag1 junta o mesmo imovel de
+    portais diferentes e guarda os absorvidos em `duplicatas`). A regra nao e
+    transitiva, entao o alvo e testado contra o representante E contra cada
+    anuncio absorvido; se qualquer um for o alvo, o imovel e marcado.
     """
+    _geocodificar_alvo_identidade(imovel_alvo)
+
     confirmados = 0
     suspeitos = 0
     for im in imoveis:
-        eh_alvo, possivel_alvo, sinais, score = _eh_anuncio_do_alvo(imovel_alvo, im)
+        testes = [(im, None)] + [
+            (dup["dados_identidade"], dup)
+            for dup in (im.get("duplicatas") or [])
+            if dup.get("dados_identidade")
+        ]
+        melhor = None   # (eh_alvo, possivel_alvo, sinais, score, dup)
+        for anuncio, dup in testes:
+            eh_alvo, possivel_alvo, sinais, score = _eh_anuncio_do_alvo(imovel_alvo, anuncio)
+            if eh_alvo or (possivel_alvo and melhor is None):
+                melhor = (eh_alvo, possivel_alvo, sinais, score, dup)
+            if eh_alvo:
+                break
+        if melhor is None:
+            continue
+        eh_alvo, possivel_alvo, sinais, score, dup = melhor
+        if dup is not None:
+            sinais = sinais + [f"via_duplicata({dup.get('portal')}:{dup.get('listing_id')})"]
         if eh_alvo:
             im["eh_anuncio_do_alvo"] = True
             im["possivel_anuncio_do_alvo"] = False

@@ -202,6 +202,8 @@ elif submitted:
         "neighborhood": bairro,
         "street": rua,
         "description": descricao or f"{tipo} com {area}m², {quartos} quartos, {banheiros} banheiros, {vagas} vagas - {bairro}, {cidade}/{estado}",
+        # Texto generico gerado acima: nao serve de prova de identidade no Ag2.
+        "descricao_gerada": not descricao,
         "images": [],
     }
 
@@ -349,8 +351,28 @@ elif submitted:
         st.stop()
 
     progress.progress(20)
+    # O Ag1 junta o mesmo imovel anunciado em varios portais/imobiliarias: cada
+    # representante guarda os anuncios descartados em "duplicatas".
+    duplicatas_descartadas = [
+        {
+            "Mantido": im.get("source") or "-",
+            "Preço": im.get("price") or im.get("preco"),
+            "Área": im.get("area") or im.get("area_construida"),
+            "Anúncio mantido": im.get("url") or "",
+            "Descartado": dup.get("source") or dup.get("portal") or "-",
+            "Anúncio descartado": dup.get("url") or "",
+            "Motivo": str(dup.get("motivo") or "").split("(")[0],
+        }
+        for im in imoveis_coletados
+        for dup in (im.get("duplicatas") or [])
+    ]
     with log_area:
         st.success(f"✅ {len(imoveis_coletados)} imóveis à venda encontrados na região")
+        if duplicatas_descartadas:
+            st.caption(
+                f"ℹ️ {len(duplicatas_descartadas)} anúncio(s) repetido(s) do mesmo imóvel "
+                f"(em outro portal ou por outra imobiliária) foram descartados."
+            )
         # Avisa se não encontrou na rua ou bairro
         if rua and imoveis_coletados:
             na_rua = sum(1 for im in imoveis_coletados if rua.lower() in (im.get("street") or im.get("rua") or "").lower())
@@ -563,8 +585,11 @@ elif submitted:
     na_rua_count = sum(1 for im in imoveis_coletados if rua and rua.lower() in (im.get("street") or im.get("rua") or "").lower())
     resumo["na_rua"] = na_rua_count
 
+    resumo["duplicatas_descartadas"] = len(duplicatas_descartadas)
+
     resultado = {
         "status": "completo",
+        "duplicatas_descartadas": duplicatas_descartadas,
         "comparaveis": comparaveis,
         "terrenos": terrenos,
         "zona_homogenea": zona_resultado,
@@ -835,6 +860,7 @@ if "resultado" in st.session_state:
                             "Área": f"{comp.get('area') or comp.get('area_construida', 0)}m²",
                             "Rua": comp.get("street") or comp.get("rua") or "-",
                             "Bairro": comp.get("neighborhood") or comp.get("bairro", "?"),
+                            "Portais": " + ".join(comp.get("fontes_origem") or [comp.get("source") or "-"]),
                             "Estado": estado_cons,
                             "Padrão": padrao_tab,
                             "Score": score_q,
@@ -863,6 +889,30 @@ if "resultado" in st.session_state:
                             f"(o portal não expõe rua/número/unidade). Por segurança, **continuam no cálculo** — "
                             f"marcamos apenas para transparência."
                         )
+
+                    # Anuncios repetidos que o Ag1 descartou (mesmo imovel em outro
+                    # portal ou por outra imobiliaria), para conferencia.
+                    dups = resultado.get("duplicatas_descartadas") or []
+                    if dups:
+                        with st.expander(f"🔁 Anúncios repetidos descartados ({len(dups)})"):
+                            st.caption(
+                                "O mesmo imóvel apareceu em mais de um anúncio. Ficou só o anúncio "
+                                "mais completo; os demais abaixo não entraram na análise."
+                            )
+                            linhas_dup = []
+                            for d in dups:
+                                try:
+                                    preco_d = fmt_brl(float(d.get("Preço"))) if d.get("Preço") else "-"
+                                except (TypeError, ValueError):
+                                    preco_d = "-"
+                                linhas_dup.append({
+                                    "Preço": preco_d,
+                                    "Área": f"{float(d['Área']):.0f}m²" if d.get("Área") else "-",
+                                    "Mantido": f"[{d['Mantido']}]({d['Anúncio mantido']})" if d.get("Anúncio mantido") else d.get("Mantido"),
+                                    "Descartado": f"[{d['Descartado']}]({d['Anúncio descartado']})" if d.get("Anúncio descartado") else d.get("Descartado"),
+                                    "Motivo": d.get("Motivo") or "-",
+                                })
+                            st.markdown(pd.DataFrame(linhas_dup).to_markdown(index=False), unsafe_allow_html=True)
 
                     # Gráfico scatter: Preço × Área
                     precos_scatter = []

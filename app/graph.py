@@ -228,6 +228,9 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
                 terrenos=terrenos,
                 cidade=imovel_alvo.get("cidade", ""),
                 estado=imovel_alvo.get("estado", ""),
+                # O Ag2 ja geocodificou o alvo por rua+numero (teste de identidade).
+                lat_alvo_precomp=imovel_alvo.get("lat"),
+                lon_alvo_precomp=imovel_alvo.get("lon"),
             )
             t_ag2_zona = time.time() - t_zona_start
             confirmados = zona_resultado.get("comparaveis_confirmados", [])
@@ -336,6 +339,10 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
         logger.warning(f"Pipeline concluído com {len(falhas)} falha(s):")
         for f in falhas:
             logger.warning(f"  - {f}")
+
+    # Anuncios do mesmo imovel descartados pelo Ag1 (detalhe em
+    # data/duplicatas_descartadas_ag1.json e em comparaveis[i]["duplicatas"]).
+    resumo["duplicatas_descartadas"] = sum(len(im.get("duplicatas") or []) for im in imoveis_coletados)
 
     status = "completo — Agentes 1 a 5 executados"
     if falhas:

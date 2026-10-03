@@ -1,0 +1,207 @@
+"""
+Testes do teste de identidade (agents/identidade.py) e da marcacao do alvo no Ag2.
+Sem rede: a geocodificacao do alvo e desligada.
+
+    .venv/Scripts/python.exe -m tests.test_identidade
+"""
+import sys
+
+sys.path.insert(0, ".")
+
+import agents.comparables as comparables
+from agents.identidade import deduplicar, mesmo_imovel
+
+comparables._geocodificar = lambda endereco: (None, None)   # sem rede nos testes
+
+DESC_APTO = (
+    "Apartamento de 3 quartos com suite, sala ampla para dois ambientes, varanda, "
+    "cozinha planejada, area de servico e duas vagas de garagem. Predio com elevador."
+)
+DESC_CASA = (
+    "Casa com 3 quartos sendo uma suite, sala de estar, cozinha ampla, quintal com "
+    "churrasqueira, garagem coberta para dois carros e area gourmet nos fundos."
+)
+
+
+def anuncio(**campos):
+    base = {
+        "portal": "vivareal", "source": "VivaReal", "tipo": "apartamento",
+        "preco": 500000.0, "area_construida": 80.0, "quartos": 3, "vagas": 2, "suites": 1,
+        "rua": "Rua Patagonia, 100", "bairro": "Sion", "descricao": DESC_APTO,
+        "anunciante_nome": "Imobiliaria Alfa Ltda", "codigo_imovel_anunciante": "AP123",
+        "listing_id": "1", "url": "https://exemplo/1",
+    }
+    base.update(campos)
+    return base
+
+
+def casa(**campos):
+    base = anuncio(tipo="casa", area_construida=150.0, descricao=DESC_CASA, rua="Rua Lirica, 50",
+                   bairro="Santa Monica", codigo_imovel_anunciante="CA9")
+    base.update(campos)
+    return base
+
+
+# ---------------------------------------------------------------- entre anuncios
+def test_mesmo_codigo_e_anunciante_em_portais_diferentes():
+    a = anuncio()
+    b = anuncio(portal="imovelweb", source="ImovelWeb", preco=650000.0, listing_id="9")
+    assert mesmo_imovel(a, b) == (True, "mesmo_codigo_e_anunciante")
+
+
+def test_mesmo_portal_mesmo_anunciante_codigos_diferentes_sao_imoveis_diferentes():
+    a = anuncio()
+    b = anuncio(codigo_imovel_anunciante="AP124", listing_id="2")
+    assert mesmo_imovel(a, b) == (False, "veto_codigos_diferentes")
+
+
+def test_apto_preco_identico_area_igual_outra_imobiliaria():
+    a = anuncio(codigo_imovel_anunciante=None)
+    b = anuncio(portal="chavesnamao", source="Chaves na Mão", anunciante_nome="Beta Imoveis",
+                codigo_imovel_anunciante=None, preco=501000.0, area_construida=80.5, descricao="")
+    igual, motivo = mesmo_imovel(a, b)
+    assert igual and motivo.startswith("apto_preco_identico"), motivo
+
+
+def test_apto_unidades_diferentes_mesmo_predio_vetadas_por_vagas():
+    a = anuncio(codigo_imovel_anunciante=None)
+    b = anuncio(codigo_imovel_anunciante=None, vagas=1, anunciante_nome="Beta", listing_id="2")
+    assert mesmo_imovel(a, b) == (False, "veto_vagas")
+
+
+def test_casa_geminada_mesmo_preco_sem_descricao_nao_e_fundida():
+    # Casa exige preco + area + descricao: casas vizinhas da mesma construtora
+    # tem preco e area iguais, mas sem descricao parecida nao ha prova.
+    a = casa(codigo_imovel_anunciante=None)
+    b = casa(codigo_imovel_anunciante=None, portal="imovelweb", anunciante_nome="Beta",
+             descricao="Casa nova em condominio fechado, acabamento de primeira, entrega imediata.")
+    igual, motivo = mesmo_imovel(a, b)
+    assert not igual and motivo.startswith("sem_prova"), motivo
+
+
+def test_casa_em_condominio_num_portal_e_casa_no_outro_ainda_e_comparada():
+    a = casa(codigo_imovel_anunciante=None, property_sub_type="CONDOMINIUM")
+    b = casa(codigo_imovel_anunciante=None, portal="imovelweb", anunciante_nome="Beta",
+             property_sub_type="Casas")
+    igual, motivo = mesmo_imovel(a, b)
+    assert igual and motivo.startswith("casa_preco_area_descricao"), motivo
+
+
+def test_bairros_diferentes_vetam():
+    a = anuncio(codigo_imovel_anunciante=None)
+    b = anuncio(codigo_imovel_anunciante=None, anunciante_nome="Beta", bairro="Savassi",
+                rua="Rua Pernambuco, 10")
+    assert mesmo_imovel(a, b) == (False, "veto_local")
+
+
+def test_terreno_nunca_e_fundido():
+    a = anuncio(tipo="terreno", codigo_imovel_anunciante=None)
+    b = anuncio(tipo="terreno", codigo_imovel_anunciante=None, portal="imovelweb")
+    assert mesmo_imovel(a, b) == (False, "tipo_sem_regra_calibrada")
+
+
+# ---------------------------------------------------------------- deduplicar
+def test_deduplicar_guarda_descartado_completo_e_motivo():
+    a = anuncio(listing_id="1", url="https://vr/1")
+    b = anuncio(portal="imovelweb", source="ImovelWeb", listing_id="9", url="https://iw/9", fotos_urls=None)
+    c = anuncio(codigo_imovel_anunciante=None, preco=900000.0, area_construida=120.0, listing_id="3")
+    unicos, descartados = deduplicar([a, b, c])
+    assert len(unicos) == 2 and len(descartados) == 1
+    rep = next(u for u in unicos if u.get("duplicatas"))
+    assert rep["duplicatas"][0]["motivo"] == "mesmo_codigo_e_anunciante"
+    assert set(rep["fontes_origem"]) == {"VivaReal", "ImovelWeb"}
+    d = descartados[0]
+    assert d["duplicata_de"]["url"] == rep["url"] and d["motivo_duplicata"] == "mesmo_codigo_e_anunciante"
+    assert d["descricao"] == DESC_APTO   # registro completo
+
+
+def test_deduplicar_compara_milhares_vizinhos():
+    # R$ 450.400 e R$ 450.600 (0,04%) caem em milhares diferentes
+    a = anuncio(codigo_imovel_anunciante=None, preco=450400.0)
+    b = anuncio(codigo_imovel_anunciante=None, preco=450600.0, portal="imovelweb",
+                anunciante_nome="Beta", listing_id="2")
+    unicos, descartados = deduplicar([a, b])
+    assert len(unicos) == 1 and len(descartados) == 1
+
+
+# ---------------------------------------------------------------- alvo (Ag2)
+def alvo_apto(**campos):
+    base = {
+        "tipo": "apartment", "propertyType": "Apartamentos", "rua": "Rua Patagonia", "numero": "100",
+        "bairro": "Sion", "cidade": "Belo Horizonte", "estado": "MG", "area": 80.0,
+        "bedrooms": 3, "bathrooms": 2, "parkingSpaces": 2,
+        "description": "Apartamento com 80m², 3 quartos", "descricao_gerada": True,
+    }
+    base.update(campos)
+    return base
+
+
+def alvo_casa(**campos):
+    base = alvo_apto(tipo="house", propertyType="Casas", rua="Rua Lirica", numero="50",
+                     bairro="Santa Monica", area=150.0)
+    base.update(campos)
+    return base
+
+
+def test_alvo_apto_com_preco_identico_confirma():
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000), anuncio())
+    assert eh and not poss, sinais
+
+
+def test_alvo_sem_preco_apto_rua_numero_sem_unidade_nao_confirma():
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(), anuncio())
+    assert not eh and "mesma_rua_e_numero" in sinais, sinais
+
+
+def test_alvo_sem_preco_casa_rua_numero_confirma():
+    eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_casa(), casa())
+    assert eh and "mesma_rua_e_numero" in sinais, sinais
+
+
+def test_alvo_casa_preco_identico_sem_descricao_real_fica_suspeito():
+    # Descricao gerada pela interface nao prova nada: casa com preco e area
+    # iguais mas sem rua+numero vira so suspeita.
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(
+        alvo_casa(price=500000, numero="", rua=""), casa())
+    assert not eh and poss, sinais
+
+
+def test_alvo_vagas_zero_do_formulario_nao_veta():
+    eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000, parkingSpaces=0), anuncio())
+    assert eh, sinais
+
+
+def test_alvo_quartos_diferentes_veta():
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000, bedrooms=2), anuncio())
+    assert not eh and not poss and sinais == ["veto_quartos"], sinais
+
+
+def test_alvo_coordenadas_iguais_e_area_confirmam():
+    alvo = alvo_apto(lat=-19.9400, lon=-43.9300, rua="", numero="")
+    comp = anuncio(lat=-19.94005, lon=-43.93004, rua="")
+    eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
+    assert eh and "coordenadas_iguais" in sinais, sinais
+
+
+def test_alvo_testado_contra_duplicatas_absorvidas():
+    # O representante nao bate com o alvo (outro preco), mas o anuncio absorvido bate.
+    rep = anuncio(preco=520000.0, rua="", codigo_imovel_anunciante=None)
+    rep["duplicatas"] = [{"portal": "imovelweb", "listing_id": "9",
+                          "dados_identidade": anuncio(portal="imovelweb", rua="")}]
+    comparables._marcar_anuncio_do_alvo(alvo_apto(price=500000, rua="", numero=""), [rep])
+    assert rep.get("eh_anuncio_do_alvo") is True
+    assert any(s.startswith("via_duplicata(imovelweb:9)") for s in rep["match_alvo_sinais"])
+
+
+if __name__ == "__main__":
+    testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
+    falhas = 0
+    for nome, fn in testes:
+        try:
+            fn()
+            print(f"OK    {nome}")
+        except AssertionError as e:
+            falhas += 1
+            print(f"FALHA {nome}: {e}")
+    print(f"\n{len(testes) - falhas}/{len(testes)} testes passaram")
+    sys.exit(1 if falhas else 0)

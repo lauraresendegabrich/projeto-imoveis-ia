@@ -25,6 +25,7 @@ ETAPA 4 — COMBINAÇÃO (athena + apify)
 ETAPA 5 — FILTROS + DEDUP COM MERGE (leilão, campos, duplicatas)
 ETAPA 6 — ESCOPO (mantém só rua/bairro)
 ETAPA 7 — ENRIQUECIMENTO (fotos)
+ETAPA 7B — MESMO IMÓVEL EM VÁRIOS ANÚNCIOS (agents/identidade.py)
 ETAPA 8 — ORDENAÇÃO (rua > bairro > cidade)
 ```
 
@@ -32,7 +33,17 @@ ETAPA 8 — ORDENAÇÃO (rua > bairro > cidade)
 
 ## ETAPA 1 — Amazon Athena
 
-Queries SQL na tabela `vivareal` (S3/Parquet).
+Queries SQL na tabela `anuncios` (S3/Parquet), com os 4 portais coletados pelo
+scraper: VivaReal, Lugar Certo, ImovelWeb e Chaves na Mão. A tabela é particionada
+por `portal`, `coleta` e `estado`; toda consulta usa só a **coleta mais recente de
+cada portal** (lida de `anuncios$partitions`, sem ler dados) e o estado do alvo.
+`ATHENA_TABLE=vivareal` volta para a tabela antiga (sem partições). Cada consulta
+loga quantos MB leu (`[Athena] consulta ... leu X MB`).
+
+`tipo` é padronizado nos 4 portais (`apartamento`, `casa`, `cobertura`, `flat`,
+`terreno`, `comercial`, `rural`). ~170 mil linhas antigas do VivaReal ainda têm
+`residential_allotment_land`/`allotment_land`, consultadas junto com `terreno`.
+`source` recebe o nome do portal e `fonte_dados` = `"Athena/S3"`.
 
 ### Limites por tipo (rua + bairro somados)
 
@@ -41,10 +52,7 @@ Queries SQL na tabela `vivareal` (S3/Parquet).
 | Tipo SQL | Limite total |
 |----------|-------------|
 | casa | 200 |
-| two_story_house | 50 |
-| village_house | 50 |
-| residential_allotment_land | 60 |
-| allotment_land | 60 |
+| terreno (+ residential_allotment_land, allotment_land) | 120 |
 
 **Para `apartment`:**
 
@@ -67,17 +75,19 @@ WITH candidatos AS (
            CASE WHEN <cond_rua> THEN 0
                 WHEN <cond_bairro> THEN 1
                 ELSE 2 END AS prioridade
-    FROM vivareal
+    FROM anuncios
     WHERE cidade = 'Campinas'          -- comparado sem acento (translate)
       AND finalidade = 'venda'
       AND (<cond_rua> OR <cond_bairro>)
+      AND ((portal = 'vivareal' AND coleta = '2026-09-29') OR ...)  -- coleta mais recente
       AND estado = 'SP'
-      AND tipo = 'casa'
+      AND tipo IN ('casa')
 ), dedup AS (
     SELECT *,
            ROW_NUMBER() OVER (
                PARTITION BY <chave_dedup>
-               ORDER BY prioridade ASC, data_publicacao DESC NULLS LAST
+               ORDER BY prioridade ASC, data_coleta DESC NULLS LAST,
+                        data_publicacao DESC NULLS LAST
            ) AS rn
     FROM candidatos
 )
@@ -211,9 +221,9 @@ O merge preserva o registro mais completo: une as fotos (até 30, sem repetir), 
 a descrição/título mais longos e preenche campos vazios (lat/lon, publishedAt,
 banheiros, vagas etc.). São 3 passos, nesta ordem:
 
-1. **ID com namespace da fonte** — `<fonte>::<listing_id>`. O namespace evita colisão
-   de IDs entre portais; Athena/S3 e VivaReal compartilham o namespace `vivareal`,
-   permitindo casar os dois. IDs que na verdade são URLs ficam para o passo 2.
+1. **ID com namespace do portal** — `<portal>::<listing_id>`. O namespace evita colisão
+   de IDs entre portais; a coluna `portal` do Athena e o `source` do Apify viram a
+   mesma chave (`Lugar Certo` = `lugarcerto`), permitindo casar as duas fontes. IDs que na verdade são URLs ficam para o passo 2.
 2. **URL normalizada** — remove parâmetros de tracking (`utm_*`, `gclid`, `fbclid`,
    `ref` etc.), barra final e normaliza domínio/protocolo antes de comparar.
 3. **Fingerprint conservadora** — só para registros sem ID e sem URL. Exige
@@ -245,6 +255,32 @@ Se NENHUM imóvel passar → fallback: usa todos (cidade toda).
 ## ETAPA 7 — Enriquecimento
 
 Imóveis sem fotos: `requests.get` na URL do VivaReal para extrair imagens do HTML.
+
+---
+
+## ETAPA 7B — Mesmo imóvel em vários anúncios
+
+A dedup da ETAPA 5 só junta anúncios com o mesmo ID ou URL. O mesmo imóvel costuma
+estar em 2-3 portais, ou ser anunciado por 2 imobiliárias, com IDs e URLs diferentes.
+Depois do escopo e do enriquecimento, `agents/identidade.py::deduplicar` agrupa esses
+anúncios e mantém **um por imóvel** (o mais completo). Regras (calibradas em BH):
+
+1. Mesmo código do imóvel + mesmo anunciante → mesmo imóvel.
+2. Mesmo portal + mesmo anunciante + códigos diferentes → imóveis diferentes.
+3. Tipos diferentes → diferentes. Terreno/comercial nunca são juntados.
+4. Bairro e rua incompatíveis → diferentes.
+5. Vetos: área > 10% (casa) / > 3% (apto), quartos diferentes; apto também vagas,
+   suítes, andar.
+6. Preço ≤ 0,5% e: apto → área ≤ 2% **ou** descrição ≥ 0,60; casa → área ≤ 1% **e**
+   descrição ≥ 0,75. Casa em condomínio dos dois lados usa a regra de apto.
+
+O representante recebe `duplicatas` (portal, id, url, motivo e os campos de identidade
+de cada absorvido) e `fontes_origem`. Os descartados vão **completos** para
+`data/duplicatas_descartadas_ag1.json`, com `duplicata_de` e `motivo_duplicata`.
+
+```
+[Ag1][Duplicatas] 105 anuncio(s) do mesmo imovel descartado(s) | 145 imoveis unicos | motivos={...}
+```
 
 ---
 

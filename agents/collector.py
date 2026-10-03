@@ -16,6 +16,8 @@ SAIDA:
     - data/imoveis_coletados_ag1.json (todos os imoveis finais)
     - data/imoveis_completos_ag1.json (so os que tem publishedAt)
     - data/imoveis_brutos_ocrad_ag1.json (brutos Apify, debug)
+    - data/duplicatas_descartadas_ag1.json (anuncios descartados por serem o mesmo
+      imovel de outro anuncio, completos, com duplicata_de e motivo_duplicata)
 
 FLUXO COMPLETO:
 ===============
@@ -101,6 +103,14 @@ FLUXO COMPLETO:
     extrair imagens. Observacao: no Streamlit Cloud esse requests.get pode ser
     bloqueado, entao o enriquecimento nem sempre roda no ambiente hospedado.
 
+  ETAPA 7B — MESMO IMOVEL EM VARIOS ANUNCIOS (agents/identidade.py)
+  ───────────────────────────────────────────────────────────────────
+    Junta anuncios do mesmo imovel (outro portal ou outra imobiliaria) e fica so
+    com o mais completo. Regras: mesmo codigo + anunciante; senao preco identico
+    (<=0,5%) + area/descricao, com regra mais rigorosa para casa. O representante
+    recebe `duplicatas` e `fontes_origem`; os descartados vao completos para
+    duplicatas_descartadas_ag1.json.
+
   ETAPA 8 — ORDENACAO FINAL
   ──────────────────────────
     Prioridade 0: mesma rua (normaliza acentos pra comparar)
@@ -132,6 +142,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from dotenv import load_dotenv
+
+from agents.identidade import deduplicar
 
 load_dotenv()
 
@@ -1804,6 +1816,19 @@ def coletar_imoveis(
     combinados, escopo = _aplicar_escopo(combinados, rua=rua, bairro=bairro, cidade=cidade_nome)
     logger.info(f"[Ag1][Re-filtro] escopo reaplicado: {escopo.upper()} | {len(combinados)} candidatos")
 
+    # ── MESMO IMOVEL EM VARIOS ANUNCIOS ───────────────────────────────
+    # O mesmo imovel costuma estar em 2-3 portais (ou anunciado por 2 imobiliarias)
+    # com IDs e URLs diferentes, o que a dedup por ID/URL nao pega. Fica um anuncio
+    # por imovel (o mais completo); os descartados vao completos para
+    # duplicatas_descartadas_ag1.json, com quem ficou no lugar e o motivo.
+    combinados, duplicatas_descartadas = deduplicar(combinados)
+    if duplicatas_descartadas:
+        motivos = Counter(d["motivo_duplicata"].split("(")[0] for d in duplicatas_descartadas)
+        logger.info(
+            f"[Ag1][Duplicatas] {len(duplicatas_descartadas)} anuncio(s) do mesmo imovel "
+            f"descartado(s) | {len(combinados)} imoveis unicos | motivos={dict(motivos)}"
+        )
+
     # ── ORDENACAO ─────────────────────────────────────────────────────
     combinados = _ordenar_por_proximidade(combinados, rua=rua, bairro=bairro)
 
@@ -1832,6 +1857,7 @@ def coletar_imoveis(
     logger.info("=" * 55)
     logger.info(f"[Ag1] RESULTADO FINAL: {len(combinados)} candidatos")
     logger.info(f"[Ag1]   Portais    : {dict(portais)}")
+    logger.info(f"[Ag1]   Duplicatas : {len(duplicatas_descartadas)} descartadas (mesmo imovel)")
     logger.info(f"[Ag1]   Com rua    : {com_rua}/{len(combinados)}")
     logger.info(f"[Ag1]   Com data   : {com_data}/{len(combinados)}")
     logger.info(f"[Ag1]   Com banheir: {com_bath}/{len(combinados)}")
@@ -1848,6 +1874,7 @@ def coletar_imoveis(
     # coleta vem vazia, entao o disco nao chega a ser reutilizado indevidamente.
     salvar_dados(combinados, arquivo_processados)
     _salvar_meta_cache(arquivo_processados, consulta_cache)
+    salvar_dados(duplicatas_descartadas, "duplicatas_descartadas_ag1.json")
 
     completos = [i for i in combinados if i.get("publishedAt")]
     salvar_dados(completos, "imoveis_completos_ag1.json")
