@@ -509,24 +509,29 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
 
     Regras (agents/identidade.py, calibradas em anuncios de venda de BH):
 
-      Vetos (qualquer um => nem alvo nem suspeito): tipo diferente (casa x apto;
-      terreno/comercial nunca), bairro E rua incompativeis, quartos diferentes,
-      area > 10% (casa) / > 3% (apto); no apto tambem vagas/suites diferentes.
-      Vagas=0 do alvo e o padrao do formulario e conta como "nao informado".
+      Vetos absolutos (nem alvo nem suspeito): tipo diferente (casa x apto;
+      terreno/comercial nunca), bairro E rua incompativeis.
+      Vetos de atributo (impedem so a CONFIRMACAO; ainda pode ser suspeito, pois
+      anuncios tem erros de digitacao): quartos diferentes, area > 10% (casa) /
+      > 3% (apto); no apto tambem vagas/suites diferentes. Vagas=0 do alvo e o
+      padrao do formulario e conta como "nao informado".
 
-      Identidade confirmada (passados os vetos), qualquer um:
+      Identidade confirmada (sem veto), qualquer um:
         - preco informado pelo usuario identico (<=0,5%) e
             casa: area <=1% E descricao >=0,75
             apto: area <=2% OU descricao >=0,60
           (a descricao so conta se o usuario escreveu uma; a gerada pela
           interface e generica)
         - mesma rua + mesmo numero (apto: tambem a mesma unidade)
-        - coordenadas quase iguais (~30 m) + area <=2%; o alvo so tem coordenada
-          aqui quando foi geocodificado por rua+numero (ver _geocodificar_alvo_identidade)
-      Sem preco do alvo, so rua+numero(+unidade) e coordenadas confirmam.
+        - CASA: coordenadas quase iguais (~30 m) + area <=2%; o alvo so tem
+          coordenada aqui quando foi geocodificado por rua+numero (ver
+          _geocodificar_alvo_identidade). No apto a coordenada e a do predio e
+          vale como rua+numero (so suspeita).
+      Sem preco do alvo, so rua+numero(+unidade) e coordenada (casa) confirmam.
 
-      Suspeita (perfil, nao exclui): mesmo bairro + area <=2% + (preco identico ou
-      proximo, ou comodos iguais), sem identidade confirmada.
+      Suspeita (nao exclui): mesmo bairro + area <=2% + (preco identico ou
+      proximo, ou comodos iguais); ou, no apto, mesmo predio (rua+numero ou
+      coordenada) + area <=2%.
     """
     sinais: list[str] = []
     score = 0.0
@@ -540,9 +545,12 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     # O formulario tem vagas=0 como padrao: nao da para distinguir "sem vaga" de
     # "nao informado", entao vagas=0 do alvo nao veta.
     ignorar = () if _para_float(imovel_alvo.get("parkingSpaces") or imovel_alvo.get("vagas")) else ("vagas",)
+    # Vetos de atributo (area, quartos, vagas, suites) so impedem a CONFIRMACAO:
+    # anuncios com erro de digitacao (ex.: 1 vaga em vez de 3, mesmo texto, mesmo
+    # preco) ainda podem ser o alvo e precisam ao menos aparecer como suspeitos.
     veto = identidade.motivo_veto(imovel_alvo, comparavel, g, ignorar=ignorar)
     if veto:
-        return (False, False, [veto], 0.0)
+        sinais.append(veto)
 
     area_dif = identidade.dif_relativa(identidade.area(imovel_alvo), identidade.area(comparavel))
     area_compativel = area_dif is not None and area_dif <= 0.02
@@ -559,7 +567,9 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
             imovel_alvo.get("description") or imovel_alvo.get("descricao") or "",
             comparavel.get("description") or comparavel.get("descricao") or "",
         )
-    if preco_dif is not None and preco_dif <= identidade.PRECO_IDENTICO:
+    if veto:
+        pass   # com veto, nenhum sinal identificador confirma (so perfil, abaixo)
+    elif preco_dif is not None and preco_dif <= identidade.PRECO_IDENTICO:
         if g == "apto" and (
             (area_dif is not None and area_dif <= identidade.APTO_AREA) or sim_desc >= identidade.APTO_DESC
         ):
@@ -603,7 +613,9 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
         if abs(lat_a - lat_c) <= 0.0003 and abs(lon_a - lon_c) <= 0.0003:
             score += 0.60
             sinais.append("coordenadas_iguais")
-            if area_compativel:
+            # Apartamento: o geocodificador devolve o ponto do PREDIO, que vale para
+            # todas as unidades — equivale a rua+numero e nao confirma (vira suspeita).
+            if area_compativel and g == "casa":
                 tem_identificador = True
 
     # =====================================================================
@@ -647,13 +659,18 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     # =====================================================================
     # DECISAO
     # =====================================================================
-    eh_alvo = tem_identificador
+    eh_alvo = tem_identificador and not veto
     possivel_alvo = False
     if not eh_alvo:
         tem_bairro = "mesmo_bairro" in sinais_perfil
         tem_area = "area_igual" in sinais_perfil
         tem_extra = any(s in sinais_perfil for s in ("preco_identico", "preco_proximo", "comodos_iguais"))
-        possivel_alvo = tem_bairro and tem_area and tem_extra
+        # Mesmo predio (rua+numero ou coordenada) e mesma area, sem a unidade:
+        # pode ser o alvo ou o vizinho de planta igual.
+        mesmo_predio = g == "apto" and tem_area and (
+            "mesma_rua_e_numero" in sinais or "coordenadas_iguais" in sinais
+        )
+        possivel_alvo = (tem_bairro and tem_area and tem_extra) or mesmo_predio
 
     return (eh_alvo, possivel_alvo, sinais, round(score, 3))
 

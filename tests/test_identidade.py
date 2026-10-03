@@ -171,16 +171,33 @@ def test_alvo_vagas_zero_do_formulario_nao_veta():
     assert eh, sinais
 
 
-def test_alvo_quartos_diferentes_veta():
-    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000, bedrooms=2), anuncio())
-    assert not eh and not poss and sinais == ["veto_quartos"], sinais
+def test_alvo_quartos_diferentes_sem_outro_sinal_nao_marca():
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(
+        alvo_apto(price=900000, bedrooms=2, rua="", numero=""), anuncio(rua=""))
+    assert not eh and not poss and "veto_quartos" in sinais, sinais
 
 
-def test_alvo_coordenadas_iguais_e_area_confirmam():
-    alvo = alvo_apto(lat=-19.9400, lon=-43.9300, rua="", numero="")
-    comp = anuncio(lat=-19.94005, lon=-43.93004, rua="")
+def test_alvo_veto_de_vagas_com_preco_identico_fica_suspeito():
+    # Caso real (Sion): mesmo texto, preco e area do alvo, mas o anuncio diz 1 vaga
+    # em vez de 3 (erro de digitacao). O veto impede confirmar, mas marca suspeito.
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(
+        alvo_apto(price=500000, parkingSpaces=3), anuncio(vagas=1, rua="Rua Patagonia, 400"))
+    assert not eh and poss and "veto_vagas" in sinais, sinais
+
+
+def test_alvo_casa_coordenadas_iguais_e_area_confirmam():
+    alvo = alvo_casa(lat=-19.9400, lon=-43.9300, rua="", numero="")
+    comp = casa(lat=-19.94005, lon=-43.93004, rua="")
     eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
     assert eh and "coordenadas_iguais" in sinais, sinais
+
+
+def test_alvo_apto_coordenadas_iguais_so_suspeito():
+    # No apto a coordenada e a do predio: vale para todas as unidades.
+    alvo = alvo_apto(lat=-19.9400, lon=-43.9300, rua="", numero="")
+    comp = anuncio(lat=-19.94005, lon=-43.93004, rua="", bairro="")
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
+    assert not eh and poss and "coordenadas_iguais" in sinais, sinais
 
 
 def test_alvo_testado_contra_duplicatas_absorvidas():

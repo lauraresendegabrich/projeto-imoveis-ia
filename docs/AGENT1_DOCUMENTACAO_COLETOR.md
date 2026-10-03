@@ -47,6 +47,11 @@ loga quantos MB leu (`[Athena] consulta ... leu X MB`).
 
 ### Limites por tipo (rua + bairro somados)
 
+O limite vale para imóveis **únicos**: o Athena traz o dobro (`FATOR_BUSCA = 2`), o Ag1
+descarta os anúncios repetidos (ETAPA 7B) e só então corta cada subtipo no limite,
+ficando os mais próximos (rua > bairro > cidade). Trazer mais linhas não muda o custo
+do Athena, que cobra pelo que lê. Duplicatas de imóveis cortados saem da auditoria.
+
 **Para `house`:**
 
 | Tipo SQL | Limite total |
@@ -259,6 +264,9 @@ Imóveis sem fotos: `requests.get` na URL do VivaReal para extrair imagens do HT
 ---
 
 ## ETAPA 7B — Mesmo imóvel em vários anúncios
+
+Quando a coleta do scraper adiciona estados, registre-os no Athena com
+`.venv/Scripts/python.exe -m tools.atualizar_particoes` (só roda `MSCK REPAIR TABLE`).
 
 A dedup da ETAPA 5 só junta anúncios com o mesmo ID ou URL. O mesmo imóvel costuma
 estar em 2-3 portais, ou ser anunciado por 2 imobiliárias, com IDs e URLs diferentes.

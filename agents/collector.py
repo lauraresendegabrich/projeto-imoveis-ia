@@ -143,7 +143,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import requests
 from dotenv import load_dotenv
 
-from agents.identidade import deduplicar
+from agents.identidade import deduplicar, portal as portal_de
 
 load_dotenv()
 
@@ -1443,6 +1443,30 @@ def _ordenar_por_proximidade(imoveis: list[dict], rua: str, bairro: str) -> list
     return ordenados
 
 
+def _limitar_por_tipo(imoveis: list[dict], limites: dict) -> list[dict]:
+    """
+    Aplica o limite de cada subtipo (LIMITES_POR_TIPO) DEPOIS da dedup, mantendo
+    a ordem recebida (ja ordenada por proximidade: rua > bairro > cidade).
+    Registros sem `tipo` do Athena (Apify) nao entram no limite.
+    """
+    subtipo_de = {nome: chave for chave, (nomes, _) in limites.items() for nome in nomes}
+    contagem: Counter = Counter()
+    resultado, cortados = [], Counter()
+    for im in imoveis:
+        chave = subtipo_de.get(im.get("tipo"))
+        if chave is None:
+            resultado.append(im)
+            continue
+        if contagem[chave] < limites[chave][1]:
+            contagem[chave] += 1
+            resultado.append(im)
+        else:
+            cortados[chave] += 1
+    if cortados:
+        logger.info(f"[Ag1][Limite] cortados apos dedup (mais distantes): {dict(cortados)}")
+    return resultado
+
+
 def _filtrar_por_cidade(imoveis: list[dict], cidade: str) -> list[dict]:
     """Mantem so imoveis cuja cidade bate com a alvo (ou sem cidade declarada)."""
     if not cidade:
@@ -1542,6 +1566,11 @@ def coletar_imoveis(
         },
     }
     limites = LIMITES_POR_TIPO[tipo_imovel]
+    # O mesmo imovel aparece em varios portais (no Sion, ~40% dos anuncios eram
+    # repeticoes). O Athena traz FATOR_BUSCA x o limite e o limite e aplicado depois
+    # de descartar as duplicatas (ver _limitar_por_tipo). LIMIT nao muda o custo do
+    # Athena (cobra pelo que le, nao pelo que devolve).
+    FATOR_BUSCA = 2
 
     # ── FONTE PRINCIPAL: Amazon Athena ────────────────────────────────
     athena_imoveis: list[dict] = []
@@ -1563,14 +1592,14 @@ def coletar_imoveis(
                         rua=rua,
                         estado=estado_nome,
                         tipo=nomes_tipo,
-                        limit=limite_tipo,
+                        limit=limite_tipo * FATOR_BUSCA,
                     )
                 else:
                     resultado_tipo = client.buscar_cidade(
                         cidade=cidade_nome,
                         estado=estado_nome,
                         tipo=nomes_tipo,
-                        limit=limite_tipo,
+                        limit=limite_tipo * FATOR_BUSCA,
                     )
                 queries_executadas += 1
             except Exception as exc:
@@ -1586,7 +1615,7 @@ def coletar_imoveis(
             )
             logger.info(
                 f"[Ag1][Athena] {tipo_sql}: retornados={len(resultado_tipo)} | "
-                f"mesma_rua={mesma_rua} | limite={limite_tipo}"
+                f"mesma_rua={mesma_rua} | busca={limite_tipo * FATOR_BUSCA} | limite_final={limite_tipo}"
             )
             athena_imoveis.extend(resultado_tipo)
 
@@ -1601,7 +1630,7 @@ def coletar_imoveis(
                         cidade=cidade_nome,
                         estado=estado_nome,
                         tipo=nomes_tipo,
-                        limit=limite_tipo,
+                        limit=limite_tipo * FATOR_BUSCA,
                     )
                     queries_executadas += 1
                     athena_imoveis.extend(resultado_cidade)
@@ -1831,6 +1860,13 @@ def coletar_imoveis(
 
     # ── ORDENACAO ─────────────────────────────────────────────────────
     combinados = _ordenar_por_proximidade(combinados, rua=rua, bairro=bairro)
+    combinados = _limitar_por_tipo(combinados, limites)
+    # Duplicatas de imoveis cortados pelo limite saem tambem da auditoria.
+    mantidos = {(portal_de(im) or None, im.get("listing_id") or im.get("id"), im.get("url")) for im in combinados}
+    duplicatas_descartadas = [
+        d for d in duplicatas_descartadas
+        if (d["duplicata_de"]["portal"], d["duplicata_de"]["listing_id"], d["duplicata_de"]["url"]) in mantidos
+    ]
 
     # Limpeza cosmetica minima: nao inventa acentos; apenas remove prefixos indevidos do scraper.
     prefixos_tipo = ["lote terreno ", "lote ", "terreno ", "casa ", "apartamento ", "sobrado "]
