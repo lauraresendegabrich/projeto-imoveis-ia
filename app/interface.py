@@ -885,8 +885,9 @@ if "resultado" in st.session_state:
                         plural_s = "anúncios têm" if n_susp > 1 else "anúncio tem"
                         st.caption(
                             f"⚠️ {n_susp} {plural_s} perfil muito parecido com o do seu imóvel "
-                            f"(mesmo bairro, área e preço), mas **sem prova de que seja o mesmo anúncio** "
-                            f"(o portal não expõe rua/número/unidade). Por segurança, **continuam no cálculo** — "
+                            f"(mesmo bairro e área, com preço ou cômodos parecidos, ou no mesmo prédio), mas "
+                            f"**sem prova de que seja o mesmo anúncio** (sem a unidade, ou com algum dado "
+                            f"divergente, como vagas). Por segurança, **continuam no cálculo** — "
                             f"marcamos apenas para transparência."
                         )
 
@@ -1281,13 +1282,24 @@ if "resultado" in st.session_state:
                         f"{len(usados_constr)} imóvel(is) usado(s) no m² da construção e "
                         f"{len(usados_terr)} no m² do terreno. São exatamente os anúncios que entraram na média."
                     )
-                    n_suspeitos = sum(1 for linha in linhas_all if linha["Alerta"])
-                    if n_suspeitos:
+                    usados_todos = usados_constr + usados_terr
+                    n_alvo_usado = sum(1 for u in usados_todos if u.get("eh_anuncio_do_alvo"))
+                    n_possivel = sum(
+                        1 for u in usados_todos
+                        if u.get("possivel_anuncio_do_alvo") and not u.get("eh_anuncio_do_alvo")
+                    )
+                    n_leilao = sum(1 for u in usados_todos if u.get("suspeita_leilao"))
+                    if n_alvo_usado or n_leilao:
                         st.warning(
-                            f"⚠️ {n_suspeitos} imóvel(is) usado(s) no cálculo têm sinal de alerta "
-                            f"(🎯 = seu próprio anúncio; ⚠️ = possível leilão). "
-                            f"Confira o anúncio pelo link — imóveis assim distorcem o valor e "
-                            f"idealmente não deveriam entrar na média."
+                            f"⚠️ No cálculo: {n_alvo_usado} anúncio(s) do seu próprio imóvel (🎯) e "
+                            f"{n_leilao} possível(is) leilão(ões) (⚠️ leilão?). Confira pelo link — "
+                            f"imóveis assim distorcem o valor e idealmente não deveriam entrar na média."
+                        )
+                    if n_possivel:
+                        st.caption(
+                            f"⚠️ {n_possivel} imóvel(is) com perfil muito parecido com o seu "
+                            f"(\"possível alvo\": mesma área e bairro, preço ou cômodos parecidos, ou o "
+                            f"mesmo prédio). Sem prova de que sejam o seu anúncio, continuam no cálculo."
                         )
 
             # Avisos do Ag5 (amostra insuficiente, terrenos descartados por sanidade, etc.)
