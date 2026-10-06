@@ -18,8 +18,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, remova-o daqui
   `.venv/Scripts/python.exe -m tools.atualizar_particoes` (só roda
   `MSCK REPAIR TABLE`). Ideal: a coleta (repositório scraper-imoveis) rodar isso
   ao fim de cada estado.
-- [ ] **Avaliação completa de casa pela interface.** Só a coleta e a deduplicação de
-  casa foram testadas com dados reais (Santa Mônica/BH e Taquaral/Campinas).
 
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
 
@@ -34,6 +32,7 @@ levou ~14,5 min de uma avaliação de ~19 min (o Agente 4, em paralelo, levou 22
 
 ## Resolvido
 
+- **Avaliação completa de casa pela interface** — Santa Mônica/BH, 03/10/2026.
 - **Agente 3: chamada à NVIDIA sem limite de tempo** — agora 60 s e sem repetir,
   como no Ag2/Ag4.
 - **Agente 3: nota do imóvel-alvo sem evidência** — sem fotos e com descrição
