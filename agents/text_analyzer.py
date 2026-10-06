@@ -1687,6 +1687,7 @@ def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
     _provider_state["nvidia"]["chamadas"] += 1
 
     try:
+        import httpx
         from openai import OpenAI
 
         api_key = os.getenv("NVIDIA_API_KEY", "")
@@ -1694,9 +1695,14 @@ def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
             logger.warning("[Ag3][NVIDIA] NVIDIA_API_KEY nao configurada")
             return {}
 
+        # Sem timeout, o cliente espera ate 10 min e repete 2x: num teste, duas
+        # chamadas travaram ~5 min cada ate o servidor devolver 504. Mesmo padrao
+        # do Ag2/Ag4: desiste em 60s e o roteador segue para o proximo provedor.
         client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=api_key,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            max_retries=0,
         )
 
         images = imovel.get("images", []) or []
@@ -2019,7 +2025,15 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
     # chaves), para que qualquer consumidor a jusante (analisar_comparaveis,
     # interface, Agente 5) possa acessar os campos com seguranca, inclusive os
     # que fazem acesso direto (ex.: analise['fotos_analisadas']).
-    if (not texto or len(texto) < 10) and not images:
+    # Alvo sem fotos e com a descricao GERADA pela interface ("Apartamento com
+    # 140m², 4 quartos...", montada a partir do formulario): nao ha evidencia de
+    # conservacao nem de acabamento. Antes o roteamento insistia ate algum provedor
+    # "chutar" uma nota (ex.: "bom/medio", score 0.67), que virava a frase "seu
+    # imovel esta abaixo da media". Agora vale a regra "sem evidencia = neutro".
+    alvo_sem_evidencia = is_alvo and not images and bool(imovel.get("descricao_gerada"))
+    if ((not texto or len(texto) < 10) and not images) or alvo_sem_evidencia:
+        if alvo_sem_evidencia:
+            logger.info("[Ag3][Alvo] sem fotos e sem descricao do usuario: nota neutra, sem LLM")
         return {
             "id_imovel": id_imovel, "status": "descricao_insuficiente",
             "estado_conservacao": "desconhecido", "padrao_acabamento": "desconhecido",
@@ -2032,7 +2046,10 @@ def _analisar_imovel(imovel: dict, is_alvo: bool = False) -> dict:
             "total_fotos_disponiveis": len(images),
             "llm_usada": "nenhuma",
             "limitacoes_analise": ["Sem descricao suficiente e sem fotos para analise."],
-            "observacoes": ["Descricao insuficiente para analise."],
+            "observacoes": [
+                "Sem fotos e sem descrição do imóvel: não há como avaliar conservação e acabamento. Nota neutra (0,50)."
+                if alvo_sem_evidencia else "Descricao insuficiente para analise."
+            ],
             "scores": {"score_qualitativo": 0.50},
             "detalhes_calculo": {"regra_neutra_aplicada": True},
             "classificacao_qualitativa": "neutro",

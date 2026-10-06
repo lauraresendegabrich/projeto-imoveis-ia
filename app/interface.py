@@ -818,7 +818,18 @@ if "resultado" in st.session_state:
                     score_alvo_num = float(score_alvo_val)
                 except (ValueError, TypeError):
                     score_alvo_num = 0
-                if score_alvo_num > 0 and score_medio > 0:
+                alvo_sem_evidencia = bool(
+                    (alvo_analise or {}).get("detalhes_calculo", {}).get("regra_neutra_aplicada")
+                )
+                if alvo_sem_evidencia:
+                    # Nota neutra por falta de fotos/descricao: comparar com a vizinhanca
+                    # diria "abaixo da media" sem base nenhuma.
+                    st.info(
+                        "Sem fotos e sem descrição do seu imóvel, não dá para comparar a conservação "
+                        "e o acabamento com a vizinhança. Usamos nota neutra (0,50). Para uma comparação "
+                        "real, informe a descrição e os links das fotos."
+                    )
+                elif score_alvo_num > 0 and score_medio > 0:
                     if score_alvo_num > score_medio + 0.1:
                         st.success(f"Seu imóvel (score {score_alvo_num:.2f}) está **acima da média** da vizinhança ({score_medio:.2f}) — melhor conservado e acabado que os vizinhos.")
                     elif score_alvo_num < score_medio - 0.1:
