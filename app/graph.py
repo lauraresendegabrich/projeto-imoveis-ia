@@ -116,6 +116,11 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
 
     t_pipeline_start = time.time()
 
+    # Identifica esta avaliacao nos JSONs que os agentes trocam: os Agentes 3/4/5
+    # ignoram arquivos de avaliacoes anteriores (ver agents/execucao.py).
+    from agents.execucao import novo_id_execucao
+    id_execucao = novo_id_execucao()
+
     # ------------------------------------------------------------------
     # AGENTE 1 — Coleta de imóveis comparáveis
     # Athena (fonte principal) → fallback Apify/ocrad (VivaReal + LugarCerto)
@@ -169,6 +174,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
             imovel_alvo=imovel_alvo,
             imoveis_coletados=imoveis_coletados,
             usar_llm=True,
+            id_execucao=id_execucao,
         )
         t_ag2_clustering = time.time() - t_ag2_start
 
@@ -231,6 +237,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
                 # O Ag2 ja geocodificou o alvo por rua+numero (teste de identidade).
                 lat_alvo_precomp=imovel_alvo.get("lat"),
                 lon_alvo_precomp=imovel_alvo.get("lon"),
+                id_execucao=id_execucao,
             )
             t_ag2_zona = time.time() - t_zona_start
             confirmados = zona_resultado.get("comparaveis_confirmados", [])
@@ -260,11 +267,11 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     with ThreadPoolExecutor(max_workers=2) as executor:
         # Agente 3 — Análise qualitativa (texto + fotos)
         t_ag3_start = time.time()
-        future_ag3 = executor.submit(analisar_comparaveis)
+        future_ag3 = executor.submit(analisar_comparaveis, id_execucao=id_execucao)
 
         # Agente 4 — Infraestrutura (POIs do entorno)
         t_ag4_start = time.time()
-        future_ag4 = executor.submit(avaliar_infraestrutura)
+        future_ag4 = executor.submit(avaliar_infraestrutura, id_execucao=id_execucao)
 
         # Coleta resultado do Agente 3 com tratamento de erro
         try:
@@ -305,7 +312,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
     try:
         logger.info("Agente 5: estimando preço e liquidez...")
         t_ag5_start = time.time()
-        resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
+        resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo, id_execucao=id_execucao)
         t_ag5 = time.time() - t_ag5_start
         logger.info(
             f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao_planilha', {}).get('valor_medio_imovel', '?'):,.2f}"
@@ -350,6 +357,7 @@ def executar_pipeline(imovel_alvo: dict) -> dict:
 
     return {
         "status":              status,
+        "id_execucao":         id_execucao,
         "imovel_alvo":         f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
         "comparaveis":         comparaveis,
         "terrenos":            terrenos,

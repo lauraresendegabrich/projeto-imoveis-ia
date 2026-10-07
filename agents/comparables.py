@@ -1678,6 +1678,7 @@ def identificar_comparaveis(
     arquivo_saida: str = "imoveis_comparaveis_ag2.json",
     usar_llm: bool = True,
     run_id: str | None = None,
+    id_execucao: str | None = None,
 ) -> dict:
     """
     Identifica comparaveis com pre-classificacao + score Python + julgamento LLM validado.
@@ -1696,6 +1697,9 @@ def identificar_comparaveis(
     run_id : str | None
         Isola os arquivos da avaliacao em data/run_<run_id>/; sem run_id
         mantem os caminhos legados em data/.
+    id_execucao : str | None
+        Gravado no JSON de saida; os Agentes 3/4/5 so aceitam o arquivo desta
+        avaliacao (ver agents/execucao.py).
 
     Retorna
     -------
@@ -1983,6 +1987,7 @@ def identificar_comparaveis(
     saida = {
         "status": status,
         "run_id": _sanitizar_run_id(run_id),
+        "id_execucao": id_execucao,
         "imovel_alvo": imovel_alvo,
         "comparaveis": resultado_final,
         "cluster_a": cluster_a,
@@ -2614,9 +2619,13 @@ def analisar_zona_homogenea(
     numero_alvo: str = "",
     terrenos: Optional[list[dict]] = None,
     run_id: str | None = None,
+    id_execucao: str | None = None,
 ) -> dict:
     """
     Valida geograficamente os comparaveis.
+
+    id_execucao e gravado no JSON (inclusive quando o alvo nao e geocodificado):
+    o Agente 5 so aceita a zona desta avaliacao (ver agents/execucao.py).
 
     Ordem de geocodificacao do candidato quando Athena nao trouxe lat/lon:
       1. rua + numero + bairro + cidade + estado;
@@ -2694,6 +2703,7 @@ def analisar_zona_homogenea(
         resultado = {
             "status": "zona_nao_verificada",
             "run_id": _sanitizar_run_id(run_id),
+            "id_execucao": id_execucao,
             "zona_homogenea": {
                 "raio_metros": RAIO_FALLBACK_METROS,
                 "raio_sugerido_metros": RAIO_FALLBACK_METROS,
@@ -2862,6 +2872,7 @@ def analisar_zona_homogenea(
     resultado = {
         "status": status,
         "run_id": _sanitizar_run_id(run_id),
+        "id_execucao": id_execucao,
         "zona_homogenea": zona,
         "comparaveis_confirmados": confirmados_efetivos + terrenos_efetivos,
         "fora_zona": fora,

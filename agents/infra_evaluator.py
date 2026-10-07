@@ -49,6 +49,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from agents.execucao import ler_json_da_execucao
+
 load_dotenv()
 
 logging.basicConfig(
@@ -4076,6 +4078,7 @@ def avaliar_infraestrutura(
     imovel_alvo: Optional[dict] = None,
     arquivo_entrada: str = "imoveis_comparaveis_ag2.json",
     arquivo_saida: str = "infra_avaliada_ag4.json",
+    id_execucao: Optional[str] = None,
 ) -> dict:
 
 
@@ -4101,38 +4104,18 @@ def avaliar_infraestrutura(
 
     if imovel_alvo is None:
 
-
-        caminho = os.path.join(
-            DATA_DIR,
-            arquivo_entrada
+        # So aceita o arquivo do Ag2 desta avaliacao (ver agents/execucao.py).
+        dados = ler_json_da_execucao(
+            os.path.join(DATA_DIR, arquivo_entrada),
+            id_execucao,
         )
 
-
-        if not os.path.exists(
-            caminho
-        ):
-
-
+        if dados is None:
             logger.error(
-                f"Arquivo nao encontrado: "
-                f"{caminho}"
+                f"Arquivo do Agente 2 desta avaliacao nao encontrado: "
+                f"{arquivo_entrada}"
             )
-
-
             return {}
-
-
-        with open(
-            caminho,
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-
-            dados = json.load(
-                f
-            )
-
 
         imovel_alvo = dados.get(
             "imovel_alvo",
@@ -4242,65 +4225,41 @@ def avaliar_infraestrutura(
     )
 
 
-    if os.path.exists(
-        caminho_zona
-    ):
+    # Zona de outra avaliacao traria as coordenadas de OUTRO endereco: nesse caso
+    # geocodifica o alvo (fallback abaixo).
+    zona_data = ler_json_da_execucao(
+        caminho_zona,
+        id_execucao,
+    )
 
+    if zona_data is not None:
 
-        try:
+        coords = zona_data.get(
+            "coordenadas_alvo"
+        ) or {}
 
+        if (
+            coords.get("lat")
+            and coords.get("lon")
+        ):
 
-            with open(
+            lat = coords[
+                "lat"
+            ]
 
-                caminho_zona,
+            lon = coords[
+                "lon"
+            ]
 
-                "r",
+            logger.info(
 
-                encoding="utf-8"
+                f"[Ag4][Geo] "
+                f"reutilizando coordenadas "
 
-            ) as f:
+                f"| lat={lat:.6f} "
 
-
-                zona_data = json.load(
-                    f
-                )
-
-
-            coords = zona_data.get(
-                "coordenadas_alvo",
-                {}
+                f"| lon={lon:.6f}"
             )
-
-
-            if (
-                coords.get("lat")
-                and coords.get("lon")
-            ):
-
-
-                lat = coords[
-                    "lat"
-                ]
-
-
-                lon = coords[
-                    "lon"
-                ]
-
-
-                logger.info(
-
-                    f"[Ag4][Geo] "
-                    f"reutilizando coordenadas "
-
-                    f"| lat={lat:.6f} "
-
-                    f"| lon={lon:.6f}"
-                )
-
-
-        except Exception:
-            pass
 
 
     # ----------------------------------------------------------------
@@ -4722,6 +4681,8 @@ def avaliar_infraestrutura(
     # ----------------------------------------------------------------
     # SALVA
     # ----------------------------------------------------------------
+
+    saida["id_execucao"] = id_execucao
 
     caminho_saida = os.path.join(
 

@@ -124,6 +124,8 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any, Dict, List, Optional, Tuple
 
+from agents.execucao import ler_json_da_execucao
+
 
 # ============================================================
 # CONSTANTES
@@ -294,7 +296,7 @@ def salvar_json(dados: Any, caminho: str) -> None:
         json.dump(dados, f, ensure_ascii=False, indent=2)
 
 
-def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]:
+def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]:
     """
     Le os JSONs dos agentes anteriores e retorna:
     - imovel_alvo (dict)
@@ -303,20 +305,38 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
     - comparaveis_zona (list) — imoveis construidos na zona (inclui os de fallback)
     - dados_ag3 (dict) — resultado completo do agente 3
     - dados_ag4 (dict) — resultado completo do agente 4
+
+    Com id_execucao, so aceita arquivos DESTA avaliacao (ver agents/execucao.py).
+    Se a zona homogenea nao rodou nesta avaliacao, nao ha comparaveis (o status
+    sai sem_amostra): antes, o arquivo da avaliacao anterior — de outro imovel —
+    era usado no calculo. Sem id_execucao (testes/scripts antigos), le como antes.
     """
+    import logging
+    logger_local = logging.getLogger(__name__)
+
+    def _ler(caminho: str) -> Dict:
+        if id_execucao:
+            return ler_json_da_execucao(caminho, id_execucao) or {}
+        return carregar_json(caminho)
+
+    caminho_ag2 = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
+
     # Zona homogenea (Ag. 2)
-    zona = carregar_json(CAMINHO_ZONA)
+    zona = _ler(CAMINHO_ZONA)
     todos_comparaveis = zona.get("comparaveis_confirmados", [])
 
-    # Fallback: se zona homogenea nao existe, usa comparaveis do Ag. 2 direto
-    if not todos_comparaveis:
-        import logging
-        logger_local = logging.getLogger(__name__)
-        caminho_ag2 = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
-        if os.path.exists(caminho_ag2):
-            ag2 = carregar_json(caminho_ag2)
+    # Fallback: zona desta avaliacao sem confirmados (ex.: alvo nao geocodificado)
+    # usa o Cluster A do Ag. 2. Se a zona nem rodou nesta avaliacao, nao ha fallback.
+    zona_desta_execucao = bool(zona) or not id_execucao
+    if not todos_comparaveis and zona_desta_execucao:
+        ag2 = _ler(caminho_ag2)
+        if ag2:
             todos_comparaveis = [c for c in ag2.get("comparaveis", []) if c.get("cluster") == "A"]
             logger_local.info(f"Fallback zona: usando {len(todos_comparaveis)} comparaveis do Cluster A")
+    elif not zona_desta_execucao:
+        logger_local.warning(
+            "[Ag5] Zona homogenea nao calculada nesta avaliacao: sem comparaveis (sem_amostra)"
+        )
 
     # Separar terrenos dos construidos (sem duplicatas).
     # Deduplica por chave de negocio estavel: url -> id/listing_id -> composicao
@@ -383,18 +403,16 @@ def carregar_dados_pipeline() -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]
             f"calculo de preco (marcados pelo Ag2 como eh_anuncio_do_alvo)"
         )
 
-    # Agente 3 (analise qualitativa)
-    dados_ag3 = carregar_json(CAMINHO_AG3)
-
-    # Agente 4 (infraestrutura)
-    dados_ag4 = carregar_json(CAMINHO_AG4)
+    # Agente 3 (analise qualitativa) e Agente 4 (infraestrutura): se falharam nesta
+    # avaliacao, o arquivo em disco e de outra; com id_execucao ele e ignorado.
+    dados_ag3 = _ler(CAMINHO_AG3)
+    dados_ag4 = _ler(CAMINHO_AG4)
 
     # Imovel alvo — pega do Ag. 3 (tem os dados completos)
     # Fallback: se Ag. 3 nao tem, pega do Ag. 2 (imoveis_comparaveis)
     imovel_alvo = dados_ag3.get("imovel_alvo", {})
     if not imovel_alvo:
-        ag2 = carregar_json(os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json"))
-        imovel_alvo = ag2.get("imovel_alvo", {})
+        imovel_alvo = _ler(caminho_ag2).get("imovel_alvo", {})
 
     return imovel_alvo, terrenos_zona, comparaveis_zona, dados_ag3, dados_ag4
 
@@ -1156,7 +1174,7 @@ def executar_agente5(
 # FUNCAO DE ENTRADA (chamada pelo pipeline)
 # ============================================================
 
-def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
+def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optional[str] = None) -> Dict[str, Any]:
     """
     Funcao principal do Agente 5.
     Le os JSONs dos agentes anteriores, calcula e salva o resultado.
@@ -1167,6 +1185,9 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
         Campos adicionais do imovel alvo (ex: area_terreno vindo do main.py/graph.py).
         Faz merge NAO destrutivo: so preenche chaves ausentes ou None no imovel alvo
         carregado do disco — nunca sobrescreve um valor ja existente.
+    id_execucao : str (opcional)
+        Identificador desta avaliacao. Com ele, so sao usados arquivos gravados por
+        esta avaliacao; sem a zona homogenea desta avaliacao, o status e sem_amostra.
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -1174,7 +1195,7 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
     logger.info("Agente 5: carregando dados dos agentes anteriores...")
 
     imovel_alvo, terrenos_zona, comparaveis_zona, dados_ag3, dados_ag4 = (
-        carregar_dados_pipeline()
+        carregar_dados_pipeline(id_execucao)
     )
 
     # Complementa imovel_alvo com dados extras (ex: area_terreno do main.py)
@@ -1199,6 +1220,14 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None) -> Dict[str, Any]:
         dados_ag4=dados_ag4,
         desconto_liquidez=0.10,
     )
+
+    if id_execucao and ler_json_da_execucao(CAMINHO_ZONA, id_execucao) is None:
+        resultado.setdefault("avisos", []).insert(
+            0,
+            "A zona homogenea nao foi calculada nesta avaliacao (ex.: sem chave do Google "
+            "Maps ou erro na validacao geografica); por seguranca, o valor nao foi estimado.",
+        )
+    resultado["id_execucao"] = id_execucao
 
     salvar_json(resultado, CAMINHO_SAIDA)
     logger.info(f"[Ag5] Resultado salvo em {CAMINHO_SAIDA}")

@@ -106,6 +106,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from agents.execucao import ler_json_da_execucao
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -2218,6 +2220,7 @@ def analisar_comparaveis(
     arquivo_entrada: str = "zona_homogenea_ag2.json",
     arquivo_saida: str = "imoveis_analisados_ag3.json",
     apenas_cluster_a: bool = True,
+    id_execucao: Optional[str] = None,
 ) -> dict:
     """
     Analisa os imoveis comparaveis do Agente 2 usando texto + fotos juntos.
@@ -2234,11 +2237,14 @@ def analisar_comparaveis(
     logger.info(f"[Ag3][Provider] Gemini disponivel={_provider_state['gemini']['available']}")
     logger.info(f"[Ag3][Provider] Groq disponivel={_provider_state['groq']['available']}")
 
+    # So aceita arquivos desta avaliacao (ver agents/execucao.py): uma zona de outra
+    # avaliacao traria os comparaveis de OUTRO imovel.
+    dados_comp = ler_json_da_execucao(
+        os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json"), id_execucao
+    )
     if comparaveis is None:
-        caminho_zona = os.path.join(DATA_DIR, arquivo_entrada)
-        if os.path.exists(caminho_zona):
-            with open(caminho_zona, "r", encoding="utf-8") as f:
-                dados_zona = json.load(f)
+        dados_zona = ler_json_da_execucao(os.path.join(DATA_DIR, arquivo_entrada), id_execucao)
+        if dados_zona is not None:
             confirmados = dados_zona.get("comparaveis_confirmados", [])
             # Aceita imoveis na zona OU incluidos por fallback de baixa confianca
             # (zona_nao_verificada anexados quando havia poucos confirmados — Opcao B).
@@ -2254,28 +2260,19 @@ def analisar_comparaveis(
                         f"{len(comparaveis)} com Cluster A + na_zona"
                         + (f" (incluindo {n_fallback} por fallback de baixa confianca)" if n_fallback else ""))
         else:
-            logger.warning(f"Zona homogenea nao disponivel — usando comparaveis do Ag. 2 direto")
-            caminho_comp = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
-            if os.path.exists(caminho_comp):
-                with open(caminho_comp, "r", encoding="utf-8") as f:
-                    dados_comp = json.load(f)
+            logger.warning(f"Zona homogenea nao disponivel nesta avaliacao — usando comparaveis do Ag. 2 direto")
+            if dados_comp is not None:
                 comparaveis = [
                     c for c in dados_comp.get("comparaveis", [])
                     if c.get("cluster") == "A"
                 ]
                 logger.info(f"Fallback: {len(comparaveis)} comparaveis do Cluster A (sem filtro de zona)")
             else:
-                logger.error(f"Nenhum arquivo de comparaveis encontrado")
+                logger.error(f"Nenhum arquivo de comparaveis desta avaliacao encontrado")
                 return {}
 
     if imovel_alvo is None:
-        caminho_comp = os.path.join(DATA_DIR, "imoveis_comparaveis_ag2.json")
-        if os.path.exists(caminho_comp):
-            with open(caminho_comp, "r", encoding="utf-8") as f:
-                dados_comp = json.load(f)
-            imovel_alvo = dados_comp.get("imovel_alvo", {})
-        else:
-            imovel_alvo = {}
+        imovel_alvo = (dados_comp or {}).get("imovel_alvo", {})
 
     logger.info("Analisando imovel alvo...")
     analise_alvo = _analisar_imovel(imovel_alvo, is_alvo=True)
@@ -2377,7 +2374,7 @@ def analisar_comparaveis(
         logger.info("  [Fase1] nenhum comparavel retornou score_llm nesta execucao")
     logger.info("=" * 60)
 
-    saida = {"imovel_alvo": imovel_alvo, "comparaveis": comparaveis, "resumo": resumo}
+    saida = {"id_execucao": id_execucao, "imovel_alvo": imovel_alvo, "comparaveis": comparaveis, "resumo": resumo}
     caminho_saida = os.path.join(DATA_DIR, arquivo_saida)
     with open(caminho_saida, "w", encoding="utf-8") as f:
         json.dump(saida, f, ensure_ascii=False, indent=2)

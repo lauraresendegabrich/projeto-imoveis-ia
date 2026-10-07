@@ -237,7 +237,12 @@ elif submitted:
     from agents.text_analyzer import analisar_comparaveis
     from agents.infra_evaluator import avaliar_infraestrutura
     from agents.price_liquidity import estimar_preco
+    from agents.execucao import novo_id_execucao
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Identifica esta avaliacao nos JSONs que os agentes trocam: os Agentes 3/4/5
+    # ignoram arquivos de avaliacoes anteriores (ver agents/execucao.py).
+    id_execucao = novo_id_execucao()
 
     # ==============================================================
     # GEOCODIFICAÇÃO ÚNICA DO ALVO (persistida pra todos os agentes)
@@ -398,6 +403,7 @@ elif submitted:
         imovel_alvo=imovel_alvo,
         imoveis_coletados=imoveis_coletados,
         usar_llm=True,
+        id_execucao=id_execucao,
     )
     tempo_ag2_cluster = time.time() - t2
 
@@ -429,6 +435,7 @@ elif submitted:
                 estado=estado,
                 lat_alvo_precomp=imovel_alvo.get("lat"),
                 lon_alvo_precomp=imovel_alvo.get("lon"),
+                id_execucao=id_execucao,
             )
             confirmados = zona_resultado.get("comparaveis_confirmados", [])
             fora = zona_resultado.get("fora_zona", [])
@@ -465,8 +472,8 @@ elif submitted:
     tempo_estimado_ag34 = 180  # ~3 minutos
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        future_ag3 = executor.submit(analisar_comparaveis, imovel_alvo)
-        future_ag4 = executor.submit(avaliar_infraestrutura)
+        future_ag3 = executor.submit(analisar_comparaveis, imovel_alvo, id_execucao=id_execucao)
+        future_ag4 = executor.submit(avaliar_infraestrutura, id_execucao=id_execucao)
 
         # Contador enquanto espera
         while not (future_ag3.done() and future_ag4.done()):
@@ -536,7 +543,7 @@ elif submitted:
 
     resultado_ag5 = {}
     try:
-        resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo)
+        resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo, id_execucao=id_execucao)
         valor = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_medio_imovel", 0)
         liquidez_val = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_liquidez_arredondado", 0)
         tempo_venda = (resultado_ag5.get("liquidez_experimental") or resultado_ag5.get("liquidez", {})).get("tempo_estimado", "?")
@@ -589,6 +596,7 @@ elif submitted:
 
     resultado = {
         "status": "completo",
+        "id_execucao": id_execucao,
         "duplicatas_descartadas": duplicatas_descartadas,
         "comparaveis": comparaveis,
         "terrenos": terrenos,
