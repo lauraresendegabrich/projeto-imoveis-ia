@@ -14,6 +14,9 @@ from pathlib import Path
 # Adiciona raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from services.leilao import MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao
+from services.leilao import linhas_laudo as linhas_laudo_leilao
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -31,6 +34,48 @@ def fmt_brl(valor, decimais=0):
     # Converte formato americano (1,234,567.89) pra brasileiro (1.234.567,89)
     texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")
     return f"R\\$ {texto}"
+
+def mostrar_avaliacao_leilao(leilao):
+    """
+    Bloco "Avaliação de leilão" (services/leilao.py). So aparece quando o valor
+    minimo CAIXA foi informado. Sem estimativa confiavel do Agente 5, mostra apenas a
+    decisao, sem lance maximo e sem detalhes tecnicos.
+    """
+    if not leilao:
+        return
+    decisao = leilao["decisao"]
+    # Fundo e texto explicitos: legiveis com o tema claro ou escuro do Streamlit.
+    cores = {
+        "Não descartar": ("#e3f4e8", "#1b6b34", "✅"),
+        "Descartar": ("#fbe4e2", "#a3261c", "❌"),
+        "Sem estimativa": ("#ececec", "#4a4a4a", "⚪"),
+    }
+    fundo, texto, icone = cores.get(decisao, cores["Sem estimativa"])
+    st.markdown("#### 🔨 Avaliação de leilão (CAIXA)")
+    st.markdown(
+        f'<div style="background:{fundo};color:{texto};padding:12px 18px;border-radius:8px;'
+        f'font-size:1.35rem;font-weight:700;">{icone} {decisao}</div>',
+        unsafe_allow_html=True,
+    )
+    if leilao.get("lance_maximo") is None:
+        return
+    sobra = leilao["sobra"]
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Lance máximo", fmt_brl(leilao["lance_maximo"]))
+    with col2:
+        st.metric("Valor mínimo CAIXA", fmt_brl(leilao["valor_minimo"]))
+    with col3:
+        st.metric("Sobra" if sobra >= 0 else "Falta", fmt_brl(abs(sobra)))
+    st.caption(
+        f"Lance máximo = valor de liquidez ÷ {leilao['fator_lucro']:.2f} "
+        f"(lucro de 55%, com os custos de aquisição já incluídos)."
+    )
+    if leilao.get("valor_avaliacao"):
+        st.caption(f"Valor de avaliação CAIXA (informativo): {fmt_brl(leilao['valor_avaliacao'])}")
+    if leilao.get("comparaveis_fora_da_regiao"):
+        st.warning("⚠️ Valor baseado em imóveis fora da região exata.")
+
 
 # Streamlit Cloud: carrega secrets como variáveis de ambiente
 try:
@@ -126,6 +171,22 @@ with st.sidebar:
         st.markdown("**📸 Fotos do imóvel** (opcional, máx. 8)")
         st.caption("Cole os links diretos das fotos, um por linha")
         fotos_texto = st.text_area("Links das fotos", value="", height=80, help="Cole até 8 URLs de imagens (uma por linha). Ex: https://...imovel.jpg")
+
+        # Leilao CAIXA: estes valores NAO entram no imovel_alvo nem em nenhum agente
+        # (preco de leilao fica bem abaixo do mercado e distorceria os comparaveis).
+        # So sao usados depois do Agente 5, em services/leilao.py.
+        st.markdown("**🔨 Leilão CAIXA** (opcional)")
+        valor_minimo_caixa = st.number_input(
+            "Valor mínimo de venda (R$)", min_value=0, value=0, step=1000,
+            help="Valor mínimo de venda que aparece no site da CAIXA.",
+        )
+        valor_avaliacao_caixa = st.number_input(
+            "Valor de avaliação CAIXA (R$)", min_value=0, value=0, step=1000,
+            help="Só informativo: não entra em nenhum cálculo.",
+        )
+        modalidade_caixa = st.selectbox("Modalidade", [""] + MODALIDADES_CAIXA)
+        codigo_caixa = st.text_input("Código do imóvel na CAIXA", value="")
+        link_caixa = st.text_input("Link do imóvel na CAIXA", value="")
 
         submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
 
@@ -594,9 +655,23 @@ elif submitted:
 
     resumo["duplicatas_descartadas"] = len(duplicatas_descartadas)
 
+    # Avaliacao de leilao: so depois do Agente 5, com os valores do formulario
+    # (nunca passaram por nenhum agente).
+    leilao_entrada = {
+        "origem": ORIGEM_CAIXA,
+        "valor_minimo": valor_minimo_caixa or None,
+        "valor_avaliacao": valor_avaliacao_caixa or None,
+        "modalidade": modalidade_caixa or None,
+        "codigo_caixa": codigo_caixa.strip() or None,
+        "link": link_caixa.strip() or None,
+    }
+    leilao = avaliar_leilao(resultado_ag5, valor_minimo_caixa, valor_avaliacao_caixa)
+
     resultado = {
         "status": "completo",
         "id_execucao": id_execucao,
+        "leilao_entrada": leilao_entrada,
+        "leilao": leilao,
         "duplicatas_descartadas": duplicatas_descartadas,
         "comparaveis": comparaveis,
         "terrenos": terrenos,
@@ -676,6 +751,8 @@ if "resultado" in st.session_state:
         with col_c:
             tempo = liquidez_info.get("tempo_estimado", "?")
             st.metric("⏱️ Tempo Estimado de Venda", tempo if avaliacao_confiavel else "—")
+
+        mostrar_avaliacao_leilao(resultado.get("leilao"))
 
         # ==============================================================
         # COMO CHEGAMOS NESTE VALOR
@@ -1373,6 +1450,11 @@ if "resultado" in st.session_state:
                    if not zona_calculada else "(comparáveis insuficientes na região).")
             )
 
+        linhas_leilao = linhas_laudo_leilao(resultado.get("leilao"), _brl_txt)
+        bloco_leilao = "\n".join(
+            ["", "AVALIAÇÃO DE LEILÃO (CAIXA)", "-" * 50] + linhas_leilao + [""]
+        ) if linhas_leilao else ""
+
         laudo_texto = f"""LAUDO DE AVALIAÇÃO IMOBILIÁRIA
 {'='*50}
 
@@ -1383,7 +1465,7 @@ Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas}
 RESULTADO DA AVALIAÇÃO
 {'-'*50}
 {bloco_resultado}
-
+{bloco_leilao}
 MÉTODO
 {'-'*50}
 {preco.get('metodo_estatistico', '?')}
@@ -1401,5 +1483,6 @@ Gerado automaticamente pelo Sistema Multiagente de Precificação Imobiliária.
 
     else:
         st.error("Não foi possível calcular o preço. Verifique os dados e tente novamente.")
+        mostrar_avaliacao_leilao(resultado.get("leilao"))
         if isinstance(resultado, dict):
             st.json(resultado)

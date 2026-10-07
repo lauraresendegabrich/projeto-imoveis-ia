@@ -331,7 +331,10 @@ def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, Li
     if not todos_comparaveis and zona_desta_execucao:
         ag2 = _ler(caminho_ag2)
         if ag2:
-            todos_comparaveis = [c for c in ag2.get("comparaveis", []) if c.get("cluster") == "A"]
+            todos_comparaveis = [
+                dict(c, _sem_validacao_zona=True)
+                for c in ag2.get("comparaveis", []) if c.get("cluster") == "A"
+            ]
             logger_local.info(f"Fallback zona: usando {len(todos_comparaveis)} comparaveis do Cluster A")
     elif not zona_desta_execucao:
         logger_local.warning(
@@ -760,6 +763,17 @@ def executar_agente5(
             "eh_anuncio_do_alvo": bool(im.get("eh_anuncio_do_alvo")),
             "possivel_anuncio_do_alvo": bool(im.get("possivel_anuncio_do_alvo")),
             "suspeita_leilao": _cheira_leilao(im),
+            # De onde veio o comparavel (nao muda o calculo; usado no aviso da
+            # avaliacao de leilao e na auditoria):
+            #   confirmado    = dentro do raio da zona homogenea
+            #   fallback      = zona_nao_verificada anexado por amostra escassa
+            #   sem_validacao = Cluster A do Ag2 usado sem zona (alvo nao geocodificado)
+            "status_zona": (
+                "fallback" if im.get("incluido_por_fallback_zona")
+                else "sem_validacao" if im.get("_sem_validacao_zona")
+                else "confirmado"
+            ),
+            "portal": im.get("source") or im.get("portal") or "",
         }
 
     # Tipo do imovel alvo
