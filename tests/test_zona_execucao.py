@@ -58,6 +58,7 @@ def test_zona_desta_avaliacao_calcula_normalmente():
     r = _rodar(zona={"id_execucao": ID, "comparaveis_confirmados": _comparaveis()})
     assert r["status_avaliacao"] == "ok", r["status_avaliacao"]
     assert r["avaliacao_planilha"]["valor_medio_imovel"] > 0
+    assert r["zona_calculada_nesta_avaliacao"] is True
 
 
 def test_zona_de_outra_avaliacao_vira_sem_amostra():
@@ -66,6 +67,7 @@ def test_zona_de_outra_avaliacao_vira_sem_amostra():
     assert r["status_avaliacao"] == "sem_amostra", r["status_avaliacao"]
     assert r["avaliacao_confiavel"] is False
     assert "nao foi calculada nesta avaliacao" in r["avisos"][0], r["avisos"]
+    assert r["zona_calculada_nesta_avaliacao"] is False
 
 
 def test_zona_inexistente_vira_sem_amostra():

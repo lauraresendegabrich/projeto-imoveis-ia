@@ -1221,7 +1221,12 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optiona
         desconto_liquidez=0.10,
     )
 
-    if id_execucao and ler_json_da_execucao(CAMINHO_ZONA, id_execucao) is None:
+    # Interface usa este campo para nao dizer "poucos anuncios na regiao" quando o
+    # motivo do sem_amostra e a zona nao ter rodado nesta avaliacao.
+    resultado["zona_calculada_nesta_avaliacao"] = not (
+        id_execucao and ler_json_da_execucao(CAMINHO_ZONA, id_execucao) is None
+    )
+    if not resultado["zona_calculada_nesta_avaliacao"]:
         resultado.setdefault("avisos", []).insert(
             0,
             "A zona homogenea nao foi calculada nesta avaliacao (ex.: sem chave do Google "

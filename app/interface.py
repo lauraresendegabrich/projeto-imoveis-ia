@@ -637,9 +637,18 @@ if "resultado" in st.session_state:
         # Nesses casos NAO mostramos "R$ 0" como se fosse um resultado valido.
         avaliacao_confiavel = preco.get("avaliacao_confiavel", True)
         status_avaliacao = preco.get("status_avaliacao", "ok")
+        # False quando a zona homogenea nao rodou nesta avaliacao (o Ag5 nao usa a
+        # zona de uma avaliacao anterior): o motivo nao e falta de anuncios.
+        zona_calculada = preco.get("zona_calculada_nesta_avaliacao", True)
 
         if not avaliacao_confiavel:
-            if status_avaliacao == "sem_amostra":
+            if not zona_calculada:
+                st.warning(
+                    "⚠️ **Não foi possível validar a localização dos comparáveis nesta avaliação.** "
+                    "A zona homogênea (verificação de quais anúncios estão perto do imóvel) não foi "
+                    "calculada, e por segurança o valor não foi estimado. Tente avaliar de novo."
+                )
+            elif status_avaliacao == "sem_amostra":
                 st.warning(
                     "⚠️ **Não foi possível estimar o valor deste imóvel.** "
                     "Não encontramos comparáveis suficientes na vizinhança (a região "
@@ -1149,7 +1158,9 @@ if "resultado" in st.session_state:
             # Sem amostra suficiente: nao mostra passo a passo com R$ 0 (seria enganoso).
             st.warning(
                 "Não foi possível estimar um valor confiável para este imóvel — "
-                "não há comparáveis suficientes na zona homogênea."
+                + ("a zona homogênea não foi calculada nesta avaliação."
+                   if not zona_calculada else
+                   "não há comparáveis suficientes na zona homogênea.")
             )
             for _av in (preco.get("avisos", []) or []):
                 st.caption(f"• {_av}")
@@ -1358,7 +1369,8 @@ if "resultado" in st.session_state:
         else:
             bloco_resultado = (
                 "Não foi possível estimar um valor confiável para este imóvel "
-                "(comparáveis insuficientes na região)."
+                + ("(a zona homogênea não foi calculada nesta avaliação)."
+                   if not zona_calculada else "(comparáveis insuficientes na região).")
             )
 
         laudo_texto = f"""LAUDO DE AVALIAÇÃO IMOBILIÁRIA
