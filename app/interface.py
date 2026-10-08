@@ -304,6 +304,8 @@ elif submitted:
     # Identifica esta avaliacao nos JSONs que os agentes trocam: os Agentes 3/4/5
     # ignoram arquivos de avaliacoes anteriores (ver agents/execucao.py).
     id_execucao = novo_id_execucao()
+    # Falhas desta avaliacao, gravadas no banco (a tela continua mostrando os avisos).
+    falhas_execucao = []
 
     # ==============================================================
     # GEOCODIFICAÇÃO ÚNICA DO ALVO (persistida pra todos os agentes)
@@ -511,6 +513,7 @@ elif submitted:
                 if len(fora) > len(confirmados):
                     st.caption("ℹ️ Muitos imóveis foram descartados porque estão longe. O sistema só usa imóveis próximos para garantir que o valor reflete a sua vizinhança.")
         except Exception as e:
+            falhas_execucao.append(f"zona_homogenea: {type(e).__name__}: {e}")
             with log_area:
                 st.warning(f"⚠️ Validação geográfica indisponível — continuando sem ela ({type(e).__name__}: {e})")
 
@@ -576,6 +579,7 @@ elif submitted:
                 if classif == "insuficiente":
                     st.caption("ℹ️ Classificação insuficiente indica pouco comércio, transporte ou serviços no raio de 1500m. Comum em bairros residenciais afastados.")
         except Exception as e:
+            falhas_execucao.append(f"agente4: {type(e).__name__}: {e}")
             with log_area:
                 st.warning("⚠️ Agente Avaliador de Infraestrutura indisponível")
 
@@ -588,6 +592,7 @@ elif submitted:
                 if total_analisados <= 3:
                     st.caption("ℹ️ Poucos imóveis avaliados — o bairro tem poucos anúncios próximos ao seu endereço. O valor estimado pode ser menos preciso.")
         except Exception as e:
+            falhas_execucao.append(f"agente3: {type(e).__name__}: {e}")
             with log_area:
                 st.warning("⚠️ Agente Analisador indisponível")
 
@@ -611,6 +616,7 @@ elif submitted:
         with log_area:
             st.success(f"✅ Avaliação concluída!")
     except Exception as e:
+        falhas_execucao.append(f"agente5: {type(e).__name__}: {e}")
         with log_area:
             st.warning(f"⚠️ Agente Estimador indisponível")
 
@@ -685,6 +691,36 @@ elif submitted:
     # Salva no session_state pra não perder no rerun
     st.session_state["resultado"] = resultado
     st.session_state["imovel_alvo_dados"] = imovel_alvo
+
+    # Grava a avaliacao no banco (Neon) em segundo plano: a tela nao espera e uma
+    # falha do banco so vira aviso no log (services/banco.py).
+    try:
+        from services.registro_execucao import montar_registro
+        from services.banco import gravar_em_segundo_plano
+        registro_execucao, registro_comparaveis = montar_registro(
+            id_execucao=id_execucao,
+            imovel_alvo=imovel_alvo,
+            leilao_entrada=leilao_entrada,
+            leilao=leilao,
+            imoveis_coletados=imoveis_coletados,
+            resultado_ag2=resultado_ag2,
+            zona_resultado=zona_resultado,
+            resultado_ag3=resultado_ag3,
+            resultado_ag4=resultado_ag4,
+            resultado_ag5=resultado_ag5,
+            tempos={
+                "total": round(tempo_total, 1),
+                "agente1": round(tempo_ag1, 1),
+                "agente2": round(tempo_ag2_cluster, 1),
+                "zona": round(locals().get("tempo_zona", 0.0), 1),
+                "agentes3e4": round(tempo_ag34, 1),
+            },
+            falhas=falhas_execucao,
+        )
+        gravar_em_segundo_plano(registro_execucao, registro_comparaveis)
+    except Exception as e:
+        import logging as _log_banco
+        _log_banco.getLogger("pipeline").warning(f"[Banco] registro nao montado: {type(e).__name__}: {e}")
 
 # Recupera resultado salvo (pra quando faz download sem perder)
 if "resultado" in st.session_state and not submitted:

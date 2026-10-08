@@ -851,13 +851,18 @@ def executar_agente5(
     valores_m2_construcao_med_terreno = []
     comparaveis_terreno_maior = 0  # comparaveis onde o terreno estimado > preco do anuncio
     construcao_descartados = 0     # m2 de construcao fora da faixa de sanidade
-    usados_construcao = []         # imoveis que efetivamente entraram no m2 de construcao
+    # [resumo do imovel, quantos valores de m2 dele passaram na sanidade]. Separa os
+    # que entraram de fato no m2 de construcao dos descartados (auditoria/banco).
+    registros_construcao = []
+    descartados_construcao = []    # na zona, mas sem preco/area validos ou com m2 implausivel
 
     def _add_sanidade(lista, valor):
         """Adiciona so se o m2 de construcao for fisicamente plausivel."""
         nonlocal construcao_descartados
         if M2_CONSTRUCAO_MIN <= valor <= M2_CONSTRUCAO_MAX:
             lista.append(valor)
+            if registros_construcao:
+                registros_construcao[-1][1] += 1
             return True
         construcao_descartados += 1
         return False
@@ -871,10 +876,11 @@ def executar_agente5(
         area_construida_comp = extrair_area(imovel)
         # Area minima valida: descarta anuncio com area corrompida (ex.: "1 m2").
         if not preco_comp or not area_construida_comp or area_construida_comp < AREA_MINIMA_VALIDA:
+            descartados_construcao.append(_resumo_imovel(imovel))
             continue
 
-        # Registra o imovel como usado no calculo de construcao (uma vez por imovel).
-        usados_construcao.append(_resumo_imovel(imovel))
+        # Registra o imovel (uma vez); conta como usado se algum m2 dele entrar.
+        registros_construcao.append([_resumo_imovel(imovel), 0])
 
         # Apartamento/Sala: preco/area direto (terreno = 0)
         if tipo_comp in TIPOS_CONDOMINIAIS:
@@ -922,6 +928,12 @@ def executar_agente5(
             m2_valor = preco_comp / area_construida_comp
             _add_sanidade(valores_m2_construcao_min_terreno, m2_valor)
             _add_sanidade(valores_m2_construcao_med_terreno, m2_valor)
+
+    usados_construcao = [resumo for resumo, aceitos in registros_construcao if aceitos > 0]
+    descartados_construcao += [resumo for resumo, aceitos in registros_construcao if aceitos == 0]
+    descartados_terreno = [
+        _resumo_imovel(t) for t in terrenos_zona if not any(t is u for u in usados_terreno)
+    ]
 
     if construcao_descartados:
         import logging as _log_c
@@ -1155,6 +1167,12 @@ def executar_agente5(
         "comparaveis_usados": {
             "construcao": usados_construcao,
             "terreno": [_resumo_imovel(t) for t in usados_terreno],
+        },
+        # Na zona, mas fora do calculo (area < minima, sem preco/area ou m2 fora da
+        # faixa de sanidade). Para auditoria e para o registro no banco.
+        "comparaveis_descartados": {
+            "construcao": descartados_construcao,
+            "terreno": descartados_terreno,
         },
         "auditoria": {
             "valores_m2_terreno": [round(v, 2) for v in valores_m2_terreno],

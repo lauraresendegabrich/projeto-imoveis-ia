@@ -3492,6 +3492,7 @@ def _chamar_qwen_colab_infra(prompt: str) -> dict:
             f"{t_qwen.time()-t0:.1f}s"
         )
 
+        resultado["_provider_llm"] = "Qwen3-VL-8B Colab"
         return resultado
 
     except requests.Timeout:
@@ -3799,9 +3800,7 @@ Retorne JSON:
                 )
 
 
-                return json.loads(
-                    m.group(0)
-                )
+                return {**json.loads(m.group(0)), "_provider_llm": "Gemini"}
 
 
     except Exception as e:
@@ -3889,9 +3888,7 @@ Retorne JSON:
                 )
 
 
-                return json.loads(
-                    m.group(0)
-                )
+                return {**json.loads(m.group(0)), "_provider_llm": "Groq"}
 
 
     except Exception as e:
@@ -3996,9 +3993,7 @@ Retorne JSON:
                 )
 
 
-                return json.loads(
-                    m.group(0)
-                )
+                return {**json.loads(m.group(0)), "_provider_llm": "NVIDIA"}
 
 
     except Exception as e:
@@ -4643,6 +4638,9 @@ def avaliar_infraestrutura(
 
             "ajuste_llm_maximo":
             AJUSTE_LLM_MAXIMO,
+            # Servico de IA que fez o ajuste (None = nenhum respondeu).
+            "provider_llm":
+            (analise or {}).get("_provider_llm"),
 
             # Perfil da regiao classificado pela LLM (Nivel 2).
             "perfil_regiao":
