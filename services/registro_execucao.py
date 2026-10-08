@@ -248,11 +248,24 @@ LINHAS_RESUMO = (
     ("Comparáveis de construção no cálculo", "qtd_comparaveis_construcao", FORMATO_INTEIRO),
     ("Terrenos no cálculo", "qtd_terrenos", FORMATO_INTEIRO),
     ("Raio da zona homogênea (m)", "raio_zona_m", FORMATO_INTEIRO),
+    ("Atenção", None, None),
+    ("Alertas", "_alertas", None),
     ("Registro", None, None),
     ("Identificador da avaliação", "id_execucao", None),
 )
 
 ROTULOS_TIPO_COMPARAVEL = {"construcao": "Construção", "terreno": "Terreno"}
+ROTULOS_ALERTAS = {
+    "poucos_comparaveis": "Poucos comparáveis",
+    "poucos_terrenos": "Poucos terrenos",
+    "fora_da_zona": "Comparáveis fora da zona",
+    "precos_espalhados": "Preços muito espalhados",
+    "diferente_avaliacao_caixa": "Diferente da avaliação CAIXA",
+    "decisao_apertada": "Decisão apertada",
+    "possivel_alvo_no_calculo": "Possível anúncio do próprio imóvel",
+    "falha_de_agente": "Falha de agente",
+}
+
 ROTULOS_STATUS_ZONA = {
     "confirmado": "Confirmado na zona",
     "fallback": "Fora da zona (fallback)",
@@ -261,7 +274,7 @@ ROTULOS_STATUS_ZONA = {
 
 
 def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
-    """Arquivo .xlsx com as abas Resumo e Comparaveis."""
+    """Arquivo .xlsx com as abas Resumo, Alertas e Comparaveis."""
     import io
 
     from openpyxl import Workbook
@@ -280,6 +293,8 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     resumo.title = "Resumo"
     valores = dict(execucao)
     valores["_confiavel"] = "Sim" if execucao.get("status_agente5") == "ok" else "Não"
+    n_alertas = len(execucao.get("alertas") or [])
+    valores["_alertas"] = f"{n_alertas} (veja a aba Alertas)" if n_alertas else "Nenhum"
     for rotulo, chave, formato in LINHAS_RESUMO:
         if chave is None:
             resumo.append([rotulo, None])
@@ -299,6 +314,41 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     resumo.column_dimensions["B"].width = 42
     for linha in resumo.iter_rows(min_col=2, max_col=2):
         linha[0].alignment = Alignment(horizontal="left")
+
+    # ── Alertas (motivo exato; anuncios envolvidos logo abaixo de cada um) ─────
+    aba_alertas = livro.create_sheet("Alertas")
+    colunas_alertas = (
+        ("Alerta", 34), ("Motivo", 90), ("Preço", 16), ("Área", 12), ("Portal", 15), ("Anúncio", 60),
+    )
+    aba_alertas.append([nome for nome, _ in colunas_alertas])
+    for celula in aba_alertas[1]:
+        celula.font, celula.fill = negrito, fundo_cabecalho
+    alertas = execucao.get("alertas") or []
+    if not alertas:
+        aba_alertas.append(["Nenhum alerta nesta avaliação.", None, None, None, None, None])
+    for alerta in alertas:
+        aba_alertas.append([ROTULOS_ALERTAS.get(alerta.get("codigo"), alerta.get("codigo")),
+                            alerta.get("mensagem"), None, None, None, None])
+        aba_alertas.cell(row=aba_alertas.max_row, column=1).font = negrito
+        aba_alertas.cell(row=aba_alertas.max_row, column=2).alignment = Alignment(wrap_text=True, vertical="top")
+        detalhe = alerta.get("detalhe")
+        itens = detalhe if isinstance(detalhe, list) else []
+        for item in itens:
+            if isinstance(item, dict):   # anuncio envolvido
+                endereco = ", ".join(x for x in (item.get("endereco"), item.get("bairro")) if x) or "(sem endereço)"
+                aba_alertas.append([None, f"↳ {endereco}", item.get("preco"), item.get("area"),
+                                    item.get("portal"), item.get("link")])
+                linha = aba_alertas.max_row
+                aba_alertas.cell(row=linha, column=3).number_format = FORMATO_REAIS
+                aba_alertas.cell(row=linha, column=4).number_format = FORMATO_AREA
+                if item.get("link"):
+                    celula = aba_alertas.cell(row=linha, column=6)
+                    celula.hyperlink, celula.font = item["link"], link
+            else:                         # texto (ex.: erro de um agente)
+                aba_alertas.append([None, f"↳ {item}", None, None, None, None])
+    for indice, (_, largura) in enumerate(colunas_alertas, start=1):
+        aba_alertas.column_dimensions[aba_alertas.cell(row=1, column=indice).column_letter].width = largura
+    aba_alertas.freeze_panes = "A2"
 
     # ── Comparaveis ───────────────────────────────────────────────────────
     aba = livro.create_sheet("Comparáveis")

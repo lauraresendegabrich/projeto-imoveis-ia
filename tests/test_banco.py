@@ -146,7 +146,7 @@ def _abrir_excel():
 
 def test_excel_tem_abas_resumo_e_comparaveis():
     livro, _ = _abrir_excel()
-    assert livro.sheetnames == ["Resumo", "Comparáveis"], livro.sheetnames
+    assert livro.sheetnames == ["Resumo", "Alertas", "Comparáveis"], livro.sheetnames
 
 
 def test_excel_resumo_campo_valor():
@@ -159,6 +159,35 @@ def test_excel_resumo_campo_valor():
     assert resumo["Identificador da avaliação"] == "abc123"
     celula_lance = next(l[1] for l in livro["Resumo"].iter_rows() if l[0].value == "Lance máximo")
     assert "R$" in celula_lance.number_format
+
+
+def test_excel_alertas_com_motivo_e_anuncios():
+    livro, _ = _abrir_excel()
+    resumo = {linha[0]: linha[1] for linha in livro["Resumo"].iter_rows(values_only=True)}
+    linhas = list(livro["Alertas"].iter_rows(values_only=True))
+    assert linhas[0][:2] == ("Alerta", "Motivo")
+    nomes = [l[0] for l in linhas[1:] if l[0]]
+    assert "Comparáveis fora da zona" in nomes and "Falha de agente" in nomes, nomes
+    assert resumo["Alertas"] == f"{len(nomes)} (veja a aba Alertas)"
+    # o anuncio fora da zona aparece logo abaixo do alerta, com link clicavel
+    i = next(i for i, l in enumerate(linhas) if l[0] == "Comparáveis fora da zona")
+    assert linhas[i + 1][1].startswith("↳ Rua B") and linhas[i + 1][5] == "https://a/2"
+    assert livro["Alertas"].cell(row=i + 2, column=6).hyperlink is not None
+    # o erro do agente aparece abaixo da falha
+    j = next(j for j, l in enumerate(linhas) if l[0] == "Falha de agente")
+    assert linhas[j + 1][1] == "↳ agente3: Timeout"
+
+
+def test_excel_sem_alertas():
+    import io
+    from openpyxl import load_workbook
+    from services.registro_execucao import excel_resultado
+    e, comps = _registro(falhas=[])
+    e["alertas"] = []
+    livro = load_workbook(io.BytesIO(excel_resultado(e, comps)))
+    resumo = {linha[0]: linha[1] for linha in livro["Resumo"].iter_rows(values_only=True)}
+    assert resumo["Alertas"] == "Nenhum"
+    assert list(livro["Alertas"].iter_rows(values_only=True))[1][0] == "Nenhum alerta nesta avaliação."
 
 
 def test_excel_comparaveis_um_por_linha_com_link():
