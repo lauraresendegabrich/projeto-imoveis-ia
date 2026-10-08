@@ -118,7 +118,7 @@ def test_colunas_batem_com_schema_sql():
                 nomes.add(m.group(1))
         return nomes
 
-    no_schema_exec = colunas("execucoes") - {"data_hora", "faz_sentido", "observacao"}
+    no_schema_exec = colunas("execucoes") - {"data_hora"}
     assert no_schema_exec == set(COLUNAS_EXECUCOES), (no_schema_exec ^ set(COLUNAS_EXECUCOES))
     no_schema_comp = colunas("comparaveis") - {"id"}
     assert no_schema_comp == set(COLUNAS_COMPARAVEIS), (no_schema_comp ^ set(COLUNAS_COMPARAVEIS))

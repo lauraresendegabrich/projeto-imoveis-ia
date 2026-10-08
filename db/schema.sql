@@ -2,7 +2,8 @@
 -- Registro de cada avaliação (PostgreSQL / Neon)
 -- =============================================================================
 -- Rodar MANUALMENTE no SQL Editor do Neon. O app nunca cria tabelas: só insere.
--- Seguro para rodar de novo (IF NOT EXISTS).
+-- Seguro para rodar de novo (IF NOT EXISTS). Mudanças num banco que já existe
+-- ficam em db/migracoes/ (rodar na ordem).
 --
 -- execucoes   : uma linha por avaliação feita pela interface
 -- comparaveis : uma linha por anúncio da zona considerado pelo Agente 5
@@ -61,10 +62,7 @@ CREATE TABLE IF NOT EXISTS execucoes (
     sobra                       NUMERIC(14, 2),            -- lance máximo − valor mínimo (negativa = falta)
     decisao                     TEXT,                      -- Não descartar / Descartar / Sem estimativa
     tempo_venda                 TEXT,
-
-    -- Conferência manual (preenchida depois) -----------------------------------
-    faz_sentido                 BOOLEAN,
-    observacao                  TEXT
+    alertas                     JSONB                      -- sinais automáticos de atenção (services/alertas.py)
 );
 
 CREATE INDEX IF NOT EXISTS idx_execucoes_data_hora ON execucoes (data_hora DESC);

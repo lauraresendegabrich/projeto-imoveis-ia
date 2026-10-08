@@ -9,6 +9,7 @@ import os
 from collections import Counter
 from pathlib import Path
 
+from services.alertas import calcular_alertas
 from services.leilao import FATOR_LUCRO_LEILAO, ORIGEM_CAIXA
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -196,6 +197,7 @@ def montar_registro(
         "decisao": leilao.get("decisao"),
         "tempo_venda": (ag5.get("liquidez_experimental") or {}).get("tempo_estimado") if confiavel else None,
     }
+    execucao["alertas"] = calcular_alertas(execucao, ag5, falhas)
     return execucao, _linhas_comparaveis(id_execucao, ag5)
 
 
