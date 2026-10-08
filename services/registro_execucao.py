@@ -181,7 +181,10 @@ def montar_registro(
         "raio_zona_m": raio,
 
         "valor_m2_construcao": _num(((m2.get("construcao") or {}).get("combinados") or {}).get("valor_m2_referencia")),
-        "valor_m2_terreno": _num((m2.get("terreno") or {}).get("valor_m2_referencia")),
+        # Sem terreno no calculo (ex.: apartamento) fica vazio, nao 0.
+        "valor_m2_terreno": (
+            _num((m2.get("terreno") or {}).get("valor_m2_referencia")) if usados.get("terreno") else None
+        ),
         "valor_mercado": _num(avaliacao.get("valor_medio_imovel")),
         "liquidez": _num(avaliacao.get("valor_liquidez")),
 
