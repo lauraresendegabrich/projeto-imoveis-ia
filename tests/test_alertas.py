@@ -87,6 +87,42 @@ def test_falha_de_agente():
     assert codigos(calcular_alertas(execucao(), ag5(), falhas=["agente3: Timeout"])) == ["falha_de_agente"]
 
 
+def test_motivo_exato_fora_da_zona_lista_os_anuncios():
+    usados = {"construcao": [
+        {"rua": "Rua A, 10", "url": "https://a/1", "status_zona": "confirmado"},
+        {"rua": "Rua B, 20", "url": "https://a/2", "status_zona": "fallback", "preco": 500000, "area": 100},
+    ], "terreno": []}
+    a = calcular_alertas(execucao(usados_por_fallback=1), ag5(usados=usados))[0]
+    assert a["codigo"] == "fora_da_zona"
+    assert "1 de 2 comparáveis" in a["mensagem"] and "fallback" in a["mensagem"]
+    assert a["detalhe"] == [{"endereco": "Rua B, 20", "bairro": None, "preco": 500000, "area": 100,
+                             "portal": None, "status_zona": "fallback", "link": "https://a/2"}]
+
+
+def test_motivo_exato_avaliacao_caixa_com_valores_e_limite():
+    a = calcular_alertas(execucao(valor_mercado=1_500_000.0, valor_avaliacao=990_000.0), ag5())[0]
+    assert a["mensagem"].startswith("Valor de mercado R$ 1.500.000 está 52% acima do valor de avaliação CAIXA (R$ 990.000)")
+    assert a["limite"] == 0.40 and a["detalhe"] == {"valor_mercado": 1_500_000.0, "valor_avaliacao_caixa": 990_000.0}
+
+
+def test_motivo_exato_precos_espalhados_mostra_extremos():
+    a = calcular_alertas(execucao(), ag5(m2=(2000, 9000, 3000, 10000)))[0]
+    assert "de R$ 2.000 a R$ 10.000" in a["mensagem"], a["mensagem"]
+    assert a["detalhe"]["menor_m2"] == 2000 and a["detalhe"]["maior_m2"] == 10000
+
+
+def test_motivo_exato_falha_mostra_agente_e_erro():
+    a = calcular_alertas(execucao(), ag5(), falhas=["agente3: Timeout", "agente4: KeyError: x"])[0]
+    assert a["mensagem"].startswith("Falha em: agente3, agente4")
+    assert a["detalhe"] == ["agente3: Timeout", "agente4: KeyError: x"]
+
+
+def test_motivo_exato_decisao_apertada():
+    a = calcular_alertas(execucao(sobra=-10_000.0, lance_maximo=490_000.0), ag5())[0]
+    assert a["mensagem"].startswith("Falta de R$ 10.000, só 2.0% do valor mínimo (R$ 500.000)")
+    assert a["detalhe"]["lance_maximo"] == 490_000.0
+
+
 def test_varios_alertas_juntos():
     e = execucao(qtd_comparaveis_construcao=3, usados_por_fallback=1, sobra=5_000.0)
     assert codigos(calcular_alertas(e, ag5())) == ["poucos_comparaveis", "fora_da_zona", "decisao_apertada"]

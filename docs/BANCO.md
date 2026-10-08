@@ -108,6 +108,10 @@ Cada avaliação grava em `alertas` uma lista de sinais de atenção, calculados
 regras simples, sem IA e sem mudar nenhum cálculo (`services/alertas.py`). Lista
 vazia = nada chamou atenção. Os limites ficam no início do arquivo.
 
+Cada alerta registra o motivo exato: `mensagem` (frase com os números reais e o
+limite), `valor` e `limite` (os números comparados) e `detalhe` (o que causou: os
+anúncios com endereço e link, os R$/m² extremos, o erro do agente...).
+
 | Código | Quando aparece |
 |---|---|
 | `poucos_comparaveis` | 3 a 4 comparáveis de construção no cálculo |
@@ -120,6 +124,12 @@ vazia = nada chamou atenção. Os limites ficam no início do arquivo.
 | `falha_de_agente` | algum agente falhou na avaliação |
 
 ```sql
+-- Motivo de cada alerta, um por linha
+SELECT e.data_hora, e.cidade, e.bairro, e.decisao,
+       a->>'codigo' AS alerta, a->>'mensagem' AS motivo, a->'detalhe' AS detalhe
+FROM execucoes e, jsonb_array_elements(e.alertas) AS a
+ORDER BY e.data_hora DESC;
+
 -- Avaliações com alertas
 SELECT data_hora, cidade, bairro, decisao, alertas
 FROM execucoes
