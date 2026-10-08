@@ -136,6 +136,33 @@ def test_banco_fora_do_ar_nao_quebra_nem_trava():
     assert ok is False and time.time() - t0 < 20
 
 
+def test_csv_resumo_formato_excel_br():
+    from services.registro_execucao import COLUNAS_CSV_RESUMO, csv_resumo
+    e, _ = _registro()
+    dados = csv_resumo(e)
+    assert dados.startswith(b"\xef\xbb\xbf"), "precisa do BOM UTF-8 para o Excel"
+    linhas = dados.decode("utf-8-sig").splitlines()
+    assert len(linhas) == 2
+    cabecalho, valores = linhas[0].split(";"), linhas[1].split(";")
+    assert cabecalho == list(COLUNAS_CSV_RESUMO) and len(valores) == len(cabecalho)
+    linha = dict(zip(cabecalho, valores))
+    assert linha["decisao"] == "Não descartar"
+    assert linha["valor_minimo"] == "323158,00" and linha["lance_maximo"].startswith("415762,")
+    assert linha["cidade"] == "Curitiba" and linha["codigo_caixa"] == "1444400000000"
+
+
+def test_csv_comparaveis_uma_linha_por_anuncio():
+    from services.registro_execucao import csv_comparaveis
+    _, comps = _registro()
+    linhas = csv_comparaveis(comps).decode("utf-8-sig").splitlines()
+    assert len(linhas) == 1 + len(comps)
+    assert linhas[0].startswith("tipo;entrou_no_calculo;status_zona;preco")
+    corpo = [l.split(";") for l in linhas[1:]]
+    assert [c[0] for c in corpo] == ["construcao", "construcao", "construcao", "terreno"]
+    assert [c[1] for c in corpo[:3]] == ["sim", "sim", "não"]   # usados antes dos descartados
+    assert corpo[0][5] == "5000,00"                           # R$/m2 com virgula decimal
+
+
 def test_versao_codigo_do_git():
     v = versao_codigo()
     assert v == "desconhecida" or re.fullmatch(r"[0-9a-f]{40}", v), v

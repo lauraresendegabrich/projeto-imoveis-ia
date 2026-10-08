@@ -197,3 +197,61 @@ def montar_registro(
         "tempo_venda": (ag5.get("liquidez_experimental") or {}).get("tempo_estimado") if confiavel else None,
     }
     return execucao, _linhas_comparaveis(id_execucao, ag5)
+
+
+# =============================================================================
+# CSV do resultado da avaliacao (botoes de exportacao na interface)
+# =============================================================================
+# Mesmo conteudo das tabelas do banco. Formato para o Excel em portugues:
+# separador ";", virgula decimal e UTF-8 com BOM (acentos corretos ao abrir).
+
+COLUNAS_CSV_RESUMO = (
+    "id_execucao", "origem", "codigo_caixa", "link", "modalidade",
+    "tipo", "endereco", "bairro", "cidade", "uf", "area_privativa", "area_terreno",
+    "quartos", "banheiros", "valor_minimo", "valor_avaliacao",
+    "anuncios_encontrados", "repetidos", "parecidos", "confirmados_na_zona",
+    "usados_por_fallback", "terrenos_usados", "raio_zona_m",
+    "valor_m2_construcao", "valor_m2_terreno", "valor_mercado", "liquidez",
+    "status_agente5", "qtd_comparaveis_construcao", "qtd_terrenos",
+    "lance_maximo", "sobra", "decisao", "tempo_venda", "tempo_s", "versao_codigo",
+)
+COLUNAS_CSV_COMPARAVEIS = (
+    "tipo", "entrou_no_calculo", "status_zona", "preco", "area", "valor_m2",
+    "endereco", "bairro", "portal", "link",
+)
+
+
+def _celula_csv(valor) -> str:
+    if valor is None:
+        return ""
+    if isinstance(valor, bool):
+        return "sim" if valor else "não"
+    if isinstance(valor, float):
+        return f"{valor:.2f}".replace(".", ",")
+    return str(valor)
+
+
+def _csv(cabecalho: tuple, linhas: list[dict]) -> bytes:
+    import csv
+    import io
+
+    saida = io.StringIO()
+    escritor = csv.writer(saida, delimiter=";", lineterminator="\r\n")
+    escritor.writerow(cabecalho)
+    for linha in linhas:
+        escritor.writerow([_celula_csv(linha.get(coluna)) for coluna in cabecalho])
+    return saida.getvalue().encode("utf-8-sig")
+
+
+def csv_resumo(execucao: dict) -> bytes:
+    """Uma linha com entrada, funil, calculo e decisao da avaliacao."""
+    return _csv(COLUNAS_CSV_RESUMO, [execucao])
+
+
+def csv_comparaveis(comparaveis: list[dict]) -> bytes:
+    """Uma linha por anuncio considerado pelo Agente 5 (usados e descartados)."""
+    ordenados = sorted(
+        comparaveis,
+        key=lambda c: (c.get("tipo") or "", not c.get("entrou_no_calculo"), c.get("valor_m2") or 0),
+    )
+    return _csv(COLUNAS_CSV_COMPARAVEIS, ordenados)

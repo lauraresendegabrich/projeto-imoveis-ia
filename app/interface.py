@@ -717,6 +717,9 @@ elif submitted:
             },
             falhas=falhas_execucao,
         )
+        # Guardado no resultado (sessao) para os botoes de exportar CSV: mesmo
+        # conteudo gravado no banco.
+        resultado["registro"] = {"execucao": registro_execucao, "comparaveis": registro_comparaveis}
         gravar_em_segundo_plano(registro_execucao, registro_comparaveis)
     except Exception as e:
         import logging as _log_banco
@@ -1516,6 +1519,29 @@ Gerado automaticamente pelo Sistema Multiagente de Precificação Imobiliária.
             mime="text/plain",
             use_container_width=True,
         )
+
+        # Resultado desta avaliacao em CSV (mesmo conteudo gravado no banco).
+        registro_csv = resultado.get("registro") or {}
+        if registro_csv.get("execucao"):
+            from services.registro_execucao import csv_comparaveis, csv_resumo
+            nome_csv = f"{cidade}_{bairro}".replace(" ", "_")
+            col_csv1, col_csv2 = st.columns(2)
+            with col_csv1:
+                st.download_button(
+                    label="📊 Exportar resumo (CSV)",
+                    data=csv_resumo(registro_csv["execucao"]),
+                    file_name=f"resumo_{nome_csv}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            with col_csv2:
+                st.download_button(
+                    label="🏘️ Exportar comparáveis (CSV)",
+                    data=csv_comparaveis(registro_csv.get("comparaveis") or []),
+                    file_name=f"comparaveis_{nome_csv}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
 
     else:
         st.error("Não foi possível calcular o preço. Verifique os dados e tente novamente.")
