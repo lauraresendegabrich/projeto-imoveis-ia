@@ -200,58 +200,139 @@ def montar_registro(
 
 
 # =============================================================================
-# CSV do resultado da avaliacao (botoes de exportacao na interface)
+# Excel do resultado da avaliacao (botao de exportacao na interface)
 # =============================================================================
-# Mesmo conteudo das tabelas do banco. Formato para o Excel em portugues:
-# separador ";", virgula decimal e UTF-8 com BOM (acentos corretos ao abrir).
+# Mesmo conteudo gravado no banco, em linguagem de usuario. Aba "Resumo" no formato
+# Campo | Valor (na ordem do laudo) e aba "Comparaveis" com um anuncio por linha.
 
-COLUNAS_CSV_RESUMO = (
-    "id_execucao", "origem", "codigo_caixa", "link", "modalidade",
-    "tipo", "endereco", "bairro", "cidade", "uf", "area_privativa", "area_terreno",
-    "quartos", "banheiros", "valor_minimo", "valor_avaliacao",
-    "anuncios_encontrados", "repetidos", "parecidos", "confirmados_na_zona",
-    "usados_por_fallback", "terrenos_usados", "raio_zona_m",
-    "valor_m2_construcao", "valor_m2_terreno", "valor_mercado", "liquidez",
-    "status_agente5", "qtd_comparaveis_construcao", "qtd_terrenos",
-    "lance_maximo", "sobra", "decisao", "tempo_venda", "tempo_s", "versao_codigo",
+FORMATO_REAIS = '"R$" #,##0.00'
+FORMATO_AREA = '#,##0.00 "m²"'
+FORMATO_INTEIRO = "#,##0"
+
+# (rotulo, chave em execucao, formato). Chave None = titulo de secao.
+LINHAS_RESUMO = (
+    ("Imóvel", None, None),
+    ("Tipo", "tipo", None),
+    ("Endereço", "endereco", None),
+    ("Bairro", "bairro", None),
+    ("Cidade", "cidade", None),
+    ("UF", "uf", None),
+    ("Área privativa", "area_privativa", FORMATO_AREA),
+    ("Área do terreno", "area_terreno", FORMATO_AREA),
+    ("Quartos", "quartos", FORMATO_INTEIRO),
+    ("Banheiros", "banheiros", FORMATO_INTEIRO),
+    ("Avaliação", None, None),
+    ("Valor de mercado", "valor_mercado", FORMATO_REAIS),
+    ("Valor de liquidez (−10%)", "liquidez", FORMATO_REAIS),
+    ("Valor do m² da construção", "valor_m2_construcao", FORMATO_REAIS),
+    ("Valor do m² do terreno", "valor_m2_terreno", FORMATO_REAIS),
+    ("Tempo estimado de venda", "tempo_venda", None),
+    ("Estimativa confiável", "_confiavel", None),
+    ("Leilão CAIXA", None, None),
+    ("Decisão", "decisao", None),
+    ("Lance máximo", "lance_maximo", FORMATO_REAIS),
+    ("Valor mínimo CAIXA", "valor_minimo", FORMATO_REAIS),
+    ("Sobra (negativo = falta)", "sobra", FORMATO_REAIS),
+    ("Valor de avaliação CAIXA (informativo)", "valor_avaliacao", FORMATO_REAIS),
+    ("Modalidade", "modalidade", None),
+    ("Código do imóvel na CAIXA", "codigo_caixa", None),
+    ("Link do imóvel na CAIXA", "link", None),
+    ("Como chegamos ao valor", None, None),
+    ("Anúncios encontrados na região", "anuncios_encontrados", FORMATO_INTEIRO),
+    ("Anúncios repetidos descartados", "repetidos", FORMATO_INTEIRO),
+    ("Imóveis parecidos com o seu", "parecidos", FORMATO_INTEIRO),
+    ("Confirmados na zona homogênea", "confirmados_na_zona", FORMATO_INTEIRO),
+    ("Usados de fora da zona confirmada", "usados_por_fallback", FORMATO_INTEIRO),
+    ("Comparáveis de construção no cálculo", "qtd_comparaveis_construcao", FORMATO_INTEIRO),
+    ("Terrenos no cálculo", "qtd_terrenos", FORMATO_INTEIRO),
+    ("Raio da zona homogênea (m)", "raio_zona_m", FORMATO_INTEIRO),
+    ("Registro", None, None),
+    ("Identificador da avaliação", "id_execucao", None),
 )
-COLUNAS_CSV_COMPARAVEIS = (
-    "tipo", "entrou_no_calculo", "status_zona", "preco", "area", "valor_m2",
-    "endereco", "bairro", "portal", "link",
-)
+
+ROTULOS_TIPO_COMPARAVEL = {"construcao": "Construção", "terreno": "Terreno"}
+ROTULOS_STATUS_ZONA = {
+    "confirmado": "Confirmado na zona",
+    "fallback": "Fora da zona (fallback)",
+    "sem_validacao": "Sem validação de distância",
+}
 
 
-def _celula_csv(valor) -> str:
-    if valor is None:
-        return ""
-    if isinstance(valor, bool):
-        return "sim" if valor else "não"
-    if isinstance(valor, float):
-        return f"{valor:.2f}".replace(".", ",")
-    return str(valor)
-
-
-def _csv(cabecalho: tuple, linhas: list[dict]) -> bytes:
-    import csv
+def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
+    """Arquivo .xlsx com as abas Resumo e Comparaveis."""
     import io
 
-    saida = io.StringIO()
-    escritor = csv.writer(saida, delimiter=";", lineterminator="\r\n")
-    escritor.writerow(cabecalho)
-    for linha in linhas:
-        escritor.writerow([_celula_csv(linha.get(coluna)) for coluna in cabecalho])
-    return saida.getvalue().encode("utf-8-sig")
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
 
+    negrito = Font(bold=True)
+    titulo_secao = Font(bold=True, color="FFFFFF")
+    fundo_secao = PatternFill("solid", fgColor="1F6F5C")
+    fundo_cabecalho = PatternFill("solid", fgColor="E2EFE9")
+    link = Font(color="0563C1", underline="single")
 
-def csv_resumo(execucao: dict) -> bytes:
-    """Uma linha com entrada, funil, calculo e decisao da avaliacao."""
-    return _csv(COLUNAS_CSV_RESUMO, [execucao])
+    livro = Workbook()
 
+    # ── Resumo ────────────────────────────────────────────────────────────
+    resumo = livro.active
+    resumo.title = "Resumo"
+    valores = dict(execucao)
+    valores["_confiavel"] = "Sim" if execucao.get("status_agente5") == "ok" else "Não"
+    for rotulo, chave, formato in LINHAS_RESUMO:
+        if chave is None:
+            resumo.append([rotulo, None])
+            for celula in resumo[resumo.max_row]:
+                celula.font, celula.fill = titulo_secao, fundo_secao
+            continue
+        valor = valores.get(chave)
+        resumo.append([rotulo, valor])
+        celula = resumo.cell(row=resumo.max_row, column=2)
+        if formato and isinstance(valor, (int, float)):
+            celula.number_format = formato
+        if chave == "link" and valor:
+            celula.hyperlink, celula.font = valor, link
+        if chave == "decisao" and valor:
+            celula.font = negrito
+    resumo.column_dimensions["A"].width = 40
+    resumo.column_dimensions["B"].width = 42
+    for linha in resumo.iter_rows(min_col=2, max_col=2):
+        linha[0].alignment = Alignment(horizontal="left")
 
-def csv_comparaveis(comparaveis: list[dict]) -> bytes:
-    """Uma linha por anuncio considerado pelo Agente 5 (usados e descartados)."""
+    # ── Comparaveis ───────────────────────────────────────────────────────
+    aba = livro.create_sheet("Comparáveis")
+    colunas = (
+        ("Tipo", 12, None), ("Entrou no cálculo", 17, None), ("Localização", 26, None),
+        ("Preço", 16, FORMATO_REAIS), ("Área", 12, FORMATO_AREA), ("Valor do m²", 15, FORMATO_REAIS),
+        ("Endereço", 36, None), ("Bairro", 22, None), ("Portal", 15, None), ("Anúncio", 60, None),
+    )
+    aba.append([nome for nome, _, _ in colunas])
+    for celula in aba[1]:
+        celula.font, celula.fill = negrito, fundo_cabecalho
     ordenados = sorted(
         comparaveis,
         key=lambda c: (c.get("tipo") or "", not c.get("entrou_no_calculo"), c.get("valor_m2") or 0),
     )
-    return _csv(COLUNAS_CSV_COMPARAVEIS, ordenados)
+    for c in ordenados:
+        aba.append([
+            ROTULOS_TIPO_COMPARAVEL.get(c.get("tipo"), c.get("tipo")),
+            "Sim" if c.get("entrou_no_calculo") else "Não",
+            ROTULOS_STATUS_ZONA.get(c.get("status_zona"), c.get("status_zona")),
+            c.get("preco"), c.get("area"), c.get("valor_m2"),
+            c.get("endereco"), c.get("bairro"), c.get("portal"), c.get("link"),
+        ])
+        linha = aba.max_row
+        for indice, (_, _, formato) in enumerate(colunas, start=1):
+            if formato:
+                aba.cell(row=linha, column=indice).number_format = formato
+        if c.get("link"):
+            celula = aba.cell(row=linha, column=len(colunas))
+            celula.hyperlink, celula.font = c["link"], link
+    for indice, (_, largura, _) in enumerate(colunas, start=1):
+        aba.column_dimensions[aba.cell(row=1, column=indice).column_letter].width = largura
+    aba.freeze_panes = "A2"
+    if aba.max_row > 1:
+        aba.auto_filter.ref = aba.dimensions
+
+    saida = io.BytesIO()
+    livro.save(saida)
+    return saida.getvalue()

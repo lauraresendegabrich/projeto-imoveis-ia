@@ -136,31 +136,43 @@ def test_banco_fora_do_ar_nao_quebra_nem_trava():
     assert ok is False and time.time() - t0 < 20
 
 
-def test_csv_resumo_formato_excel_br():
-    from services.registro_execucao import COLUNAS_CSV_RESUMO, csv_resumo
-    e, _ = _registro()
-    dados = csv_resumo(e)
-    assert dados.startswith(b"\xef\xbb\xbf"), "precisa do BOM UTF-8 para o Excel"
-    linhas = dados.decode("utf-8-sig").splitlines()
-    assert len(linhas) == 2
-    cabecalho, valores = linhas[0].split(";"), linhas[1].split(";")
-    assert cabecalho == list(COLUNAS_CSV_RESUMO) and len(valores) == len(cabecalho)
-    linha = dict(zip(cabecalho, valores))
-    assert linha["decisao"] == "Não descartar"
-    assert linha["valor_minimo"] == "323158,00" and linha["lance_maximo"].startswith("415762,")
-    assert linha["cidade"] == "Curitiba" and linha["codigo_caixa"] == "1444400000000"
+def _abrir_excel():
+    import io
+    from openpyxl import load_workbook
+    from services.registro_execucao import excel_resultado
+    e, comps = _registro()
+    return load_workbook(io.BytesIO(excel_resultado(e, comps))), comps
 
 
-def test_csv_comparaveis_uma_linha_por_anuncio():
-    from services.registro_execucao import csv_comparaveis
-    _, comps = _registro()
-    linhas = csv_comparaveis(comps).decode("utf-8-sig").splitlines()
-    assert len(linhas) == 1 + len(comps)
-    assert linhas[0].startswith("tipo;entrou_no_calculo;status_zona;preco")
-    corpo = [l.split(";") for l in linhas[1:]]
-    assert [c[0] for c in corpo] == ["construcao", "construcao", "construcao", "terreno"]
-    assert [c[1] for c in corpo[:3]] == ["sim", "sim", "não"]   # usados antes dos descartados
-    assert corpo[0][5] == "5000,00"                           # R$/m2 com virgula decimal
+def test_excel_tem_abas_resumo_e_comparaveis():
+    livro, _ = _abrir_excel()
+    assert livro.sheetnames == ["Resumo", "Comparáveis"], livro.sheetnames
+
+
+def test_excel_resumo_campo_valor():
+    livro, _ = _abrir_excel()
+    resumo = {linha[0]: linha[1] for linha in livro["Resumo"].iter_rows(values_only=True)}
+    assert resumo["Decisão"] == "Não descartar"
+    assert round(resumo["Lance máximo"]) == 415763 and round(resumo["Sobra (negativo = falta)"]) == 92605
+    assert resumo["Valor mínimo CAIXA"] == 323158 and resumo["Valor de liquidez (−10%)"] == 644432.4
+    assert resumo["Cidade"] == "Curitiba" and resumo["Estimativa confiável"] == "Sim"
+    assert resumo["Identificador da avaliação"] == "abc123"
+    celula_lance = next(l[1] for l in livro["Resumo"].iter_rows() if l[0].value == "Lance máximo")
+    assert "R$" in celula_lance.number_format
+
+
+def test_excel_comparaveis_um_por_linha_com_link():
+    livro, comps = _abrir_excel()
+    aba = livro["Comparáveis"]
+    linhas = list(aba.iter_rows(values_only=True))
+    assert linhas[0][:3] == ("Tipo", "Entrou no cálculo", "Localização")
+    corpo = linhas[1:]
+    assert len(corpo) == len(comps)
+    assert [l[0] for l in corpo] == ["Construção", "Construção", "Construção", "Terreno"]
+    assert [l[1] for l in corpo[:3]] == ["Sim", "Sim", "Não"]   # usados antes dos descartados
+    assert "Fora da zona (fallback)" in [l[2] for l in corpo]
+    assert aba.cell(row=2, column=10).hyperlink is not None
+    assert aba.freeze_panes == "A2"
 
 
 def test_versao_codigo_do_git():
