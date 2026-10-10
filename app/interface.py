@@ -14,6 +14,7 @@ from pathlib import Path
 # Adiciona raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
 from services.leilao import MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, ler_valor_reais
 from services.leilao import linhas_laudo as linhas_laudo_leilao
@@ -35,6 +36,21 @@ def fmt_brl(valor, decimais=0):
     # Converte formato americano (1,234,567.89) pra brasileiro (1.234.567,89)
     texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")
     return f"R\\$ {texto}"
+
+def buscar_cep_cache(cep):
+    """
+    buscar_cep guardando so os acertos na sessao: o formulario roda de novo a cada
+    clique e nao precisa consultar o CEP toda vez. Falha nao fica guardada, para
+    tentar de novo no proximo Enter.
+    """
+    cache = st.session_state.setdefault("_cache_cep", {})
+    if cep in cache:
+        return cache[cep], "ok"
+    endereco, situacao = buscar_cep(cep)
+    if endereco:
+        cache[cep] = endereco
+    return endereco, situacao
+
 
 def mostrar_avaliacao_leilao(leilao):
     """
@@ -107,27 +123,24 @@ with st.sidebar:
 
     # ── BUSCA POR CEP ─────────────────────────────────────────
     st.markdown("**🔎 Buscar por CEP:**")
-    cep_input = st.text_input("CEP (opcional)", value="", max_chars=9, placeholder="13015-100")
+    cep_input = st.text_input(
+        "CEP (opcional)", value="", max_chars=10, placeholder="13015-100",
+        help="Digite o CEP e aperte Enter para preencher rua, bairro, cidade e UF.",
+    )
     preset = {}
-    if cep_input and len(cep_input.replace("-", "")) == 8:
-        import requests
-        try:
-            cep_limpo = cep_input.replace("-", "")
-            r = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
-            if r.status_code == 200:
-                dados_cep = r.json()
-                if not dados_cep.get("erro"):
-                    preset = {
-                        "rua": dados_cep.get("logradouro", ""),
-                        "bairro": dados_cep.get("bairro", ""),
-                        "cidade": dados_cep.get("localidade", ""),
-                        "estado": dados_cep.get("uf", ""),
-                    }
-                    st.success(f"✅ {dados_cep.get('logradouro', '')}, {dados_cep.get('bairro', '')}, {dados_cep.get('localidade', '')}/{dados_cep.get('uf', '')}")
-                else:
-                    st.warning("CEP não encontrado")
-        except Exception:
-            pass
+    if cep_input.strip():
+        cep_limpo = limpar_cep(cep_input)
+        if not cep_limpo:
+            st.warning("CEP deve ter 8 dígitos.")
+        else:
+            endereco_cep, situacao_cep = buscar_cep_cache(cep_limpo)
+            if endereco_cep:
+                preset = endereco_cep
+                st.success(f"✅ {preset['rua']}, {preset['bairro']}, {preset['cidade']}/{preset['estado']}")
+            elif situacao_cep == "nao_encontrado":
+                st.warning("CEP não encontrado.")
+            else:
+                st.warning("Não foi possível consultar o CEP agora. Preencha o endereço manualmente.")
 
     st.divider()
 
