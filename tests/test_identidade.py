@@ -119,6 +119,32 @@ def test_terreno_nunca_e_fundido():
     assert mesmo_imovel(a, b) == (False, "tipo_sem_regra_calibrada")
 
 
+def test_mesmo_codigo_com_nome_da_imobiliaria_escrito_diferente():
+    # Casos reais de Sao Jose do Rio Preto: cada portal escreve a imobiliaria de um jeito.
+    a = casa(anunciante_nome="Habicarmo Imoveis", codigo_imovel_anunciante="CA1807",
+             rua="Rua Marcelino Bertoni, 646")
+    b = casa(portal="chavesnamao", source="Chaves na Mão", anunciante_nome="Habicarmo",
+             codigo_imovel_anunciante="CA1807", rua="Rua Projetada, 646", listing_id="2")
+    assert mesmo_imovel(a, b) == (True, "mesmo_codigo_e_anunciante")
+
+
+def test_terreno_mesmo_codigo_e_anunciante_e_fundido():
+    a = anuncio(tipo="terreno", preco=11200.0, area_construida=200.0, portal="chavesnamao",
+                anunciante_nome="Sumares Negocios Imobiliarios", codigo_imovel_anunciante="TE00704")
+    b = anuncio(tipo="terreno", preco=11200.0, area_construida=200.0, portal="imovelweb",
+                anunciante_nome="Sumares Imoveis", codigo_imovel_anunciante="TE00704", listing_id="2")
+    assert mesmo_imovel(a, b) == (True, "mesmo_codigo_e_anunciante")
+    unicos, descartados = deduplicar([a, b])
+    assert len(unicos) == 1 and len(descartados) == 1
+
+
+def test_imobiliarias_diferentes_com_mesmo_codigo_nao_sao_fundidas():
+    a = casa(anunciante_nome="Habicarmo Imoveis", codigo_imovel_anunciante="CA10")
+    b = casa(portal="imovelweb", anunciante_nome="Villaggio Imoveis", codigo_imovel_anunciante="CA10",
+             preco=900000.0, listing_id="2")
+    assert mesmo_imovel(a, b)[0] is False
+
+
 # ---------------------------------------------------------------- deduplicar
 def test_deduplicar_guarda_descartado_completo_e_motivo():
     a = anuncio(listing_id="1", url="https://vr/1")

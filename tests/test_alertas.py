@@ -128,6 +128,42 @@ def test_varios_alertas_juntos():
     assert codigos(calcular_alertas(e, ag5())) == ["poucos_comparaveis", "fora_da_zona", "decisao_apertada"]
 
 
+def comp(preco, area, rua="Rua A, 10"):
+    return {"preco": preco, "area": area, "rua": rua, "status_zona": "confirmado"}
+
+
+def test_amostra_concentrada_mesma_area():
+    construcao = [comp(550_000 + i * 10_000, 142, f"Rua A, {i}") for i in range(4)] + [
+        comp(400_000 + i * 20_000, 100 + i * 7, f"Rua B, {i}") for i in range(6)]
+    alertas = calcular_alertas(execucao(), ag5(usados={"construcao": construcao, "terreno": []}))
+    assert codigos(alertas) == ["amostra_concentrada"], codigos(alertas)
+    assert "4 de 10" in alertas[0]["mensagem"] and "142 m²" in alertas[0]["mensagem"]
+
+
+def test_amostra_pequena_nao_e_concentrada():
+    construcao = [comp(550_000 + i, 142, f"Rua A, {i}") for i in range(3)] + [comp(400_000, 120, "Rua B, 1")]
+    alertas = calcular_alertas(execucao(), ag5(usados={"construcao": construcao, "terreno": []}))
+    assert "amostra_concentrada" not in codigos(alertas)
+
+
+def test_terreno_fora_do_padrao_preco_com_digito_a_menos_e_gleba():
+    terrenos = [comp(110_000 + i * 1_000, 200, f"Rua T, {i}") for i in range(8)]
+    terrenos += [comp(11_200, 200, "Av. X, 505"), comp(950_000, 9_500, "Rua Y, 3")]
+    alertas = calcular_alertas(execucao(), ag5(usados={"construcao": [], "terreno": terrenos}))
+    assert codigos(alertas) == ["terreno_fora_do_padrao"], codigos(alertas)
+    assert len(alertas[0]["detalhe"]["anuncios"]) == 2
+    assert "cenário conservador" in alertas[0]["mensagem"]
+
+
+def test_possivel_repetido_mesmo_preco_area_e_numero():
+    construcao = [comp(550_000, 142, "Rua Elvio Luis Guindani, 314"), comp(550_000, 142, "Rua Projetada, 314"),
+                  comp(560_000, 142, "Rua Elvio Luis Guindani, 314"), comp(400_000, 100, "Rua B, 1")]
+    alertas = calcular_alertas(execucao(), ag5(usados={"construcao": construcao, "terreno": []}))
+    assert codigos(alertas) == ["possivel_repetido_no_calculo"], codigos(alertas)
+    grupo = alertas[0]["detalhe"][0]
+    assert grupo["numero"] == "314" and len(grupo["anuncios"]) == 2
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

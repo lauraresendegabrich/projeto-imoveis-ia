@@ -5,7 +5,8 @@ Alertas automaticos de cada avaliacao
 Regras simples (sem IA e sem mudar nenhum calculo) que apontam avaliacoes que
 merecem atencao: poucos comparaveis, comparaveis fora da zona, precos espalhados,
 divergencia com o valor de avaliacao CAIXA, decisao apertada, possivel anuncio do
-proprio imovel no calculo e falha de agente.
+proprio imovel no calculo, falha de agente, amostra concentrada num mesmo
+empreendimento, terrenos fora do padrao e possiveis repetidos que ficaram no calculo.
 
 Gravados no banco (coluna execucoes.alertas) para quem for analisar os resultados
 filtrar as avaliacoes que precisam ser olhadas. Nao aparecem na tela.
@@ -21,13 +22,20 @@ Os limites abaixo sao um ponto de partida, para ajustar com o uso.
 """
 from __future__ import annotations
 
-from statistics import mean, pstdev
+from collections import Counter, defaultdict
+from statistics import mean, median, pstdev
+
+from agents.identidade import numero as numero_endereco
 
 # Limites (unico lugar).
 LIMITE_POUCOS_COMPARAVEIS = 4          # 3 a 4 comparaveis: no limite do minimo de 3
 LIMITE_PRECOS_ESPALHADOS = 0.40        # coeficiente de variacao do R$/m2 usado
 LIMITE_DIFERENCA_AVALIACAO_CAIXA = 0.40  # valor de mercado vs avaliacao CAIXA
 LIMITE_DECISAO_APERTADA = 0.05         # |sobra| em relacao ao valor minimo
+LIMITE_AMOSTRA_CONCENTRADA = 0.30      # parcela das casas com a mesma area ou o mesmo preco
+MIN_AMOSTRA_CONCENTRADA = 6            # abaixo disso, coincidencias sao normais
+LIMITE_TERRENO_M2_FORA = 4             # R$/m2 abaixo de mediana/4 ou acima de mediana*4
+LIMITE_TERRENO_AREA_FORA = 10          # area acima de 10x a mediana (gleba)
 
 
 def _brl(valor) -> str:
@@ -163,6 +171,84 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             f"Falha em: {', '.join(agentes)}. A nota de qualidade, a infraestrutura ou o tempo "
             f"de venda podem estar incompletos.",
             len(falhas), 0, list(falhas),
+        ))
+
+    # 8. Amostra concentrada: muitas casas com exatamente a mesma area ou o mesmo
+    #    preco costumam ser um mesmo empreendimento (casas novas iguais), que pode
+    #    nao representar o imovel avaliado.
+    construcao = usados.get("construcao") or []
+    if len(construcao) >= MIN_AMOSTRA_CONCENTRADA:
+        for campo, nome, fmt in (("area", "área", lambda v: f"{v:g} m²"), ("preco", "preço", _brl)):
+            valores = [round(float(c[campo])) for c in construcao if c.get(campo)]
+            if not valores:
+                continue
+            valor, qtd = Counter(valores).most_common(1)[0]
+            parcela = qtd / len(construcao)
+            if qtd >= 3 and parcela >= LIMITE_AMOSTRA_CONCENTRADA:
+                iguais = [c for c in construcao if c.get(campo) and round(float(c[campo])) == valor]
+                alertas.append(_alerta(
+                    "amostra_concentrada",
+                    f"{qtd} de {len(construcao)} comparáveis ({parcela:.0%}) têm exatamente a mesma "
+                    f"{nome} ({fmt(valor)}); limite: {LIMITE_AMOSTRA_CONCENTRADA:.0%}. Pode ser um "
+                    f"mesmo empreendimento dominando a amostra (ex.: casas novas iguais), diferente "
+                    f"do imóvel avaliado.",
+                    round(parcela, 3), LIMITE_AMOSTRA_CONCENTRADA,
+                    {"campo": campo, "valor": valor, "quantidade": qtd, "total": len(construcao),
+                     "anuncios": [_anuncio(c) for c in iguais]},
+                ))
+
+    # 9. Terrenos fora do padrao: R$/m2 muito abaixo/acima da mediana (provavel preco
+    #    digitado errado) ou area de gleba. A media sem extremos absorve, mas o
+    #    cenario conservador usa o MENOR R$/m2 do terreno.
+    terrenos = [c for c in usados.get("terreno") or [] if c.get("preco") and c.get("area")]
+    if len(terrenos) >= 3:
+        m2 = [float(c["preco"]) / float(c["area"]) for c in terrenos]
+        med_m2 = median(m2)
+        med_area = median(float(c["area"]) for c in terrenos)
+        fora_padrao = []
+        for c, v in zip(terrenos, m2):
+            motivos = []
+            if v < med_m2 / LIMITE_TERRENO_M2_FORA:
+                motivos.append(f"R$/m² {_brl(v)}, muito abaixo da mediana")
+            elif v > med_m2 * LIMITE_TERRENO_M2_FORA:
+                motivos.append(f"R$/m² {_brl(v)}, muito acima da mediana")
+            if float(c["area"]) > med_area * LIMITE_TERRENO_AREA_FORA:
+                motivos.append(f"área de {float(c['area']):,.0f} m²".replace(",", ".") + ", muito maior que a mediana")
+            if motivos:
+                fora_padrao.append({**_anuncio(c), "valor_m2": round(v, 2), "motivo": "; ".join(motivos)})
+        if fora_padrao:
+            menor_vem_daqui = min(m2) < med_m2 / LIMITE_TERRENO_M2_FORA
+            alertas.append(_alerta(
+                "terreno_fora_do_padrao",
+                f"{len(fora_padrao)} de {len(terrenos)} terrenos estão fora do padrão (R$/m² abaixo de "
+                f"1/{LIMITE_TERRENO_M2_FORA} ou acima de {LIMITE_TERRENO_M2_FORA}x a mediana de "
+                f"{_brl(med_m2)}, ou área acima de {LIMITE_TERRENO_AREA_FORA}x a mediana). "
+                + ("O cenário conservador usa o menor R$/m², que vem desses anúncios: não é confiável."
+                   if menor_vem_daqui else "A média sem extremos tende a absorver."),
+                len(fora_padrao), 0,
+                {"mediana_m2": round(med_m2, 2), "mediana_area": round(med_area, 2), "anuncios": fora_padrao},
+            ))
+
+    # 10. Possiveis repetidos que ficaram no calculo: mesmo preco, mesma area e mesmo
+    #     numero de endereco, mas sem prova para juntar (ex.: varias casas iguais num
+    #     mesmo loteamento, anunciadas por imobiliarias diferentes).
+    grupos_rep = defaultdict(list)
+    for tipo_lista in ("construcao", "terreno"):
+        for c in usados.get(tipo_lista) or []:
+            num = numero_endereco({"rua": c.get("rua")})
+            if num and c.get("preco") and c.get("area"):
+                grupos_rep[(tipo_lista, num, round(float(c["preco"])), round(float(c["area"])))].append(c)
+    repetidos = [g for g in grupos_rep.values() if len(g) >= 2]
+    if repetidos:
+        n_anuncios = sum(len(g) for g in repetidos)
+        alertas.append(_alerta(
+            "possivel_repetido_no_calculo",
+            f"{n_anuncios} anúncios em {len(repetidos)} grupo(s) têm o mesmo preço, a mesma área e o "
+            f"mesmo número de endereço e continuam no cálculo. Podem ser o mesmo imóvel (sem prova "
+            f"para descartar) ou casas iguais de um mesmo loteamento.",
+            n_anuncios, 0,
+            [{"preco": k[2], "area": k[3], "numero": k[1], "anuncios": [_anuncio(c) for c in g]}
+             for k, g in grupos_rep.items() if len(g) >= 2],
         ))
 
     return alertas

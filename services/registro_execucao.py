@@ -264,6 +264,9 @@ ROTULOS_ALERTAS = {
     "decisao_apertada": "Decisão apertada",
     "possivel_alvo_no_calculo": "Possível anúncio do próprio imóvel",
     "falha_de_agente": "Falha de agente",
+    "amostra_concentrada": "Amostra concentrada",
+    "terreno_fora_do_padrao": "Terreno fora do padrão",
+    "possivel_repetido_no_calculo": "Possível repetido no cálculo",
 }
 
 ROTULOS_STATUS_ZONA = {
@@ -332,10 +335,25 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
         aba_alertas.cell(row=aba_alertas.max_row, column=1).font = negrito
         aba_alertas.cell(row=aba_alertas.max_row, column=2).alignment = Alignment(wrap_text=True, vertical="top")
         detalhe = alerta.get("detalhe")
-        itens = detalhe if isinstance(detalhe, list) else []
+        if isinstance(detalhe, list):
+            itens_brutos = detalhe
+        elif isinstance(detalhe, dict):
+            itens_brutos = detalhe.get("anuncios") or []
+        else:
+            itens_brutos = []
+        # Grupos (possivel repetido): uma linha de titulo e os anuncios do grupo abaixo.
+        itens = []
+        for item in itens_brutos:
+            if isinstance(item, dict) and "anuncios" in item:
+                itens.append(f"Grupo: nº {item.get('numero')}, {item.get('area')} m², preço {item.get('preco')}")
+                itens.extend(item["anuncios"])
+            else:
+                itens.append(item)
         for item in itens:
             if isinstance(item, dict):   # anuncio envolvido
                 endereco = ", ".join(x for x in (item.get("endereco"), item.get("bairro")) if x) or "(sem endereço)"
+                if item.get("motivo"):
+                    endereco += f" — {item['motivo']}"
                 aba_alertas.append([None, f"↳ {endereco}", item.get("preco"), item.get("area"),
                                     item.get("portal"), item.get("link")])
                 linha = aba_alertas.max_row

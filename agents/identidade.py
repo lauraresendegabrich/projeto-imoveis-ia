@@ -40,8 +40,13 @@ Diferencas em relacao a proposta original:
     Na calibracao de BH nao mudou as taxas (quase nenhum par tinha numero nos dois
     lados); no Santa Monica juntou 16 anuncios a mais.
 
+  - Na prova direta (mesmo codigo + anunciante), o nome do anunciante e comparado
+    sem palavras genericas ("Habicarmo" = "Habicarmo Imoveis"): em Sao Jose do Rio
+    Preto (out/2026) a mesma casa e o mesmo terreno escapavam por isso.
+
 Limitacoes: calibrado so em BH/venda; poucos pares de casa (61); terreno e
-comercial nao tem regra calibrada e nunca sao fundidos.
+comercial nao tem regra calibrada: so sao fundidos pela prova direta (mesmo
+codigo + mesmo anunciante).
 """
 from __future__ import annotations
 
@@ -62,6 +67,14 @@ CASA_DESC = 0.75
 CASA_AREA_COM_NUMERO = 0.02
 
 SUFIXOS_ANUNCIANTE = {"ltda", "me", "eireli", "sa", "epp", "s", "a"}
+# Palavras genericas que cada portal poe ou tira do nome da mesma imobiliaria
+# ("Habicarmo" x "Habicarmo Imoveis", "Sumares Imoveis" x "Sumares Negocios
+# Imobiliarios"). Ignoradas so na prova direta (mesmo codigo + mesmo anunciante).
+PALAVRAS_GENERICAS_ANUNCIANTE = {
+    "imoveis", "imovel", "imobiliaria", "imobiliarias", "imobiliario", "imobiliarios",
+    "negocios", "corretor", "corretora", "corretores", "consultoria", "assessoria",
+    "empreendimentos", "creci", "de", "do", "da", "dos", "das", "e",
+}
 PREFIXOS_RUA = {"rua", "r", "avenida", "av", "alameda", "al", "travessa", "tv",
                 "praca", "estrada", "rodovia", "largo"}
 
@@ -112,6 +125,14 @@ def portal(d: dict) -> str:
 def _anunciante(d: dict) -> str:
     nome = _campo(d, "anunciante_nome", "advertiser", "publisher")
     return " ".join(p for p in _norm(nome).split() if p not in SUFIXOS_ANUNCIANTE)
+
+
+def _anunciante_base(d: dict) -> str:
+    """Nome do anunciante sem palavras genericas, numeros (CRECI) e letras soltas."""
+    return " ".join(
+        p for p in _anunciante(d).split()
+        if p not in PALAVRAS_GENERICAS_ANUNCIANTE and len(p) > 1 and not any(ch.isdigit() for ch in p)
+    )
 
 
 def _codigo(d: dict) -> str | None:
@@ -271,10 +292,13 @@ def motivo_veto(a: dict, b: dict, g: str, ignorar: tuple = ()) -> str | None:
 def mesmo_imovel(a: dict, b: dict) -> tuple[bool, str]:
     """Decide se dois ANUNCIOS sao o mesmo imovel. Retorna (sim/nao, motivo)."""
     # 1) Prova direta: mesmo codigo do imovel + mesmo anunciante
+    # (o nome do anunciante e comparado sem palavras genericas: cada portal escreve
+    # a mesma imobiliaria de um jeito). Vale tambem para terreno.
     cod_a, cod_b = _codigo(a), _codigo(b)
-    anunc_a, anunc_b = _anunciante(a), _anunciante(b)
-    if cod_a and cod_a == cod_b and anunc_a and anunc_a == anunc_b:
+    base_a, base_b = _anunciante_base(a), _anunciante_base(b)
+    if cod_a and cod_a == cod_b and base_a and base_a == base_b:
         return True, "mesmo_codigo_e_anunciante"
+    anunc_a, anunc_b = _anunciante(a), _anunciante(b)
     # O proprio anunciante diz que sao imoveis diferentes: mesmo portal, mesmo
     # anunciante e codigos diferentes = outras unidades (era a maior fonte de fusao
     # indevida em BH).
@@ -373,8 +397,8 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
         return ("preco", milhar, int(q) if q is not None else None)
 
     def _bloco_codigo(d):
-        if _codigo(d) and _anunciante(d):
-            return [("codigo", _codigo(d), _anunciante(d))]
+        if _codigo(d) and _anunciante_base(d):
+            return [("codigo", _codigo(d), _anunciante_base(d))]
         return []
 
     def blocos_registro(d):
