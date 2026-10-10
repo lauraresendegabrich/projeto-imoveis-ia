@@ -1077,23 +1077,38 @@ if "resultado" in st.session_state:
                     # portal ou por outra imobiliaria), para conferencia.
                     dups = resultado.get("duplicatas_descartadas") or []
                     if dups:
-                        with st.expander(f"🔁 Anúncios repetidos descartados ({len(dups)})"):
+                        # Uma linha por imovel: o anuncio que entrou no calculo e todos os
+                        # repetidos dele que foram descartados.
+                        grupos_dup = {}
+                        for d in dups:
+                            chave = d.get("Anúncio mantido") or (d.get("Mantido"), d.get("Preço"), d.get("Área"))
+                            grupos_dup.setdefault(chave, []).append(d)
+                        with st.expander(
+                            f"🔁 Anúncios repetidos descartados ({len(dups)} anúncio(s) de {len(grupos_dup)} imóvel(is))"
+                        ):
                             st.caption(
-                                "O mesmo imóvel apareceu em mais de um anúncio. Ficou só o anúncio "
-                                "mais completo; os demais abaixo não entraram na análise."
+                                "O mesmo imóvel apareceu em mais de um anúncio. Cada imóvel entrou "
+                                "**uma única vez** no cálculo, pelo anúncio da coluna \"Entrou no "
+                                "cálculo\"; os anúncios da coluna \"Descartados\" ficaram de fora."
                             )
                             linhas_dup = []
-                            for d in dups:
+                            for grupo in grupos_dup.values():
+                                d = grupo[0]
                                 try:
                                     preco_d = fmt_brl(float(d.get("Preço"))) if d.get("Preço") else "-"
                                 except (TypeError, ValueError):
                                     preco_d = "-"
+                                links_desc = [
+                                    f"[{g['Descartado']}]({g['Anúncio descartado']})" if g.get("Anúncio descartado") else str(g.get("Descartado"))
+                                    for g in grupo
+                                ]
+                                motivos = list(dict.fromkeys(g.get("Motivo") or "-" for g in grupo))
                                 linhas_dup.append({
                                     "Preço": preco_d,
                                     "Área": f"{float(d['Área']):.0f}m²" if d.get("Área") else "-",
-                                    "Mantido": f"[{d['Mantido']}]({d['Anúncio mantido']})" if d.get("Anúncio mantido") else d.get("Mantido"),
-                                    "Descartado": f"[{d['Descartado']}]({d['Anúncio descartado']})" if d.get("Anúncio descartado") else d.get("Descartado"),
-                                    "Motivo": d.get("Motivo") or "-",
+                                    "Entrou no cálculo": f"[{d['Mantido']}]({d['Anúncio mantido']})" if d.get("Anúncio mantido") else d.get("Mantido"),
+                                    "Descartados": f"{len(grupo)} anúncio(s): " + ", ".join(links_desc),
+                                    "Motivo": ", ".join(motivos),
                                 })
                             st.markdown(pd.DataFrame(linhas_dup).to_markdown(index=False), unsafe_allow_html=True)
 
