@@ -140,6 +140,15 @@ def test_amostra_concentrada_mesma_area():
     assert "4 de 10" in alertas[0]["mensagem"] and "142 m²" in alertas[0]["mensagem"]
 
 
+def test_amostra_concentrada_texto_apto_e_preco():
+    construcao = [comp(300_000, 60 + i, f"Rua A, {i}") for i in range(4)] + [
+        comp(400_000 + i * 20_000, 100 + i * 7, f"Rua B, {i}") for i in range(6)]
+    alertas = calcular_alertas(execucao(tipo="apartamento"), ag5(usados={"construcao": construcao, "terreno": []}))
+    assert codigos(alertas) == ["amostra_concentrada"], codigos(alertas)
+    assert "o mesmo preço (R$ 300.000)" in alertas[0]["mensagem"], alertas[0]["mensagem"]
+    assert "mesmo prédio ou lançamento" in alertas[0]["mensagem"]
+
+
 def test_amostra_pequena_nao_e_concentrada():
     construcao = [comp(550_000 + i, 142, f"Rua A, {i}") for i in range(3)] + [comp(400_000, 120, "Rua B, 1")]
     alertas = calcular_alertas(execucao(), ag5(usados={"construcao": construcao, "terreno": []}))

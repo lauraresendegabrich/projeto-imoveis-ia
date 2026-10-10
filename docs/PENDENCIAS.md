@@ -38,6 +38,18 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   avaliação e pular o Qwen se ele demorar; fazer o notebook cancelar pedidos
   abandonados; GPU mais forte.
 
+## Agente 2 — Zona homogênea (`agents/comparables.py`)
+
+- [ ] **Raio da zona muda entre rodadas do mesmo imóvel.** Quem escolhe o raio é a
+  IA de visão olhando a imagem de satélite, e ela não responde igual toda vez. Teste
+  de 10/10/2026: Curitiba/Cajuru (Rua Raul de Oliveira) saiu com 450 m e, na rodada
+  seguinte, 350 m. Os anúncios disponíveis eram os mesmos, mas a amostra caiu de 4
+  para 2 casas e a decisão foi de "Não descartar" (sobra R$ 207 mil) para "Sem
+  estimativa". São José do Rio Preto variou de 450 para 400 m. Com poucos anúncios
+  na região, 100 m a menos derrubam a amostra abaixo do mínimo de 3. Levar ao
+  professor; opções: fixar o raio, usar a média de algumas leituras, ou guardar o
+  raio por endereço. Não mexer sem decisão (fora do escopo atual).
+
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
 
 - [ ] **Ordem dos provedores para comparáveis.** Hoje Groq → NVIDIA → Gemini. No
