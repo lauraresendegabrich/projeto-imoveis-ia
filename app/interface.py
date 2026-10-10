@@ -14,7 +14,7 @@ from pathlib import Path
 # Adiciona raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.leilao import MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao
+from services.leilao import MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, ler_valor_reais
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
 from dotenv import load_dotenv
@@ -176,12 +176,15 @@ with st.sidebar:
         # (preco de leilao fica bem abaixo do mercado e distorceria os comparaveis).
         # So sao usados depois do Agente 5, em services/leilao.py.
         st.markdown("**🔨 Leilão CAIXA** (opcional)")
-        valor_minimo_caixa = st.number_input(
-            "Valor mínimo de venda (R$)", min_value=0, value=0, step=1000,
+        # Campo de texto (e nao number_input) para aceitar o jeito brasileiro de
+        # escrever valores: "323.158,50", "323158", "R$ 323.158". Lido depois do
+        # envio por ler_valor_reais (services/leilao.py).
+        texto_valor_minimo_caixa = st.text_input(
+            "Valor mínimo de venda (R$)", value="", placeholder="Ex.: 323.158,00",
             help="Valor mínimo de venda que aparece no site da CAIXA.",
         )
-        valor_avaliacao_caixa = st.number_input(
-            "Valor de avaliação CAIXA (R$)", min_value=0, value=0, step=1000,
+        texto_valor_avaliacao_caixa = st.text_input(
+            "Valor de avaliação CAIXA (R$)", value="", placeholder="Ex.: 410.000,00",
             help="Só informativo: não entra em nenhum cálculo.",
         )
         modalidade_caixa = st.selectbox("Modalidade", [""] + MODALIDADES_CAIXA)
@@ -236,8 +239,23 @@ elif submitted:
     if quartos <= 0:
         erros_validacao.append("Número de quartos deve ser maior que zero")
 
+    # Valores do leilao CAIXA digitados como texto (aceita "323.158,50").
+    valor_minimo_caixa = valor_avaliacao_caixa = None
+    try:
+        valor_minimo_caixa = ler_valor_reais(texto_valor_minimo_caixa)
+    except ValueError:
+        erros_validacao.append(
+            f"Valor mínimo de venda inválido: \"{texto_valor_minimo_caixa}\" (use, por exemplo, 323.158,00)"
+        )
+    try:
+        valor_avaliacao_caixa = ler_valor_reais(texto_valor_avaliacao_caixa)
+    except ValueError:
+        erros_validacao.append(
+            f"Valor de avaliação CAIXA inválido: \"{texto_valor_avaliacao_caixa}\" (use, por exemplo, 410.000,00)"
+        )
+
     if erros_validacao:
-        st.error("❌ **Preencha todos os campos obrigatórios para iniciar a avaliação:**")
+        st.error("❌ **Corrija os campos abaixo para iniciar a avaliação:**")
         for erro in erros_validacao:
             st.warning(f"• {erro}")
         st.stop()

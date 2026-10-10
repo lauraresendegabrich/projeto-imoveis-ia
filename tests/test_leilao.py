@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from services.leilao import FATOR_LUCRO_LEILAO, avaliar_leilao, linhas_laudo
+from services.leilao import FATOR_LUCRO_LEILAO, avaliar_leilao, ler_valor_reais, linhas_laudo
 
 
 def ag5(status="ok", liquidez=None, usados=None):
@@ -103,6 +103,30 @@ def test_laudo_sem_estimativa_nao_tem_lance():
     linhas = linhas_laudo(avaliar_leilao(ag5(status="amostra_insuficiente"), 391948), _brl)
     assert linhas == ["Decisão: Sem estimativa", "Valor mínimo CAIXA: R$ 391.948"], linhas
     assert linhas_laudo(None, _brl) == []
+
+
+def test_ler_valor_reais_formatos_aceitos():
+    casos = {
+        "323158": 323158.0, "323.158": 323158.0, "323.158,50": 323158.5, "323158,50": 323158.5,
+        "R$ 323.158,50": 323158.5, "r$323.158": 323158.0, "323158.50": 323158.5,
+        "1.250.000": 1250000.0, "1.250.000,00": 1250000.0, " 480000 ": 480000.0, "480000,5": 480000.5,
+    }
+    for texto, esperado in casos.items():
+        assert ler_valor_reais(texto) == esperado, (texto, ler_valor_reais(texto))
+
+
+def test_ler_valor_reais_vazio_e_zero():
+    for texto in ("", "   ", None, "0", "0,00"):
+        assert ler_valor_reais(texto) is None, texto
+
+
+def test_ler_valor_reais_invalidos():
+    for texto in ("abc", "32.15.8", "323,158,50", "12,345", "-5000"):
+        try:
+            ler_valor_reais(texto)
+        except ValueError:
+            continue
+        raise AssertionError(f"deveria recusar {texto!r}")
 
 
 def test_fator_unico():

@@ -42,6 +42,42 @@ DECISAO_DESCARTAR = "Descartar"
 DECISAO_SEM_ESTIMATIVA = "Sem estimativa"
 
 
+def ler_valor_reais(texto) -> float | None:
+    """
+    Le um valor em reais digitado no formulario, no jeito brasileiro ou nao:
+    "323158", "323.158", "323.158,50", "323158,50", "R$ 323.158,50", "323158.50".
+    Vazio -> None. Texto que nao e valor -> ValueError (a tela mostra o erro).
+    """
+    import re
+
+    if texto is None:
+        return None
+    if isinstance(texto, (int, float)):
+        return float(texto) if texto > 0 else None
+    limpo = re.sub(r"[R$\s]", "", str(texto).strip(), flags=re.I)
+    if not limpo:
+        return None
+    if not re.fullmatch(r"[\d.,]+", limpo):
+        raise ValueError(f"valor inválido: {texto!r}")
+    if "," in limpo:
+        # Virgula = decimal; pontos = milhar ("323.158,50").
+        inteiro, _, decimal = limpo.rpartition(",")
+        if "," in inteiro or len(decimal) > 2:
+            raise ValueError(f"valor inválido: {texto!r}")
+        limpo = inteiro.replace(".", "") + "." + decimal
+    elif limpo.count(".") == 1 and len(limpo.split(".")[1]) <= 2:
+        pass  # ponto decimal ("323158.50")
+    else:
+        # Pontos de milhar ("323.158" ou "1.250.000"): cada grupo depois do primeiro
+        # tem 3 digitos.
+        grupos = limpo.split(".")
+        if any(len(g) != 3 for g in grupos[1:]):
+            raise ValueError(f"valor inválido: {texto!r}")
+        limpo = "".join(grupos)
+    valor = float(limpo)
+    return valor if valor > 0 else None
+
+
 def _numero(valor) -> float | None:
     try:
         numero = float(valor)
