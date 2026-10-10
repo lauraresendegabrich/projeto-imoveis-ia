@@ -14,6 +14,7 @@ from pathlib import Path
 # Adiciona raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from services.formatos import ler_numero_br
 from services.leilao import MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, ler_valor_reais
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
@@ -148,19 +149,14 @@ with st.sidebar:
         tipo = st.selectbox("Tipo", ["Casa", "Apartamento"], index=["Casa", "Apartamento"].index(preset.get("tipo", "Casa")))
         col_a, col_b = st.columns(2)
         with col_a:
-            # value/min_value/step em float para aceitar casas decimais (ex.: 399,99 m²).
-            # Se fossem int, o Streamlit forcaria numeros inteiros.
-            area = st.number_input(
-                "Área construída (m²)", min_value=0.0,
-                value=float(preset.get("area", 0) or 0), step=0.01, format="%.2f",
-            )
+            # Campo de texto (e nao number_input) para aceitar o jeito brasileiro:
+            # "179", "179,5", "1.250,75". Lido depois do envio por ler_numero_br.
+            texto_area = st.text_input("Área construída (m²)", value="", placeholder="Ex.: 179,50")
             quartos = st.number_input("Quartos", min_value=0, value=preset.get("quartos", 0))
             vagas = st.number_input("Vagas", min_value=0, value=preset.get("vagas", 0))
         with col_b:
-            terreno_default = 0.0 if tipo == "Apartamento" else float(preset.get("area_terreno", 0) or 0)
-            area_terreno = st.number_input(
-                "Terreno (m²)", min_value=0.0,
-                value=terreno_default, step=0.01, format="%.2f",
+            texto_area_terreno = st.text_input(
+                "Terreno (m²)", value="", placeholder="Ex.: 300" if tipo == "Casa" else "Apartamento: deixe vazio",
             )
             banheiros = st.number_input("Banheiros", min_value=0, value=preset.get("banheiros", 0))
             preco_anunciado = st.number_input("Preço (R$, opcional)", min_value=0, value=0, step=1000)
@@ -234,7 +230,18 @@ elif submitted:
         erros_validacao.append("Cidade é obrigatória")
     if not estado.strip():
         erros_validacao.append("Estado é obrigatório")
-    if area <= 0:
+    # Areas digitadas como texto (aceita "179,5" e "1.250,75").
+    area, area_terreno = 0.0, 0.0
+    try:
+        area = ler_numero_br(texto_area) or 0.0
+    except ValueError:
+        erros_validacao.append(f"Área construída inválida: \"{texto_area}\" (use, por exemplo, 179,50)")
+        area = -1.0   # evita repetir o aviso de area obrigatoria
+    try:
+        area_terreno = ler_numero_br(texto_area_terreno) or 0.0
+    except ValueError:
+        erros_validacao.append(f"Terreno inválido: \"{texto_area_terreno}\" (use, por exemplo, 300 ou 312,50)")
+    if area == 0:
         erros_validacao.append("Área construída deve ser maior que zero")
     if quartos <= 0:
         erros_validacao.append("Número de quartos deve ser maior que zero")
@@ -1516,7 +1523,7 @@ if "resultado" in st.session_state:
 {'='*50}
 
 Imóvel: {rua}, {numero} - {bairro}, {cidade}/{estado}
-Tipo: {tipo} | Área: {area}m² | Terreno: {area_terreno}m²
+Tipo: {tipo} | Área: {imovel_alvo_export.get('area') or 0}m² | Terreno: {imovel_alvo_export.get('area_terreno') or 0}m²
 Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas}
 
 RESULTADO DA AVALIAÇÃO
