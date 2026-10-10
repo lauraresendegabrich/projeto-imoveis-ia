@@ -122,6 +122,9 @@ anúncios com endereço e link, os R$/m² extremos, o erro do agente...).
 | `decisao_apertada` | sobra ou falta menor que 5% do valor mínimo |
 | `possivel_alvo_no_calculo` | anúncio com perfil do próprio imóvel entrou na média |
 | `falha_de_agente` | algum agente falhou na avaliação |
+| `amostra_concentrada` | 30% ou mais das casas (com 6 ou mais) têm exatamente a mesma área ou o mesmo preço: provável empreendimento dominando a amostra |
+| `terreno_fora_do_padrao` | terreno com R$/m² abaixo de 1/4 ou acima de 4x a mediana, ou área acima de 10x a mediana (preço digitado errado, gleba); avisa quando o cenário conservador vem dele |
+| `possivel_repetido_no_calculo` | anúncios com mesmo preço, mesma área e mesmo número de endereço continuam no cálculo (sem prova para juntar) |
 
 ```sql
 -- Motivo de cada alerta, um por linha
