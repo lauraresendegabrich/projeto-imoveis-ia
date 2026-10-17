@@ -157,7 +157,7 @@ M2_TERRENO_MIN = 50.0              # R$/m2 de terreno plausivel (minimo)
 M2_TERRENO_MAX = 30000.0          # R$/m2 de terreno plausivel (maximo)
 M2_CONSTRUCAO_MIN = 500.0         # R$/m2 de construcao plausivel (minimo)
 M2_CONSTRUCAO_MAX = 50000.0       # R$/m2 de construcao plausivel (maximo)
-MIN_AMOSTRAS_CONFIAVEL = 3        # abaixo disso a estimativa e marcada baixa confianca
+MIN_AMOSTRAS_CONFIAVEL = 5        # abaixo disso a estimativa e marcada baixa confianca (era 3 ate out/2026)
 
 CAMINHO_ZONA = "data/zona_homogenea_ag2.json"
 CAMINHO_AG3 = "data/imoveis_analisados_ag3.json"

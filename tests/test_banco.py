@@ -77,7 +77,7 @@ def test_execucao_tem_os_campos_principais():
     assert e["usados_por_fallback"] == 1 and e["terrenos_usados"] == 1
     assert e["qtd_comparaveis_construcao"] == 2 and e["qtd_terrenos"] == 1
     assert e["tempo_venda"] == "60 a 90 dias" and e["tempo_s"] == 300.5
-    assert e["parametros"]["fator_lucro_leilao"] == 1.55 and e["parametros"]["min_amostras_confiavel"] == 3
+    assert e["parametros"]["fator_lucro_leilao"] == 1.55 and e["parametros"]["min_amostras_confiavel"] == 5
     assert e["modelos_ia"]["agente4"] == "Gemini" and e["fontes"]["anuncios_apify"] == 1
     assert e["falhas"]["falhas"] == ["agente3: Timeout"]
 

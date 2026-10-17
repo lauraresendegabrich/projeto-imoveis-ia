@@ -177,7 +177,7 @@ Muitos imóveis não têm rua nem coordenada própria (é comum a coleta trazer 
 
 ### Fallback de amostra escassa (Opção B)
 
-Quando a validação geográfica confirma **menos de 3** comparáveis na zona (`MIN_CONFIRMADOS_ZONA`), os imóveis `zona_nao_verificada` são anexados a `comparaveis_confirmados` para que os Agentes 3 e 5 não fiquem sem amostra. Esses imóveis recebem `incluido_por_fallback_zona=true` e `confianca_zona="baixa"`, e o acionamento é registrado em `resumo_zona.fallback_zona_acionado`. A mesma política vale para terrenos: se nenhum terreno é confirmado na zona, os terrenos não verificados entram como fallback. Havendo confirmados suficientes, o fallback **não** é acionado e nada de baixa confiança é misturado.
+Quando a validação geográfica confirma **menos de 5** comparáveis na zona (`MIN_CONFIRMADOS_ZONA`), os imóveis `zona_nao_verificada` são anexados a `comparaveis_confirmados` para que os Agentes 3 e 5 não fiquem sem amostra. Esses imóveis recebem `incluido_por_fallback_zona=true` e `confianca_zona="baixa"`, e o acionamento é registrado em `resumo_zona.fallback_zona_acionado`. A mesma política vale para terrenos: com menos de 5 terrenos confirmados na zona, os terrenos não verificados entram como fallback. Havendo confirmados suficientes, o fallback **não** é acionado e nada de baixa confiança é misturado.
 
 ### Raio livre com barreira de sanidade
 

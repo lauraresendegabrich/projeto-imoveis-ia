@@ -37,12 +37,14 @@ def test_avaliacao_tranquila_sem_alertas():
 
 
 def test_poucos_comparaveis():
-    assert codigos(calcular_alertas(execucao(qtd_comparaveis_construcao=3), ag5())) == ["poucos_comparaveis"]
-    assert calcular_alertas(execucao(qtd_comparaveis_construcao=5), ag5()) == []
+    # Minimo exigido = 5; alerta com 5 ou 6 (no limite).
+    assert codigos(calcular_alertas(execucao(qtd_comparaveis_construcao=5), ag5())) == ["poucos_comparaveis"]
+    assert codigos(calcular_alertas(execucao(qtd_comparaveis_construcao=6), ag5())) == ["poucos_comparaveis"]
+    assert calcular_alertas(execucao(qtd_comparaveis_construcao=7), ag5()) == []
 
 
 def test_poucos_comparaveis_so_com_estimativa():
-    # Com menos de 3 o status ja e amostra_insuficiente; nao repete o aviso.
+    # Abaixo do minimo (5) o status ja e amostra_insuficiente; nao repete o aviso.
     e = execucao(status_agente5="amostra_insuficiente", qtd_comparaveis_construcao=1, sobra=None)
     assert calcular_alertas(e, ag5()) == []
 

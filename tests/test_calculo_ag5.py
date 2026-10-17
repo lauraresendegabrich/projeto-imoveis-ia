@@ -62,12 +62,34 @@ def test_casa_curitiba_continua_com_as_duas_series():
     assert r["valor_m2_zona_homogenea"]["construcao"]["combinados"]["quantidade_total"] == 8
 
 
-def test_contagem_de_comparaveis_para_o_minimo_de_3_nao_muda():
-    r = calcular({"propertyType": "apartamento", "area": 100}, [apto(500000, 100), apto(520000, 100)])
-    assert r["status_avaliacao"] == "amostra_insuficiente", r["status_avaliacao"]
-    r = calcular({"propertyType": "apartamento", "area": 100},
-                 [apto(500000, 100), apto(520000, 100), apto(480000, 100)])
+def test_minimo_de_5_comparaveis():
+    alvo = {"propertyType": "apartamento", "area": 100}
+    quatro = [apto(500000 + i * 10000, 100) for i in range(4)]
+    assert calcular(alvo, quatro)["status_avaliacao"] == "amostra_insuficiente"
+    assert calcular(alvo, quatro + [apto(450000, 100)])["status_avaliacao"] == "ok"
+
+
+CASAS_5 = [casa(600000 + i * 50000, 150, 200) for i in range(5)]
+ALVO_CASA = {"propertyType": "casa", "area": 150, "area_terreno": 200}
+
+
+def test_casa_sem_nenhum_terreno_usa_preco_m2_total():
+    r = calcular(ALVO_CASA, CASAS_5, [])
     assert r["status_avaliacao"] == "ok", r["status_avaliacao"]
+    assert r["calculo_terreno"]["aplicado"] is False
+
+
+def test_casa_com_1_a_4_terrenos_fica_sem_estimativa():
+    for n in (1, 4):
+        terrenos = [terreno(200000 + i * 10000, 250) for i in range(n)]
+        r = calcular(ALVO_CASA, CASAS_5, terrenos)
+        assert r["status_avaliacao"] == "amostra_insuficiente", (n, r["status_avaliacao"])
+
+
+def test_casa_com_5_terrenos_separa_terreno():
+    terrenos = [terreno(200000 + i * 10000, 250) for i in range(5)]
+    r = calcular(ALVO_CASA, CASAS_5, terrenos)
+    assert r["status_avaliacao"] == "ok" and r["calculo_terreno"]["aplicado"] is True, r["status_avaliacao"]
 
 
 if __name__ == "__main__":

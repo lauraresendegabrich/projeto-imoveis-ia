@@ -19,7 +19,7 @@ ID = "exec-atual"
 OUTRO = "exec-anterior"
 
 
-def _comparaveis(n=4, preco_base=500000.0):
+def _comparaveis(n=6, preco_base=500000.0):
     return [
         {
             "url": f"https://exemplo/{i}", "propertyType": "Apartamentos", "tipo": "apartamento",

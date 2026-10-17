@@ -25,10 +25,12 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from statistics import mean, median, pstdev
 
+from agents.comparables import MIN_CONFIRMADOS_ZONA
 from agents.identidade import numero as numero_endereco
+from agents.price_liquidity import MIN_AMOSTRAS_CONFIAVEL
 
 # Limites (unico lugar).
-LIMITE_POUCOS_COMPARAVEIS = 4          # 3 a 4 comparaveis: no limite do minimo de 3
+LIMITE_POUCOS_COMPARAVEIS = 6          # 5 a 6 comparaveis: no limite do minimo de 5
 LIMITE_PRECOS_ESPALHADOS = 0.40        # coeficiente de variacao do R$/m2 usado
 LIMITE_DIFERENCA_AVALIACAO_CAIXA = 0.40  # valor de mercado vs avaliacao CAIXA
 LIMITE_DECISAO_APERTADA = 0.05         # |sobra| em relacao ao valor minimo
@@ -67,7 +69,7 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
     usados = ag5.get("comparaveis_usados") or {}
     usados_todos = (usados.get("construcao") or []) + (usados.get("terreno") or [])
 
-    # 1. Poucos comparaveis (so faz sentido com estimativa; com menos de 3 o status
+    # 1. Poucos comparaveis (so faz sentido com estimativa; abaixo do minimo o status
     #    ja e amostra_insuficiente e a decisao e "Sem estimativa").
     if estimativa_ok:
         n_construcao = execucao.get("qtd_comparaveis_construcao") or 0
@@ -75,7 +77,7 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             alertas.append(_alerta(
                 "poucos_comparaveis",
                 f"Só {n_construcao} comparáveis de construção entraram no cálculo "
-                f"(alerta até {LIMITE_POUCOS_COMPARAVEIS}; mínimo exigido: 3). Um anúncio a mais "
+                f"(alerta até {LIMITE_POUCOS_COMPARAVEIS}; mínimo exigido: {MIN_AMOSTRAS_CONFIAVEL}). Um anúncio a mais "
                 f"ou a menos muda bastante o valor.",
                 n_construcao, LIMITE_POUCOS_COMPARAVEIS,
                 [_anuncio(c) for c in usados.get("construcao") or []],
@@ -99,7 +101,7 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
         motivo = (
             "sem verificação de distância (o endereço do imóvel não foi localizado no mapa)"
             if sem_validacao and sem_validacao == len(fora) else
-            "anexados por fallback (menos de 3 confirmados dentro do raio da zona)"
+            f"anexados por fallback (menos de {MIN_CONFIRMADOS_ZONA} confirmados dentro do raio da zona)"
         )
         alertas.append(_alerta(
             "fora_da_zona",

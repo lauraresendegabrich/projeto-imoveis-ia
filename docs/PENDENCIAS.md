@@ -14,8 +14,8 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Regras para levar ao professor
 
-- [ ] **Comparáveis por fallback contam para o mínimo de 3.** Quando menos de 3
-  comparáveis são confirmados na zona homogênea, os "zona não verificada" são
+- [ ] **Comparáveis por fallback contam para o mínimo de 5** (era 3 até 17/10/2026).
+  Quando menos de 5 comparáveis (ou terrenos) são confirmados na zona homogênea, os "zona não verificada" são
   anexados e o Agente 5 os conta normalmente (ex.: ID 20 dos testes). Também
   contam os do Cluster A do Agente 2 quando o alvo não é geocodificado. Não foi
   alterado; o bloco de leilão avisa "Valor baseado em imóveis fora da região
@@ -46,7 +46,7 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   seguinte, 350 m. Os anúncios disponíveis eram os mesmos, mas a amostra caiu de 4
   para 2 casas e a decisão foi de "Não descartar" (sobra R$ 207 mil) para "Sem
   estimativa". São José do Rio Preto variou de 450 para 400 m. Com poucos anúncios
-  na região, 100 m a menos derrubam a amostra abaixo do mínimo de 3. Levar ao
+  na região, 100 m a menos derrubam a amostra abaixo do mínimo (hoje 5). Levar ao
   professor; opções: fixar o raio, usar a média de algumas leituras, ou guardar o
   raio por endereço. Não mexer sem decisão (fora do escopo atual).
 
@@ -59,6 +59,16 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Mínimo de comparáveis passou de 3 para 5** (17/10/2026, decisão da usuária):
+  - Agente 5 (`MIN_AMOSTRAS_CONFIAVEL = 5`): menos de 5 casas/apartamentos, ou menos
+    de 5 terrenos quando a casa separa o terreno → "Sem estimativa".
+  - Casa sem nenhum terreno na zona (ou sem área de terreno informada) continua
+    calculando pelo preço/m² total das casas, e só exige 5 casas.
+  - Agente 2 (`MIN_CONFIRMADOS_ZONA = 5`): com menos de 5 confirmados na zona,
+    anexa os "zona não verificada" (fallback). Terrenos agora seguem a mesma regra
+    (antes: só quando nenhum terreno era confirmado).
+  - Alerta "poucos comparáveis/terrenos" passou de 3–4 para 5–6.
 
 - **Apartamento contado duas vezes na média do Agente 5** — a planilha junta as
   colunas F e G (`MÉDIA.INTERNA($F$38:$G$57)`), que para apartamento/sala são

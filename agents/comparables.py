@@ -112,10 +112,11 @@ FLUXO COMPLETO:
     na_zona / fora_zona / zona_nao_verificada (geocodificado so por bairro).
 
     Fallback de amostra escassa (Opcao B):
-      Se menos de MIN_CONFIRMADOS_ZONA (3) comparaveis forem confirmados na zona,
+      Se menos de MIN_CONFIRMADOS_ZONA (5) comparaveis forem confirmados na zona,
       os imoveis "zona_nao_verificada" sao anexados aos confirmados com
       incluido_por_fallback_zona=True e confianca baixa, para nao deixar os
-      Agentes 3 e 5 sem amostra.
+      Agentes 3 e 5 sem amostra. Terrenos seguem a mesma regra: com menos de 5
+      terrenos confirmados, os terrenos "zona_nao_verificada" sao anexados.
 
 QUEM USA A SAIDA:
 ─────────────────
@@ -160,7 +161,7 @@ LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO = 0.45
 # Se a validacao geografica confirmar menos que isto, os imoveis "zona_nao_verificada"
 # (geocodificados por bairro fora do raio, sem posicao propria) sao anexados como
 # fallback de baixa confianca, para nao deixar o Agente 3/5 sem amostra (Opcao B).
-MIN_CONFIRMADOS_ZONA = 3
+MIN_CONFIRMADOS_ZONA = 5   # igual ao minimo do Agente 5 (MIN_AMOSTRAS_CONFIAVEL); era 3
 
 # Barreira de sanidade para o raio livre escolhido pela LLM de visao.
 # A LLM continua livre para escolher qualquer valor (437, 615, 882, 1340...),
@@ -2848,17 +2849,19 @@ def analisar_zona_homogenea(
             im["incluido_por_fallback_zona"] = True
             im["confianca_zona"] = "baixa"
         confirmados_efetivos = confirmados + nao_verificados
-    # Terrenos seguem a mesma politica: sem terreno confirmado, usa os nao verificados.
-    if not terrenos_confirmados and terrenos_nao_verificados:
+    # Terrenos seguem a mesma politica: com menos de MIN_CONFIRMADOS_ZONA terrenos
+    # confirmados, anexa os nao verificados (antes: so quando nenhum era confirmado).
+    if len(terrenos_confirmados) < MIN_CONFIRMADOS_ZONA and terrenos_nao_verificados:
         fallback_zona_acionado = True
         logger.info(
-            f"[Ag2][Zona] nenhum terreno confirmado na zona; anexando "
+            f"[Ag2][Zona] apenas {len(terrenos_confirmados)} terreno(s) confirmado(s) na zona "
+            f"(minimo desejado={MIN_CONFIRMADOS_ZONA}); anexando "
             f"{len(terrenos_nao_verificados)} terreno(s) nao_verificado(s) como fallback"
         )
         for t in terrenos_nao_verificados:
             t["incluido_por_fallback_zona"] = True
             t["confianca_zona"] = "baixa"
-        terrenos_efetivos = list(terrenos_nao_verificados)
+        terrenos_efetivos = terrenos_confirmados + terrenos_nao_verificados
 
     status = "ok"
     if nao_verificados:
@@ -2879,7 +2882,7 @@ def analisar_zona_homogenea(
         "comparaveis_nao_verificados": nao_verificados,
         # terrenos agora validados geograficamente. "terrenos" aponta para os
         # confirmados (na zona) para o Agente 5 usar so os que sao referencia real;
-        # inclui os nao verificados apenas quando nenhum terreno foi confirmado.
+        # inclui os nao verificados quando ha menos de MIN_CONFIRMADOS_ZONA confirmados.
         "terrenos": terrenos_efetivos,
         "terrenos_confirmados": terrenos_confirmados,
         "terrenos_fora_zona": terrenos_fora_zona,
