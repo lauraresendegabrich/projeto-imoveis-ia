@@ -10,6 +10,7 @@ sys.path.insert(0, ".")
 import agents.collector as ag1
 import agents.comparables as ag2
 from services.athena_client import AthenaClient
+from tests._pasta_temporaria import data_dir_temporario
 
 ALVO = (-23.2938, -51.1580)   # Londrina / Aritana (aprox.)
 
@@ -137,8 +138,9 @@ def test_fallback_da_zona_nao_puxa_os_proximos():
     ag2._classificar_imovel_na_zona = lambda im, *a, **k: (
         "fora_zona" if ag2._so_entra_com_circulo(im) and im["zona"] != "na_zona" else im["zona"])
     try:
-        z = ag2.analisar_zona_homogenea("x", casas, cidade="Londrina", estado="PR", lat_alvo_precomp=ALVO[0],
-                                        lon_alvo_precomp=ALVO[1], terrenos=[], id_execucao="teste")
+        with data_dir_temporario():
+            z = ag2.analisar_zona_homogenea("x", casas, cidade="Londrina", estado="PR", lat_alvo_precomp=ALVO[0],
+                                            lon_alvo_precomp=ALVO[1], terrenos=[], id_execucao="teste")
     finally:
         (ag2._obter_imagem_satelite, ag2._analisar_zona_homogenea, ag2._classificar_imovel_na_zona,
          ag2._centros_da_cidade) = originais

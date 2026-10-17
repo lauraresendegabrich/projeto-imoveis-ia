@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, ".")
 
 import agents.comparables as ag2
+from tests._pasta_temporaria import data_dir_temporario
 
 
 def _simular(monkey):
@@ -31,10 +32,11 @@ def _rodar(casas, terrenos):
         "_classificar_imovel_na_zona": lambda im, *a, **k: im["zona"],
     })
     try:
-        return ag2.analisar_zona_homogenea(
-            "Rua X, 1", casas, cidade="Cidade", estado="SP",
-            lat_alvo_precomp=-20.0, lon_alvo_precomp=-49.0, terrenos=terrenos, id_execucao="teste",
-        )
+        with data_dir_temporario():
+            return ag2.analisar_zona_homogenea(
+                "Rua X, 1", casas, cidade="Cidade", estado="SP",
+                lat_alvo_precomp=-20.0, lon_alvo_precomp=-49.0, terrenos=terrenos, id_execucao="teste",
+            )
     finally:
         _restaurar(originais)
 
