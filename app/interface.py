@@ -74,6 +74,11 @@ def mostrar_avaliacao_leilao(leilao):
         f'font-size:1.35rem;font-weight:700;">{icone} {decisao}</div>',
         unsafe_allow_html=True,
     )
+    if leilao.get("alvo_sem_localizacao"):
+        st.warning(
+            "⚠️ Endereço não localizado no mapa com precisão de rua ou bairro: a distância "
+            "dos comparáveis até o imóvel não foi verificada. Confira antes de decidir."
+        )
     if leilao.get("lance_maximo") is None:
         return
     sobra = leilao["sobra"]
@@ -695,6 +700,10 @@ elif submitted:
         "link": link_caixa.strip() or None,
     }
     leilao = avaliar_leilao(resultado_ag5, valor_minimo_caixa, valor_avaliacao_caixa)
+    if leilao is not None:
+        # Endereco nao localizado com precisao de rua/bairro: o calculo segue, mas o
+        # aviso fica junto da decisao para nao passar despercebido.
+        leilao["alvo_sem_localizacao"] = alvo_sem_localizacao
 
     resultado = {
         "status": "completo",

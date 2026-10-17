@@ -100,7 +100,8 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
     if n_fora:
         sem_validacao = sum(1 for c in fora if c.get("status_zona") == "sem_validacao")
         motivo = (
-            "sem verificação de distância (o endereço do imóvel não foi localizado no mapa)"
+            "usados sem verificação de distância (nenhum comparável confirmado dentro da zona, "
+            "ou endereço do imóvel não localizado no mapa)"
             if sem_validacao and sem_validacao == len(fora) else
             f"anexados por fallback (menos de {MIN_CONFIRMADOS_ZONA} confirmados dentro do raio da zona)"
         )

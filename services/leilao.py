@@ -129,6 +129,11 @@ def linhas_laudo(leilao: dict | None, fmt_brl) -> list[str]:
     if not leilao:
         return []
     linhas = [f"Decisão: {leilao['decisao']}"]
+    if leilao.get("alvo_sem_localizacao"):
+        linhas.append(
+            "Atenção: endereço não localizado no mapa com precisão de rua ou bairro; "
+            "a distância dos comparáveis não foi verificada."
+        )
     if leilao.get("lance_maximo") is not None:
         sobra = leilao["sobra"]
         linhas += [

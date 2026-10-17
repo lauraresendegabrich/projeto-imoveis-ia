@@ -129,6 +129,15 @@ def test_ler_valor_reais_invalidos():
         raise AssertionError(f"deveria recusar {texto!r}")
 
 
+
+def test_laudo_avisa_endereco_nao_localizado():
+    leilao = avaliar_leilao(ag5(liquidez=644432), 323158)
+    leilao["alvo_sem_localizacao"] = True
+    linhas = linhas_laudo(leilao, _brl)
+    assert linhas[0] == "Decisão: Não descartar" and linhas[1].startswith("Atenção: endereço não localizado"), linhas
+    leilao["alvo_sem_localizacao"] = False
+    assert not any("não localizado" in l for l in linhas_laudo(leilao, _brl))
+
 def test_fator_unico():
     assert FATOR_LUCRO_LEILAO == 1.55
 
