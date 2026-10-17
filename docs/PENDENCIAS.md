@@ -38,6 +38,20 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   avaliação e pular o Qwen se ele demorar; fazer o notebook cancelar pedidos
   abandonados; GPU mais forte.
 
+## Agente 1 — Repetidos entre portais (`agents/identidade.py`)
+
+- [ ] **Prioridade baixa. Área do par juntado depende do anúncio que fica.** Ao
+  juntar o mesmo imóvel de dois portais, fica o anúncio mais completo (mais campos
+  preenchidos) com a área dele, sem comparar com a do outro. Curitiba/Cajuru
+  (10/10/2026): 6 de 123 pares tinham área mais de 2% diferente, todos com mesmo
+  código e mesmo preço. Em 3 o outro portal mostrou a área do terreno (ex.: VivaReal
+  80 m² × Chaves na Mão 110 m², terreno 110) e ficou a área certa; em 3 não dá para
+  saber (R$ 660.000: 117 × 127 m², e o link do VivaReal diz 127; R$ 699.000: 117 ×
+  109 m²; R$ 2.290.000: 600 × 506 m²). Saídas possíveis: (1) regra para a área do
+  par — portal mais confiável, a menor (mais conservadora) ou a média; (2) alerta
+  quando as áreas do par diferirem mais de 5%. Recomendação: menor área + alerta
+  (sem dados para ranquear portais; a média mistura o valor certo com o errado).
+
 ## Agente 2 — Zona homogênea (`agents/comparables.py`)
 
 - [ ] **Raio da zona muda entre rodadas do mesmo imóvel.** Quem escolhe o raio é a
