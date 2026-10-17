@@ -440,6 +440,31 @@ class AthenaClient:
         """
         return self.executar_query(sql)
 
+    @staticmethod
+    def condicao_proximidade(lat: float, lon: float, raio_m: float) -> tuple[str, str]:
+        """
+        (condicao, distancia) em SQL para "dentro de raio_m do ponto". Filtra primeiro
+        por uma caixa de latitude/longitude (barato) e depois pela distancia
+        (aproximacao plana, boa ate alguns km; o Agente 1 confere a distancia exata).
+        Anuncio sem latitude/longitude nunca passa.
+        """
+        import math
+        lat, lon, raio_m = float(lat), float(lon), float(raio_m)
+        m_por_grau_lat = 111_320.0
+        m_por_grau_lon = 111_320.0 * max(math.cos(math.radians(lat)), 0.01)
+        dlat, dlon = raio_m / m_por_grau_lat, raio_m / m_por_grau_lon
+        lat_sql, lon_sql = "TRY_CAST(latitude AS double)", "TRY_CAST(longitude AS double)"
+        distancia = (
+            f"sqrt(power(({lat_sql} - ({lat:.7f})) * {m_por_grau_lat:.1f}, 2) + "
+            f"power(({lon_sql} - ({lon:.7f})) * {m_por_grau_lon:.1f}, 2))"
+        )
+        condicao = (
+            f"({lat_sql} BETWEEN {lat - dlat:.7f} AND {lat + dlat:.7f} "
+            f"AND {lon_sql} BETWEEN {lon - dlon:.7f} AND {lon + dlon:.7f} "
+            f"AND {distancia} <= {raio_m:.0f})"
+        )
+        return condicao, distancia
+
     def buscar_bairro_rua(
         self,
         cidade: str,
@@ -448,18 +473,26 @@ class AthenaClient:
         tipo: str = None,
         limit: int = 200,
         estado: str = None,
+        lat_alvo: float = None,
+        lon_alvo: float = None,
+        raio_proximidade_m: float = None,
     ) -> list[dict]:
         """
-        Busca unificada por RUA OU BAIRRO dentro da cidade/UF.
+        Busca unificada por RUA OU BAIRRO dentro da cidade/UF e, quando recebe a
+        coordenada do alvo (localizado com precisao de rua ou bairro), tambem os
+        anuncios a ate raio_proximidade_m dele.
 
         - mesma rua: prioridade 0;
         - mesmo bairro: prioridade 1;
+        - por proximidade: prioridade 2, do mais perto para o mais longe (coluna
+          distancia_alvo_m), para o limite cortar primeiro os mais distantes;
         - deduplica por portal+listing_id/URL/fallback seguro (fica a linha mais recente);
         - tipo aceita um nome ou uma lista de nomes equivalentes (tipo IN (...));
         - tolera caixa, acentos e prefixos comuns (Rua/R., Jardim/Jd. etc.).
         """
         limit = self._normalizar_limit(limit)
-        if not bairro and not rua:
+        usar_proximidade = lat_alvo is not None and lon_alvo is not None and raio_proximidade_m
+        if not bairro and not rua and not usar_proximidade:
             return self.buscar_cidade(
                 cidade=cidade,
                 estado=estado,
@@ -471,15 +504,16 @@ class AthenaClient:
         bairro_cond = (
             self._condicao_texto_local("bairro", bairro, "bairro") if bairro else "FALSE"
         )
-        local_cond = f"({rua_cond} OR {bairro_cond})"
-
-        if rua:
-            prioridade_sql = (
-                f"CASE WHEN {rua_cond} THEN 0 "
-                f"WHEN {bairro_cond} THEN 1 ELSE 2 END"
-            )
+        if usar_proximidade:
+            prox_cond, distancia_sql = self.condicao_proximidade(lat_alvo, lon_alvo, raio_proximidade_m)
         else:
-            prioridade_sql = "1"
+            prox_cond, distancia_sql = "FALSE", "CAST(NULL AS double)"
+        local_cond = f"({rua_cond} OR {bairro_cond} OR {prox_cond})"
+
+        prioridade_sql = (
+            f"CASE WHEN {rua_cond} THEN 0 "
+            f"WHEN {bairro_cond} THEN 1 ELSE 2 END"
+        )
 
         conditions = [
             self._condicao_igual_normalizada("cidade", cidade),
@@ -494,7 +528,7 @@ class AthenaClient:
         chave = self._chave_dedup_sql()
         sql = f"""
             WITH candidatos AS (
-                SELECT *, {prioridade_sql} AS prioridade
+                SELECT *, {prioridade_sql} AS prioridade, {distancia_sql} AS distancia_alvo_m
                 FROM {self.table}
                 WHERE {where}
             ), dedup AS (
@@ -508,7 +542,9 @@ class AthenaClient:
             SELECT *
             FROM dedup
             WHERE rn = 1
-            ORDER BY prioridade ASC, data_publicacao DESC NULLS LAST
+            ORDER BY prioridade ASC,
+                     CASE WHEN prioridade = 2 THEN distancia_alvo_m END ASC NULLS LAST,
+                     data_publicacao DESC NULLS LAST
             LIMIT {limit}
         """
         return self.executar_query(sql)

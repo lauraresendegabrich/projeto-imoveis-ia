@@ -75,10 +75,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   `_geocodificar`) sem a checagem de precisão do Agente 2. Usada só para buscar
   pontos de interesse perto do imóvel; não afeta o valor. Avaliar se deve usar a
   mesma função.
-- [ ] **Etapas seguintes (decididas em 17/10/2026):** Etapa 2 — branch
-  `comparaveis-sem-bairro` (a IA do Agente 2 não julga bairro/rua; a localização fica
-  com a zona). Etapa 3 — refazer o teste de Itaborai com o branch
-  `busca-cidade-poucos-locais` e só então fazer o merge.
+- [ ] **Ligação com a decisão do raio (levar ao professor).** Se o professor escolher
+  "ampliar o raio até ter 5 comparáveis", a busca por proximidade do Agente 1 já
+  fornece os anúncios até 1,5 km do imóvel (`RAIO_PROXIMIDADE_M`); seria preciso só
+  aumentar esse raio junto com o da zona.
+- [ ] **Branch `busca-cidade-poucos-locais` guardado, sem merge.** Buscar a cidade
+  inteira traz os anúncios mais recentes, não os mais próximos (Londrina/Aritana: 353
+  anúncios, 0 casas no círculo, +114 s). Substituído pela busca por proximidade.
 
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
 
@@ -89,6 +92,17 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Busca por proximidade no Agente 1** (branch `busca-proximidade`): com o imóvel
+  localizado com precisão de rua ou bairro, a consulta ao Athena traz também os
+  anúncios a até 1,5 km (caixa de lat/lon + distância), ordenados por rua → bairro →
+  mais próximos. Marcados `origem_busca="proximidade"`: só entram se o círculo da
+  zona confirmar (nunca pelo fallback da zona nem pelo socorro do Agente 5).
+  Londrina/Aritana (casa típica, raio 450 m): antes 2 anúncios e sem amostra; depois
+  9 casas e 57 terrenos no círculo, status ok, R$ 498.104. Tempo total 201 s →
+  507 s (o Agente 3 passou a ter comparáveis para analisar: 14 s → 218 s).
+  Curitiba/Cajuru: 0 anúncios por proximidade, mesmos 320 anúncios (Agente 1
+  ~5–10 s mais lento). Itaboraí: sem mudança (imóvel sem localização).
 
 - **IA do Agente 2 recusando por bairro** (branch `comparaveis-sem-bairro`): o pedido
   de comparabilidade não leva mais bairro/rua e diz que a localização é julgada

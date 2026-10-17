@@ -532,6 +532,47 @@ def _salvar_meta_cache(nome_arquivo: str, consulta: dict) -> None:
                 pass
 
 
+# Busca por proximidade: alem da rua e do bairro, traz os anuncios a ate este raio do
+# imovel (quando ele foi localizado com precisao de rua ou bairro). Ficam marcados
+# com origem_busca="proximidade" e so entram no calculo se a zona do Agente 2
+# confirmar que estao dentro do circulo (nunca pelos socorros do Agente 2 ou 5).
+RAIO_PROXIMIDADE_M = 1500
+NIVEIS_GEO_PRECISOS = {"endereco_completo", "rua_numero", "rua", "bairro"}
+
+
+def _distancia_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Distancia exata (Haversine) em metros."""
+    import math
+    r = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _marcar_proximidade(resultado: list[dict], lat_alvo: float, lon_alvo: float, raio_m: float) -> list[dict]:
+    """
+    Os anuncios que vieram so pela proximidade (prioridade 2 na consulta) recebem
+    origem_busca="proximidade" e distancia_alvo_m exata; os que passam do raio
+    (a consulta usa uma aproximacao) saem.
+    """
+    mantidos = []
+    for im in resultado:
+        if str(im.get("prioridade")) != "2":
+            mantidos.append(im)
+            continue
+        lat, lon = _to_float_safe(im.get("latitude"), None), _to_float_safe(im.get("longitude"), None)
+        if lat is None or lon is None:
+            continue
+        dist = _distancia_m(lat_alvo, lon_alvo, lat, lon)
+        if dist > raio_m:
+            continue
+        im["origem_busca"] = "proximidade"
+        im["distancia_alvo_m"] = round(dist)
+        mantidos.append(im)
+    return mantidos
+
+
 def _eh_leilao(imovel: dict) -> bool:
     """
     Verifica se o anuncio e de leilao pelo titulo, tipo e descricao.
@@ -1437,7 +1478,12 @@ def _ordenar_por_proximidade(imoveis: list[dict], rua: str, bairro: str) -> list
             return 1
         return 2
 
-    ordenados = sorted(imoveis, key=_prio)
+    def _chave(imovel: dict) -> tuple:
+        # Fora da rua/bairro: os trazidos por proximidade, do mais perto ao mais longe.
+        dist = imovel.get("distancia_alvo_m")
+        return (_prio(imovel), dist if isinstance(dist, (int, float)) else float("inf"))
+
+    ordenados = sorted(imoveis, key=_chave)
     grupos = Counter(_prio(i) for i in ordenados)
     logger.info(f"Ordenacao: {grupos[0]} na rua | {grupos[1]} no bairro | {grupos[2]} na cidade")
     return ordenados
@@ -1480,6 +1526,20 @@ def _aplicar_escopo(imoveis: list[dict], rua: str, bairro: str, cidade: str = ""
     Em ambos os casos, imoveis de OUTRA cidade sao descartados (bairro homonimo).
     """
     resultado = _filtrar_matches_locais(imoveis, rua=rua, bairro=bairro, cidade=cidade)
+    # Roda 2 vezes (antes e depois do enriquecimento): quem passou a ser da rua/bairro
+    # perde a marca de proximidade; os demais marcados continuam junto dos locais.
+    locais = {id(im) for im in resultado}
+    for im in resultado:
+        if im.get("origem_busca") == "proximidade":
+            im.pop("origem_busca", None)
+    proximos = [
+        im for im in _filtrar_por_cidade(imoveis, cidade)
+        if id(im) not in locais and im.get("origem_busca") == "proximidade"
+    ]
+    if proximos:
+        escopo = "rua+bairro+proximidade" if resultado else "proximidade"
+        logger.info(f"Escopo: {escopo.upper()} -> {len(resultado)} na rua/bairro + {len(proximos)} por proximidade")
+        return resultado + proximos, escopo
     if rua or bairro:
         if resultado:
             logger.info(f"Escopo: RUA+BAIRRO -> {len(resultado)} imoveis")
@@ -1504,6 +1564,9 @@ def coletar_imoveis(
     rua: str = "",
     usar_cache: bool = False,
     arquivo_processados: str = "imoveis_coletados_ag1.json",
+    lat_alvo: float = None,
+    lon_alvo: float = None,
+    nivel_geo_alvo: str = None,
 ) -> list[dict]:
     """
     Coleta imoveis para o Agente 2. Athena e a fonte principal; Apify complementa
@@ -1550,6 +1613,14 @@ def coletar_imoveis(
         f"[Ag1] Iniciando coleta | {cidade_nome}/{estado_nome} | "
         f"tipo={tipo_imovel} | bairro={bairro} | rua={rua}"
     )
+    # Proximidade so com o alvo localizado com precisao de rua ou bairro.
+    usar_proximidade = (
+        lat_alvo is not None and lon_alvo is not None and nivel_geo_alvo in NIVEIS_GEO_PRECISOS
+    )
+    if usar_proximidade:
+        logger.info(f"[Ag1] Busca por proximidade ligada: ate {RAIO_PROXIMIDADE_M} m do alvo (nivel={nivel_geo_alvo})")
+    elif lat_alvo is not None:
+        logger.info(f"[Ag1] Busca por proximidade desligada: alvo sem precisao de rua/bairro (nivel={nivel_geo_alvo})")
 
     # Tipos da tabela anuncios (padronizados nos 4 portais). Terreno inclui os nomes
     # em ingles que sobraram em ~170 mil linhas antigas do VivaReal (dados nao serao
@@ -1593,7 +1664,14 @@ def coletar_imoveis(
                         estado=estado_nome,
                         tipo=nomes_tipo,
                         limit=limite_tipo * FATOR_BUSCA,
+                        lat_alvo=lat_alvo if usar_proximidade else None,
+                        lon_alvo=lon_alvo if usar_proximidade else None,
+                        raio_proximidade_m=RAIO_PROXIMIDADE_M if usar_proximidade else None,
                     )
+                    if usar_proximidade:
+                        resultado_tipo = _marcar_proximidade(resultado_tipo, lat_alvo, lon_alvo, RAIO_PROXIMIDADE_M)
+                        n_prox = sum(1 for im in resultado_tipo if im.get("origem_busca") == "proximidade")
+                        logger.info(f"[Ag1][Athena] {tipo_sql}: {n_prox} anuncio(s) por proximidade (ate {RAIO_PROXIMIDADE_M} m)")
                 else:
                     resultado_tipo = client.buscar_cidade(
                         cidade=cidade_nome,

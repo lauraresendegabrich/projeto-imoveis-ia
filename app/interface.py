@@ -409,6 +409,11 @@ elif submitted:
             tipo_imovel=imovel_alvo["tipo"],
             bairro=imovel_alvo.get("bairro", ""),
             rua=imovel_alvo.get("rua", ""),
+            # Coordenada e precisao da localizacao feita acima: com rua ou bairro,
+            # o Agente 1 traz tambem os anuncios mais proximos do imovel.
+            lat_alvo=imovel_alvo.get("lat"),
+            lon_alvo=imovel_alvo.get("lon"),
+            nivel_geo_alvo=imovel_alvo.get("geocodificacao_nivel"),
         )
 
     t1 = time.time()
@@ -471,10 +476,16 @@ elif submitted:
         # Antes a tela comparava os nomes letra por letra e dizia "cidade toda"
         # quando o bairro so estava escrito sem acento (ITAJUBA x Itajubá).
         escopo_busca = imoveis_coletados[0].get("escopo_busca")
+        n_proximidade = sum(1 for im in imoveis_coletados if im.get("origem_busca") == "proximidade")
+        if n_proximidade:
+            st.caption(
+                f"ℹ️ {n_proximidade} anúncio(s) vieram por proximidade (até 1,5 km do imóvel, fora da "
+                f"rua e do bairro). Só entram no cálculo se estiverem dentro da zona do imóvel."
+            )
         if (rua or bairro) and escopo_busca == "cidade":
             local = " / ".join(x for x in (rua, bairro) if x)
             st.caption(f"ℹ️ Nenhum imóvel encontrado em {local}. Usando imóveis da cidade toda.")
-        elif rua and escopo_busca == "rua+bairro":
+        elif rua and escopo_busca in ("rua+bairro", "rua+bairro+proximidade"):
             na_rua = sum(1 for im in imoveis_coletados if _mesma_rua(im.get("street") or im.get("rua"), rua))
             if na_rua > 0:
                 st.caption(f"ℹ️ {na_rua} imóveis encontrados na mesma rua ({rua})")

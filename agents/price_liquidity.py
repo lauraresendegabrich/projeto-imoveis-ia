@@ -334,9 +334,12 @@ def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, Li
     if not todos_comparaveis and zona_desta_execucao:
         ag2 = _ler(caminho_ag2)
         if ag2:
+            # Anuncios trazidos de fora da rua/bairro (proximidade) so valem com o
+            # circulo da zona confirmando a distancia; no socorro nao ha circulo.
             todos_comparaveis = [
                 dict(c, _sem_validacao_zona=True)
-                for c in ag2.get("comparaveis", []) if c.get("cluster") == "A"
+                for c in ag2.get("comparaveis", [])
+                if c.get("cluster") == "A" and c.get("origem_busca") not in ("proximidade", "cidade")
             ]
             logger_local.info(f"Fallback zona: usando {len(todos_comparaveis)} comparaveis do Cluster A")
     elif not zona_desta_execucao:

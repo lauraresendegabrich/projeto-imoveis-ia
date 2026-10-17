@@ -2683,6 +2683,17 @@ def _classificar_por_distancia(distancia_metros: float, raio_zona: int | float =
         raio = float(RAIO_FALLBACK_METROS)
     return "na_zona" if distancia_metros <= raio else "fora_zona"
 
+# Anuncios trazidos de fora da rua/bairro pelo Agente 1 (busca por proximidade):
+# so entram no calculo se o circulo da zona confirmar a distancia. Sem posicao
+# confirmada contam como fora_zona, para nunca entrarem pelo fallback de
+# "zona nao verificada" (nem pelo socorro do Agente 5, que tambem os ignora).
+ORIGENS_SO_COM_CIRCULO = {"proximidade", "cidade"}
+
+
+def _so_entra_com_circulo(im: dict) -> bool:
+    return im.get("origem_busca") in ORIGENS_SO_COM_CIRCULO
+
+
 def _classificar_imovel_na_zona(
     im: dict,
     lat_alvo: float,
@@ -2727,11 +2738,12 @@ def _classificar_imovel_na_zona(
 
     if lat is None or lon is None:
         im["distancia_metros"] = None
-        im["classificacao_zona"] = "zona_nao_verificada"
         im["coordenadas"] = None
         im["geocodificacao_nivel"] = None
         im["endereco_geocodificado"] = None
-        return "zona_nao_verificada"
+        classificacao = "fora_zona" if _so_entra_com_circulo(im) else "zona_nao_verificada"
+        im["classificacao_zona"] = classificacao
+        return classificacao
 
     dist = _distancia_haversine(lat_alvo, lon_alvo, lat, lon)
     im["distancia_metros"] = round(dist)
@@ -2754,15 +2766,16 @@ def _classificar_imovel_na_zona(
             and (round(lat, 4), round(lon, 4)) in coords_repetidas):
         motivo_generica = "mesma coordenada em varios anuncios de bairros diferentes"
     if motivo_generica:
-        im["classificacao_zona"] = "zona_nao_verificada"
+        classificacao = "fora_zona" if _so_entra_com_circulo(im) else "zona_nao_verificada"
+        im["classificacao_zona"] = classificacao
         im["confianca_geocodificacao"] = "baixa"
         im["motivo_zona_nao_verificada"] = f"coordenada generica ({motivo_generica})"
         logger.info(
             f"[Ag2][Zona] coordenada generica ({motivo_generica}): "
             f"{im.get('neighborhood') or im.get('bairro') or '?'} | {str(im.get('url') or '')[:60]} "
-            f"-> zona_nao_verificada"
+            f"-> {classificacao}"
         )
-        return "zona_nao_verificada"
+        return classificacao
 
     # A geocodificacao no nivel bairro usa o centroide do bairro como aproximacao
     # da posicao do imovel (nao ha rua/coordenada propria). A regra:
@@ -2772,7 +2785,7 @@ def _classificar_imovel_na_zona(
     #     real e desconhecida): marcamos zona_nao_verificada, categoria que nao
     #     descarta o imovel e permite recupera-lo depois via fallback (Opcao B).
     classificacao = _classificar_por_distancia(dist, raio)
-    if nivel == "bairro" and classificacao == "fora_zona":
+    if nivel == "bairro" and classificacao == "fora_zona" and not _so_entra_com_circulo(im):
         classificacao = "zona_nao_verificada"
     im["classificacao_zona"] = classificacao
     return classificacao
