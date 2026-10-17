@@ -80,6 +80,55 @@ def ler_data_br(texto) -> date | None:
     raise ValueError(texto)
 
 
+def contar_status_zona(resultado_ag5: dict | None) -> dict:
+    """
+    Quantos comparaveis usados pelo Agente 5 (construcao e terreno) foram:
+      confirmado    = dentro do raio da zona homogenea;
+      fallback      = "zona nao verificada": completaram a amostra porque havia menos
+                      de 5 confirmados (a distancia nao pode ser medida);
+      sem_validacao = socorro do Agente 5: Cluster A usado sem nenhum confirmado.
+    Os de fallback e sem_validacao contam para o minimo de 5 (decisao do professor,
+    17/10/2026); o aviso na tela, no laudo e nos logs deixa isso claro.
+    """
+    usados = (resultado_ag5 or {}).get("comparaveis_usados") or {}
+    contagem = {"confirmado": 0, "fallback": 0, "sem_validacao": 0}
+    for lista in (usados.get("construcao") or [], usados.get("terreno") or []):
+        for comparavel in lista:
+            status = comparavel.get("status_zona") or "confirmado"
+            contagem[status if status in contagem else "confirmado"] += 1
+    contagem["total"] = sum(contagem.values())
+    return contagem
+
+
+def texto_aviso_zona(contagem: dict, escopo_busca: str | None = None) -> str | None:
+    """
+    Aviso com numeros sobre os comparaveis cuja distancia nao foi verificada (e sobre
+    a busca na cidade toda). None quando todos foram confirmados perto do imovel.
+    """
+    partes = []
+    total = contagem.get("total", 0)
+    if contagem.get("sem_validacao"):
+        partes.append(
+            f"Nenhum comparável foi confirmado perto do imóvel. O valor usa "
+            f"{contagem['sem_validacao']} imóveis parecidos encontrados na busca, sem verificar "
+            f"a distância. Confira esses anúncios antes de decidir."
+        )
+    elif contagem.get("fallback"):
+        partes.append(
+            f"Só {contagem.get('confirmado', 0)} dos {total} comparáveis foram confirmados perto "
+            f"do imóvel (dentro da zona homogênea). Os outros {contagem['fallback']} não têm "
+            f"localização exata no anúncio, então não foi possível medir a distância: podem "
+            f"estar perto ou longe. Eles contam para o mínimo de 5. Confira esses anúncios "
+            f"antes de decidir."
+        )
+    if escopo_busca == "cidade":
+        partes.append(
+            "Nenhum anúncio foi encontrado na rua ou no bairro do imóvel; o valor usa imóveis "
+            "parecidos de outros bairros da cidade."
+        )
+    return " ".join(partes) or None
+
+
 def _numero(valor) -> float | None:
     try:
         numero = float(valor)
@@ -170,8 +219,8 @@ def linhas_laudo(leilao: dict | None, fmt_brl) -> list[str]:
             f"(lance máximo = liquidez ÷ {leilao['fator_lucro']:.2f}; "
             f"lucro de 55% com os custos de aquisição incluídos)",
         ]
-        if leilao.get("comparaveis_fora_da_regiao"):
-            linhas.append("Atenção: valor baseado em imóveis fora da região exata.")
+        if leilao.get("aviso_zona"):
+            linhas.append(f"Atenção: {leilao['aviso_zona']}")
     else:
         linhas.append(f"Valor mínimo CAIXA: {fmt_brl(leilao['valor_minimo'])}")
     if leilao.get("valor_avaliacao"):

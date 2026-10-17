@@ -294,7 +294,7 @@ ROTULOS_TIPO_COMPARAVEL = {"construcao": "Construção", "terreno": "Terreno"}
 ROTULOS_ALERTAS = {
     "poucos_comparaveis": "Poucos comparáveis",
     "poucos_terrenos": "Poucos terrenos",
-    "fora_da_zona": "Comparáveis fora da zona",
+    "fora_da_zona": "Distância não verificada",
     "precos_espalhados": "Preços muito espalhados",
     "diferente_avaliacao_caixa": "Diferente da avaliação CAIXA",
     "decisao_apertada": "Decisão apertada",
@@ -308,7 +308,7 @@ ROTULOS_ALERTAS = {
 
 ROTULOS_STATUS_ZONA = {
     "confirmado": "Confirmado na zona",
-    "fallback": "Fora da zona (fallback)",
+    "fallback": "Distância não verificada",
     "sem_validacao": "Sem validação de distância",
 }
 

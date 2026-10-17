@@ -116,7 +116,7 @@ anúncios com endereço e link, os R$/m² extremos, o erro do agente...).
 |---|---|
 | `poucos_comparaveis` | 5 a 6 comparáveis de construção no cálculo (mínimo exigido: 5) |
 | `poucos_terrenos` | 5 a 6 terrenos, quando a casa separa terreno e construção |
-| `fora_da_zona` | algum comparável do cálculo veio por fallback ou sem validação de distância |
+| `fora_da_zona` | algum comparável do cálculo está com a distância não verificada (fallback "zona não verificada" ou socorro sem validação); não estão comprovadamente longe, e contam para o mínimo de 5 |
 | `precos_espalhados` | coeficiente de variação do R$/m² usado acima de 40% |
 | `diferente_avaliacao_caixa` | valor de mercado mais de 40% acima ou abaixo do valor de avaliação CAIXA |
 | `decisao_apertada` | sobra ou falta menor que 5% do valor mínimo |

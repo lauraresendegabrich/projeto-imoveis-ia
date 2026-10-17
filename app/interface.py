@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
 from services.leilao import (
-    FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, ler_data_br, ler_valor_reais,
+    FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, contar_status_zona,
+    ler_data_br, ler_valor_reais, texto_aviso_zona,
 )
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
@@ -97,8 +98,8 @@ def mostrar_avaliacao_leilao(leilao):
     )
     if leilao.get("valor_avaliacao"):
         st.caption(f"Valor de avaliação CAIXA (informativo): {fmt_brl(leilao['valor_avaliacao'])}")
-    if leilao.get("comparaveis_fora_da_regiao"):
-        st.warning("⚠️ Valor baseado em imóveis fora da região exata.")
+    if leilao.get("aviso_zona"):
+        st.warning(f"⚠️ {leilao['aviso_zona']}")
 
 
 # Streamlit Cloud: carrega secrets como variáveis de ambiente
@@ -675,6 +676,8 @@ elif submitted:
         st.write("**Agente Estimador de Preço** — Calculando o valor do seu imóvel com base nos preços da vizinhança...")
 
     resultado_ag5 = {}
+    escopo_busca = imoveis_coletados[0].get("escopo_busca") if imoveis_coletados else None
+    imovel_alvo["escopo_busca"] = escopo_busca   # so para o log do Agente 5
     try:
         resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo, id_execucao=id_execucao)
         valor = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_medio_imovel", 0)
@@ -702,6 +705,14 @@ elif submitted:
     _lr.info(f"  Agente 2 (clustering): {tempo_ag2_cluster:.1f}s")
     _lr.info(f"  Agente 3+4 (paralelo): {tempo_ag34:.1f}s")
     _lr.info(f"  Tempo total: {tempo_total:.1f}s")
+    # Comparaveis usados por situacao da zona (os nao verificados contam para o minimo).
+    contagem_zona = contar_status_zona(resultado_ag5)
+    aviso_zona = texto_aviso_zona(contagem_zona, escopo_busca)
+    _lr.info(
+        f"  Usados no calculo: {contagem_zona['confirmado']} confirmados | "
+        f"{contagem_zona['fallback']} zona_nao_verificada (contam para o minimo de 5) | "
+        f"{contagem_zona['sem_validacao']} sem_validacao (socorro) | escopo_busca={escopo_busca}"
+    )
     _lr.info("=" * 55)
 
     # Monta resultado para exibição
@@ -743,6 +754,7 @@ elif submitted:
     }
     leilao = avaliar_leilao(resultado_ag5, valor_minimo_caixa, valor_avaliacao_caixa)
     if leilao is not None:
+        leilao["aviso_zona"] = aviso_zona
         # Endereco nao localizado com precisao de rua/bairro: o calculo segue, mas o
         # aviso fica junto da decisao para nao passar despercebido.
         leilao["alvo_sem_localizacao"] = alvo_sem_localizacao
@@ -750,6 +762,7 @@ elif submitted:
     resultado = {
         "status": "completo",
         "id_execucao": id_execucao,
+        "aviso_zona": aviso_zona,
         "leilao_entrada": leilao_entrada,
         "leilao": leilao,
         "duplicatas_descartadas": duplicatas_descartadas,
@@ -865,6 +878,11 @@ if "resultado" in st.session_state:
         with col_c:
             tempo = liquidez_info.get("tempo_estimado", "?")
             st.metric("⏱️ Tempo Estimado de Venda", tempo if avaliacao_confiavel else "—")
+
+        # Comparaveis com a distancia nao verificada (contam para o minimo de 5) e
+        # busca na cidade toda: aviso com numeros, com ou sem valor minimo CAIXA.
+        if resultado.get("aviso_zona"):
+            st.warning(f"⚠️ {resultado['aviso_zona']}")
 
         mostrar_avaliacao_leilao(resultado.get("leilao"))
 
@@ -1499,8 +1517,13 @@ if "resultado" in st.session_state:
                             alertas.append("⚠️ possível alvo (perfil)")
                         if u.get("suspeita_leilao"):
                             alertas.append("⚠️ leilão?")
+                        localizacao_u = (
+                            "✅ Confirmado na zona" if (u.get("status_zona") or "confirmado") == "confirmado"
+                            else "📍 Distância não verificada"
+                        )
                         linhas.append({
                             "Tipo": rotulo,
+                            "Localização": localizacao_u,
                             "Preço": fmt_brl(preco_u) if preco_u else "-",
                             "Área": f"{float(area_u):.0f}m²" if area_u else "-",
                             "Rua": u.get("rua") or "-",

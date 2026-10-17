@@ -167,10 +167,10 @@ def test_excel_alertas_com_motivo_e_anuncios():
     linhas = list(livro["Alertas"].iter_rows(values_only=True))
     assert linhas[0][:2] == ("Alerta", "Motivo")
     nomes = [l[0] for l in linhas[1:] if l[0]]
-    assert "Comparáveis fora da zona" in nomes and "Falha de agente" in nomes, nomes
+    assert "Distância não verificada" in nomes and "Falha de agente" in nomes, nomes
     assert resumo["Alertas"] == f"{len(nomes)} (veja a aba Alertas)"
     # o anuncio fora da zona aparece logo abaixo do alerta, com link clicavel
-    i = next(i for i, l in enumerate(linhas) if l[0] == "Comparáveis fora da zona")
+    i = next(i for i, l in enumerate(linhas) if l[0] == "Distância não verificada")
     assert linhas[i + 1][1].startswith("↳ Rua B") and linhas[i + 1][5] == "https://a/2"
     assert livro["Alertas"].cell(row=i + 2, column=6).hyperlink is not None
     # o erro do agente aparece abaixo da falha
@@ -199,7 +199,7 @@ def test_excel_comparaveis_um_por_linha_com_link():
     assert len(corpo) == len(comps)
     assert [l[0] for l in corpo] == ["Construção", "Construção", "Construção", "Terreno"]
     assert [l[1] for l in corpo[:3]] == ["Sim", "Sim", "Não"]   # usados antes dos descartados
-    assert "Fora da zona (fallback)" in [l[2] for l in corpo]
+    assert "Distância não verificada" in [l[2] for l in corpo]
     assert aba.cell(row=2, column=10).hyperlink is not None
     assert aba.freeze_panes == "A2"
 

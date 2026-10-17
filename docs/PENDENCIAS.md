@@ -14,12 +14,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Regras para levar ao professor
 
-- [ ] **Comparáveis por fallback contam para o mínimo de 5** (era 3 até 17/10/2026).
-  Quando menos de 5 comparáveis (ou terrenos) são confirmados na zona homogênea, os "zona não verificada" são
-  anexados e o Agente 5 os conta normalmente (ex.: ID 20 dos testes). Também
-  contam os do Cluster A do Agente 2 quando o alvo não é geocodificado. Não foi
-  alterado; o bloco de leilão avisa "Valor baseado em imóveis fora da região
-  exata" nesses casos.
+- [ ] **Socorro com o imóvel localizado: usar só os parecidos mais próximos.** Hoje,
+  quando a zona não confirma nenhum comparável, o socorro do Agente 5 usa todos os
+  parecidos (Cluster A). Proposta: com o imóvel localizado, usar só os mais próximos
+  (ex.: os 5 mais perto, até 3 km), em vez de todos.
+- [ ] **Imóvel não localizado e sem anúncios no bairro.** O socorro usa parecidos da
+  cidade toda, sem verificar distância. Aceitar com aviso (como hoje) ou dar
+  "sem estimativa"?
 - [ ] **Mínimo de terrenos incoerente no Agente 5** (`agents/price_liquidity.py`).
   Casa com área de terreno informada: com 0 terrenos na zona, o valor sai pelo m²
   das casas (sem separar o terreno); com 1 a 4 terrenos, o terreno é separado e,
@@ -68,16 +69,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Agente 2 — Zona homogênea (`agents/comparables.py`)
 
-- [ ] **Raio da zona muda entre rodadas do mesmo imóvel.** Quem escolhe o raio é a
-  IA de visão olhando a imagem de satélite, e ela não responde igual toda vez. Teste
-  de 10/10/2026: Curitiba/Cajuru (Rua Raul de Oliveira) saiu com 450 m e, na rodada
-  seguinte, 350 m. Os anúncios disponíveis eram os mesmos, mas a amostra caiu de 4
-  para 2 casas e a decisão foi de "Não descartar" (sobra R$ 207 mil) para "Sem
-  estimativa". São José do Rio Preto variou de 450 para 400 m. Com poucos anúncios
-  na região, 100 m a menos derrubam a amostra abaixo do mínimo (hoje 5). Levar ao
-  professor; opções: fixar o raio, usar a média de algumas leituras, ou guardar o
-  raio por endereço. Não mexer sem decisão (fora do escopo atual).
-
 - [ ] **Socorro do Agente 5 com o alvo localizado (levar ao professor; não mexer
   antes da decisão sobre raio e socorro).** Quando a zona não confirma nenhum
   comparável, o Agente 5 usa todo o Cluster A do Agente 2 ("sem validação"),
@@ -85,6 +76,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   quando o alvo não foi localizado. Ex.: Cuiabá (10/10/2026) — alvo localizado,
   raio 350 m, 0 no círculo, 60 comparáveis pelo socorro, decisão "Descartar";
   enquanto Curitiba com 2 no círculo deu "Sem estimativa".
+- [ ] **Trava `ORIGENS_SO_COM_CIRCULO` inclui "cidade" sem efeito hoje**
+  (`agents/comparables.py`). Ela garante que anúncios trazidos de fora da rua/bairro
+  só entram com o círculo confirmando. "proximidade" é marcado pelo Agente 1; "cidade"
+  ficou para a busca na cidade inteira (branch `busca-cidade-poucos-locais`, sem
+  merge), então hoje o Agente 1 nunca marca `origem_busca="cidade"` e essa parte da
+  trava não tem efeito. Os anúncios da busca antiga na cidade (sem nenhum na
+  rua/bairro) não são marcados e podem entrar pelo fallback e pelo socorro.
 - [ ] **Agente 4 tem geocodificação própria** (`agents/infra_evaluator.py`,
   `_geocodificar`) sem a checagem de precisão do Agente 2. Usada só para buscar
   pontos de interesse perto do imóvel; não afeta o valor. Avaliar se deve usar a
@@ -115,6 +113,19 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Comparáveis por fallback contam para o mínimo de 5.** Decisão do professor
+  (17/10/2026): manter; aviso com números na tela, no laudo e nos logs. A tela
+  mostra, abaixo do valor e no bloco do leilão, quantos comparáveis foram
+  confirmados perto do imóvel e quantos estão com a distância não verificada
+  (`services/leilao.py`, `texto_aviso_zona`); a tabela dos imóveis usados mostra
+  "Confirmado na zona" ou "Distância não verificada"; o Agente 5 e o resumo da
+  execução registram a contagem no log. No Excel e no alerta, "Fora da zona
+  (fallback)" virou "Distância não verificada" (não estão comprovadamente longe).
+- **Raio da zona muda entre rodadas do mesmo imóvel.** Decisão do professor
+  (17/10/2026): manter o raio escolhido pela IA a cada avaliação. A variação entre
+  rodadas é uma limitação conhecida; o raio usado fica registrado no banco
+  (`raio_zona_m`) e no Excel.
 
 - **Banco e Excel passaram a registrar a localização e os dados do leilão** (branch
   `registro-localizacao-leilao`, migração `002`). Novas colunas em `execucoes`:

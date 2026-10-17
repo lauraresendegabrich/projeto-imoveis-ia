@@ -8,7 +8,9 @@ import sys
 
 sys.path.insert(0, ".")
 
-from services.leilao import FATOR_LUCRO_LEILAO, avaliar_leilao, ler_valor_reais, linhas_laudo
+from services.leilao import (
+    FATOR_LUCRO_LEILAO, avaliar_leilao, contar_status_zona, ler_valor_reais, linhas_laudo, texto_aviso_zona,
+)
 
 
 def ag5(status="ok", liquidez=None, usados=None):
@@ -151,6 +153,50 @@ def test_ler_data_br():
             continue
         raise AssertionError(f"aceitou data invalida: {texto}")
 
+
+
+# ---------------------------------------------------------------- aviso da zona
+def _ag5_usados(construcao, terreno=()):
+    return {"comparaveis_usados": {"construcao": [{"status_zona": s} for s in construcao],
+                                   "terreno": [{"status_zona": s} for s in terreno]}}
+
+
+def test_aviso_so_confirmados_nao_tem_aviso():
+    c = contar_status_zona(_ag5_usados(["confirmado"] * 5, ["confirmado"] * 5))
+    assert c == {"confirmado": 10, "fallback": 0, "sem_validacao": 0, "total": 10}, c
+    assert texto_aviso_zona(c, "rua+bairro") is None
+
+
+def test_aviso_com_fallback_tem_os_numeros():
+    c = contar_status_zona(_ag5_usados(["confirmado"] * 2 + ["fallback"] * 3, ["confirmado"] * 5))
+    assert c["confirmado"] == 7 and c["fallback"] == 3 and c["total"] == 10, c
+    texto = texto_aviso_zona(c, "rua+bairro")
+    assert texto.startswith("Só 7 dos 10 comparáveis foram confirmados perto do imóvel (dentro da zona homogênea).")
+    assert "Os outros 3 não têm localização exata no anúncio" in texto
+    assert "Eles contam para o mínimo de 5. Confira esses anúncios antes de decidir." in texto
+
+
+def test_aviso_com_sem_validacao():
+    c = contar_status_zona(_ag5_usados(["sem_validacao"] * 6))
+    texto = texto_aviso_zona(c, "rua+bairro")
+    assert texto == ("Nenhum comparável foi confirmado perto do imóvel. O valor usa 6 imóveis parecidos "
+                     "encontrados na busca, sem verificar a distância. Confira esses anúncios antes de decidir."), texto
+
+
+def test_aviso_escopo_cidade():
+    so_cidade = texto_aviso_zona(contar_status_zona(_ag5_usados(["confirmado"] * 5)), "cidade")
+    assert so_cidade == ("Nenhum anúncio foi encontrado na rua ou no bairro do imóvel; o valor usa imóveis "
+                         "parecidos de outros bairros da cidade."), so_cidade
+    junto = texto_aviso_zona(contar_status_zona(_ag5_usados(["sem_validacao"] * 6)), "cidade")
+    assert junto.startswith("Nenhum comparável foi confirmado") and junto.endswith("outros bairros da cidade.")
+
+
+def test_laudo_usa_o_texto_novo_do_aviso():
+    leilao = avaliar_leilao(ag5(liquidez=644432), 323158)
+    leilao["aviso_zona"] = texto_aviso_zona(contar_status_zona(_ag5_usados(["confirmado"] * 2 + ["fallback"] * 3)))
+    linhas = linhas_laudo(leilao, _brl)
+    assert "Atenção: Só 2 dos 5 comparáveis foram confirmados perto do imóvel" in " | ".join(linhas), linhas
+    assert not any("fora da região exata" in l for l in linhas)
 
 def test_fator_unico():
     assert FATOR_LUCRO_LEILAO == 1.55

@@ -96,7 +96,8 @@ def test_motivo_exato_fora_da_zona_lista_os_anuncios():
     ], "terreno": []}
     a = calcular_alertas(execucao(usados_por_fallback=1), ag5(usados=usados))[0]
     assert a["codigo"] == "fora_da_zona"
-    assert "1 de 2 comparáveis" in a["mensagem"] and "fallback" in a["mensagem"]
+    assert "1 de 2 comparáveis" in a["mensagem"] and "distância não verificada" in a["mensagem"]
+    assert "contam para o mínimo" in a["mensagem"]
     assert a["detalhe"] == [{"endereco": "Rua B, 20", "bairro": None, "preco": 500000, "area": 100,
                              "portal": None, "status_zona": "fallback", "link": "https://a/2"}]
 

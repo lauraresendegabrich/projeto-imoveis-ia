@@ -94,7 +94,8 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
                 [_anuncio(c) for c in usados.get("terreno") or []],
             ))
 
-    # 2. Comparaveis fora da zona confirmada (fallback ou sem validacao de distancia).
+    # 2. Comparaveis com a distancia nao verificada (fallback ou sem validacao). Nao
+    #    estao comprovadamente longe: so nao foi possivel medir. Contam para o minimo.
     fora = [c for c in usados_todos if c.get("status_zona") in ("fallback", "sem_validacao")]
     n_fora = len(fora) or (execucao.get("usados_por_fallback") or 0)
     if n_fora:
@@ -103,12 +104,14 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             "usados sem verificação de distância (nenhum comparável confirmado dentro da zona, "
             "ou endereço do imóvel não localizado no mapa)"
             if sem_validacao and sem_validacao == len(fora) else
-            f"anexados por fallback (menos de {MIN_CONFIRMADOS_ZONA} confirmados dentro do raio da zona)"
+            f"sem localização exata no anúncio, completaram a amostra porque havia menos de "
+            f"{MIN_CONFIRMADOS_ZONA} confirmados dentro do raio da zona"
         )
         alertas.append(_alerta(
             "fora_da_zona",
-            f"{n_fora} de {len(usados_todos) or '?'} comparáveis do cálculo não foram confirmados "
-            f"na zona homogênea: {motivo}.",
+            f"{n_fora} de {len(usados_todos) or '?'} comparáveis do cálculo estão com a distância "
+            f"não verificada (podem estar perto ou longe; contam para o mínimo de "
+            f"{MIN_CONFIRMADOS_ZONA}): {motivo}.",
             n_fora, 0, [_anuncio(c) for c in fora],
         ))
 

@@ -1298,6 +1298,23 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optiona
     logger.info(f"[Ag5] Valor medio: R$ {ap['valor_medio_imovel']:,.2f}")
     logger.info(f"[Ag5] Valor liquidez: R$ {ap['valor_liquidez']:,.2f} (desconto {ap['desconto_liquidez_percentual']}%)")
 
+    # Situacao da zona dos comparaveis usados. Os "zona nao verificada" (fallback) e os
+    # do socorro (sem_validacao) contam para o minimo (decisao do professor, 17/10/2026).
+    usados = resultado.get("comparaveis_usados") or {}
+    status = [c.get("status_zona") or "confirmado"
+              for lista in (usados.get("construcao") or [], usados.get("terreno") or []) for c in lista]
+    n_conf, n_fb, n_sv = status.count("confirmado"), status.count("fallback"), status.count("sem_validacao")
+    escopo_busca = (imovel_alvo_extra or {}).get("escopo_busca")
+    linha_zona = (
+        f"[Ag5][Zona] usados no calculo: {n_conf} confirmados | {n_fb} zona_nao_verificada "
+        f"(contam para o minimo de {MIN_AMOSTRAS_CONFIAVEL}) | {n_sv} sem_validacao (socorro) | "
+        f"escopo_busca={escopo_busca}"
+    )
+    if n_fb or n_sv or escopo_busca == "cidade":
+        logger.warning(linha_zona)
+    else:
+        logger.info(linha_zona)
+
     return resultado
 
 
