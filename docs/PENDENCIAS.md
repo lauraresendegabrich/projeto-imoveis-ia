@@ -75,6 +75,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   `_geocodificar`) sem a checagem de precisão do Agente 2. Usada só para buscar
   pontos de interesse perto do imóvel; não afeta o valor. Avaliar se deve usar a
   mesma função.
+- [ ] **Prioridade baixa. Apify sem contar a proximidade.** O Agente 1 aciona a coleta
+  complementar do Apify quando a rua e o bairro têm menos de 10 anúncios, sem contar
+  os que vieram por proximidade. Em Londrina/Aritana o Apify rodou mesmo com 319
+  anúncios por proximidade. Melhoria: contar também os por proximidade até ~500 m
+  antes de acionar o Apify, para não rodar à toa quando a proximidade já trouxe amostra.
+- [ ] **Decisão registrada: a proximidade fica dentro da mesma cidade.** A consulta por
+  proximidade mantém o filtro de cidade e estado, então vizinhos de outro município
+  (ex.: imóvel na divisa) não entram, mesmo a menos de 1,5 km. Decisão conservadora
+  (17/10/2026); rever se aparecerem casos de divisa.
 - [ ] **Ligação com a decisão do raio (levar ao professor).** Se o professor escolher
   "ampliar o raio até ter 5 comparáveis", a busca por proximidade do Agente 1 já
   fornece os anúncios até 1,5 km do imóvel (`RAIO_PROXIMIDADE_M`); seria preciso só
