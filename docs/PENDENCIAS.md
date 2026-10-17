@@ -64,6 +64,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   professor; opções: fixar o raio, usar a média de algumas leituras, ou guardar o
   raio por endereço. Não mexer sem decisão (fora do escopo atual).
 
+- [ ] **Socorro do Agente 5 com o alvo localizado (levar ao professor; não mexer
+  antes da decisão sobre raio e socorro).** Quando a zona não confirma nenhum
+  comparável, o Agente 5 usa todo o Cluster A do Agente 2 ("sem validação"),
+  inclusive anúncios que a zona classificou como FORA do raio. Deveria valer só
+  quando o alvo não foi localizado. Ex.: Cuiabá (10/10/2026) — alvo localizado,
+  raio 350 m, 0 no círculo, 60 comparáveis pelo socorro, decisão "Descartar";
+  enquanto Curitiba com 2 no círculo deu "Sem estimativa".
 - [ ] **Agente 4 tem geocodificação própria** (`agents/infra_evaluator.py`,
   `_geocodificar`) sem a checagem de precisão do Agente 2. Usada só para buscar
   pontos de interesse perto do imóvel; não afeta o valor. Avaliar se deve usar a
@@ -82,6 +89,14 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **IA do Agente 2 recusando por bairro** (branch `comparaveis-sem-bairro`): o pedido
+  de comparabilidade não leva mais bairro/rua e diz que a localização é julgada
+  depois pela zona. Itaboraí (casas da cidade inteira, 18 julgadas pela IA): antes
+  0 aprovadas e 18 recusas citando bairro (2 rodadas); depois 14 e 11 aprovadas,
+  nenhuma recusa por bairro. Curitiba/Cajuru: aprovadas 50 → 44 (variação da IA);
+  zona igual (6 casas e 4 terrenos confirmados); tempo do Agente 2 90 s → 115 s e
+  zona 24 s → 22 s (variam com o provedor da IA).
 
 - **Localização imprecisa tratada como exata** (branch `geocodificacao-precisa`):
   `_geocodificar` recusa resultados com precisão de cidade (Nominatim

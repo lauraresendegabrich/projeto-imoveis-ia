@@ -1073,14 +1073,16 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
     Prompt de comparabilidade sem preco/preco-m2 para evitar circularidade na precificacao.
     Inclui descricao curta e caracteristicas extraidas para dar contexto qualitativo a LLM.
     O score Python tambem nao e enviado, evitando ancoragem.
+
+    Sem bairro e rua (out/2026): a localizacao e julgada depois, pela zona homogenea
+    (distancia). Com bairro no prompt, a IA recusava candidatos de outro bairro antes
+    de o circulo medir a distancia (Itaborai: 18 de 18 recusados por bairro).
     """
     terreno_alvo = _obter_area_terreno(alvo) if _eh_casa(alvo) else None
     alvo_resumo = (
         f"Tipo={alvo.get('propertyType') or alvo.get('tipo') or '?'} "
         f"Area={_obter_area_construida(alvo) or '?'}m2 "
-        f"Q={alvo.get('bedrooms', '?')} B={alvo.get('bathrooms', '?')} V={alvo.get('parkingSpaces', '?')} "
-        f"Bairro={alvo.get('neighborhood') or alvo.get('bairro') or '?'} "
-        f"Rua={alvo.get('street') or alvo.get('rua') or '?'}"
+        f"Q={alvo.get('bedrooms', '?')} B={alvo.get('bathrooms', '?')} V={alvo.get('parkingSpaces', '?')}"
     )
     if terreno_alvo is not None:
         alvo_resumo += f" Terreno={terreno_alvo:.0f}m2"
@@ -1094,9 +1096,7 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
         linha = (
             f"[{idx}] Tipo={c.get('propertyType') or c.get('tipo') or '?'} "
             f"Area={_obter_area_construida(c) or '?'}m2 "
-            f"Q={c.get('bedrooms', '?')} B={c.get('bathrooms', '?')} V={c.get('parkingSpaces', '?')} "
-            f"Bairro={c.get('neighborhood') or c.get('bairro') or '?'} "
-            f"Rua={c.get('street') or c.get('rua') or '?'}"
+            f"Q={c.get('bedrooms', '?')} B={c.get('bathrooms', '?')} V={c.get('parkingSpaces', '?')}"
         )
         if area_t is not None:
             linha += f" Terreno={area_t:.0f}m2"
@@ -1121,11 +1121,13 @@ CANDIDATOS ({len(candidatos)}):
 {candidatos_texto}
 
 CRITERIOS DE JULGAMENTO:
-1. Tipo/uso e contexto de localizacao sao prioritarios.
+1. A localizacao NAO e criterio aqui: ela e avaliada depois, pela zona homogenea.
+   Julgue apenas tipo/uso, area, quartos e padrao. Ignore bairro, rua ou regiao que
+   aparecam na descricao.
 2. Area e numero de quartos sao relevantes, mas uma diferenca de ATE 1 QUARTO
    (ex.: alvo com 4 quartos vs candidato com 3 ou 5) NAO e motivo para rejeitar.
-   Trate ate 1 quarto de diferenca como equivalente quando area e localizacao
-   forem compativeis. So considere os quartos um problema se a diferenca for de
+   Trate ate 1 quarto de diferenca como equivalente quando a area
+   for compativel. So considere os quartos um problema se a diferenca for de
    2 ou mais, ou se vier acompanhada de outras divergencias relevantes.
 3. Banheiros, vagas, terreno e caracteristicas estruturais ajudam a diferenciar o padrao.
 4. Use a descricao somente para entender tipologia, padrao e caracteristicas; nao invente dados ausentes.
