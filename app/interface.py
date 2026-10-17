@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
-from services.leilao import MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, ler_valor_reais
+from services.leilao import (
+    FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, ler_data_br, ler_valor_reais,
+)
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
 from dotenv import load_dotenv
@@ -204,6 +206,20 @@ with st.sidebar:
         modalidade_caixa = st.selectbox("Modalidade", [""] + MODALIDADES_CAIXA)
         codigo_caixa = st.text_input("Código do imóvel na CAIXA", value="")
         link_caixa = st.text_input("Link do imóvel na CAIXA", value="")
+        # So registrados (banco e Excel): nao entram em nenhum calculo.
+        texto_data_leilao = st.text_input(
+            "Data do leilão / da venda", value="", placeholder="Ex.: 25/11/2026",
+            help="Data que aparece na página do imóvel na CAIXA. Só é registrada.",
+        )
+        formas_pagamento_caixa = st.multiselect(
+            "Formas de pagamento aceitas", FORMAS_PAGAMENTO_CAIXA,
+            help="Conforme a página do imóvel na CAIXA. Só é registrado.",
+        )
+        regras_despesas_caixa = st.text_area(
+            "Regras de despesas (condomínio, tributos)", value="", height=80,
+            placeholder="Cole o texto da CAIXA. Ex.: Condomínio: sob responsabilidade do comprador...",
+            help="Só é registrado.",
+        )
 
         submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
 
@@ -277,6 +293,14 @@ elif submitted:
     except ValueError:
         erros_validacao.append(
             f"Valor de avaliação CAIXA inválido: \"{texto_valor_avaliacao_caixa}\" (use, por exemplo, 410.000,00)"
+        )
+
+    data_leilao_caixa = None
+    try:
+        data_leilao_caixa = ler_data_br(texto_data_leilao)
+    except ValueError:
+        erros_validacao.append(
+            f"Data do leilão inválida: \"{texto_data_leilao}\" (use, por exemplo, 25/11/2026)"
         )
 
     if erros_validacao:
@@ -357,6 +381,8 @@ elif submitted:
     # -> bairro e recusa resultados com precisao de cidade (o Google/Nominatim
     # devolvem o centro da cidade quando nao acham a rua; antes isso era aceito).
     alvo_sem_localizacao = False
+    # Gravado no banco para contar depois quantas avaliacoes ficaram sem localizacao.
+    localizacao_alvo = "coordenada_informada"
     if not imovel_alvo.get("lat") or not imovel_alvo.get("lon"):
         from agents.comparables import _geocodificar_com_fallback
         endereco_geo = ", ".join(p for p in (rua, numero, bairro, cidade, estado, "Brasil") if p)
@@ -369,12 +395,14 @@ elif submitted:
             imovel_alvo["lat"] = _lat
             imovel_alvo["lon"] = _lon
             imovel_alvo["geocodificacao_nivel"] = _nivel_geo
+            localizacao_alvo = _nivel_geo
             _logger.info(
                 f"[Geo][Alvo] lat={_lat:.6f} | lon={_lon:.6f} | nivel={_nivel_geo} | "
                 f"endereco_usado={_endereco_usado!r} | geocodificacao_nova=true"
             )
         else:
             alvo_sem_localizacao = True
+            localizacao_alvo = "nao_localizado"
             _logger.warning("[Geo][Alvo] Nao foi possivel localizar o alvo com precisao de rua ou bairro")
     else:
         _logger.info(f"[Geo][Alvo] lat={imovel_alvo['lat']} | lon={imovel_alvo['lon']} | geocodificacao_nova=false (ja existente)")
@@ -709,6 +737,9 @@ elif submitted:
         "modalidade": modalidade_caixa or None,
         "codigo_caixa": codigo_caixa.strip() or None,
         "link": link_caixa.strip() or None,
+        "data_leilao": data_leilao_caixa,
+        "formas_pagamento": formas_pagamento_caixa or None,
+        "regras_despesas": regras_despesas_caixa.strip() or None,
     }
     leilao = avaliar_leilao(resultado_ag5, valor_minimo_caixa, valor_avaliacao_caixa)
     if leilao is not None:
@@ -759,6 +790,7 @@ elif submitted:
                 "agentes3e4": round(tempo_ag34, 1),
             },
             falhas=falhas_execucao,
+            localizacao_alvo=localizacao_alvo,
         )
         # Guardado no resultado (sessao) para o botao de exportar Excel: mesmo
         # conteudo gravado no banco.

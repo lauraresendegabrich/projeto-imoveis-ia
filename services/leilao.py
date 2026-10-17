@@ -21,6 +21,8 @@ comparaveis. O valor de avaliacao CAIXA e so informativo.
 """
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from services.formatos import ler_numero_br
 
 # Lucro desejado de 55%, com os custos de aquisicao ja incluidos. Unico lugar do fator.
@@ -40,6 +42,15 @@ MODALIDADES_CAIXA = [
     "Outra",
 ]
 
+# Formas de pagamento como aparecem na pagina do imovel na CAIXA ("Formas de
+# pagamento aceitas"). So registradas: nao entram no calculo.
+FORMAS_PAGAMENTO_CAIXA = [
+    "Recursos próprios (à vista)",
+    "FGTS",
+    "Financiamento",
+    "Parcelamento",
+]
+
 DECISAO_NAO_DESCARTAR = "Não descartar"
 DECISAO_DESCARTAR = "Descartar"
 DECISAO_SEM_ESTIMATIVA = "Sem estimativa"
@@ -51,6 +62,22 @@ def ler_valor_reais(texto) -> float | None:
     "R$ 323.158,50", "323158.50". Vazio -> None; invalido -> ValueError.
     """
     return ler_numero_br(texto)
+
+
+def ler_data_br(texto) -> date | None:
+    """
+    Data digitada no formulario: "25/11/2026" ou "25/11/26". Vazio -> None;
+    invalido -> ValueError.
+    """
+    texto = str(texto or "").strip()
+    if not texto:
+        return None
+    for formato in ("%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    raise ValueError(texto)
 
 
 def _numero(valor) -> float | None:

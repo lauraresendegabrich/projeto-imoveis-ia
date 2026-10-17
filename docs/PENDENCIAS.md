@@ -20,12 +20,23 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   contam os do Cluster A do Agente 2 quando o alvo não é geocodificado. Não foi
   alterado; o bloco de leilão avisa "Valor baseado em imóveis fora da região
   exata" nesses casos.
+- [ ] **Mínimo de terrenos incoerente no Agente 5** (`agents/price_liquidity.py`).
+  Casa com área de terreno informada: com 0 terrenos na zona, o valor sai pelo m²
+  das casas (sem separar o terreno); com 1 a 4 terrenos, o terreno é separado e,
+  por não chegar a 5, a avaliação dá "sem estimativa", mesmo com muitas casas.
+  Ou seja, achar poucos terrenos dá resultado pior do que não achar nenhum. A
+  busca por proximidade diminui o caso (traz mais terrenos), mas não elimina.
+  Proposta: com menos de 5 terrenos, não separar o terreno (calcular como no caso
+  de 0 terrenos). Não alterado: muda o método.
 - [ ] **Confirmar o ID 4 dos testes** (1 comparável e valor exibido): provavelmente
   rodou em 19/09 antes do commit `e2c843e`, que criou a regra dos 3 comparáveis.
   Rodar os IDs 4 e 5 de novo para confirmar.
 
 ## Infraestrutura e segurança
 
+- [ ] **Rodar a migração `db/migracoes/002_localizacao_e_dados_do_leilao.sql` no
+  Neon ANTES de publicar o código que grava as colunas novas** (sem ela, nenhuma
+  avaliação é gravada). Confirmar também que a `001` já foi rodada.
 - [ ] **`DATABASE_URL` nos Secrets do Streamlit Cloud** (Settings → Secrets). Sem
   ela o app publicado funciona, mas não grava as avaliações no banco.
 - [ ] **Trocar a chave do Qwen e a senha do banco Neon**, que circularam em
@@ -48,9 +59,12 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   80 m² × Chaves na Mão 110 m², terreno 110) e ficou a área certa; em 3 não dá para
   saber (R$ 660.000: 117 × 127 m², e o link do VivaReal diz 127; R$ 699.000: 117 ×
   109 m²; R$ 2.290.000: 600 × 506 m²). Saídas possíveis: (1) regra para a área do
-  par — portal mais confiável, a menor (mais conservadora) ou a média; (2) alerta
-  quando as áreas do par diferirem mais de 5%. Recomendação: menor área + alerta
-  (sem dados para ranquear portais; a média mistura o valor certo com o errado).
+  par — portal mais confiável, a menor ou a média; (2) alerta quando as áreas do
+  par diferirem mais de 5%. Escolhido: menor área + alerta. A menor área NÃO é a
+  opção conservadora (com o mesmo preço, dá m² maior e lance maior); foi escolhida
+  porque costuma ser a certa: o erro mais comum é o portal mostrar a área do
+  terreno no lugar da construída. Não há dados para ranquear portais, e a média
+  mistura o valor certo com o errado.
 
 ## Agente 2 — Zona homogênea (`agents/comparables.py`)
 
@@ -101,6 +115,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Banco e Excel passaram a registrar a localização e os dados do leilão** (branch
+  `registro-localizacao-leilao`, migração `002`). Novas colunas em `execucoes`:
+  `localizacao_alvo` (endereco_completo / rua_numero / rua / bairro /
+  coordenada_informada / nao_localizado), `escopo_busca`, `anuncios_por_proximidade`,
+  `data_leilao`, `formas_pagamento` e `regras_despesas`. Antes não dava para contar
+  quantas avaliações ficaram sem localização (o alerta "fora da zona" junta esse caso
+  com "nenhum comparável confirmado"). Data, formas de pagamento e regras de despesas
+  entram por campos novos do formulário e só são registradas (não entram no cálculo).
 
 - **Busca por proximidade no Agente 1** (branch `busca-proximidade`): com o imóvel
   localizado com precisão de rua ou bairro, a consulta ao Athena traz também os

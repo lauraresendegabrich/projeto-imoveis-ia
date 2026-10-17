@@ -27,14 +27,15 @@ COLUNAS_EXECUCOES = (
     "id_execucao", "versao_codigo", "parametros", "fontes", "modelos_ia", "tempo_s", "falhas",
     "origem", "codigo_caixa", "link", "modalidade", "tipo", "endereco", "bairro", "cidade", "uf",
     "area_privativa", "area_terreno", "quartos", "banheiros", "campos_presumidos",
-    "valor_minimo", "valor_avaliacao",
+    "valor_minimo", "valor_avaliacao", "data_leilao", "formas_pagamento", "regras_despesas",
+    "localizacao_alvo", "escopo_busca", "anuncios_por_proximidade",
     "anuncios_encontrados", "repetidos", "parecidos", "confirmados_na_zona",
     "usados_por_fallback", "terrenos_usados", "raio_zona_m",
     "valor_m2_construcao", "valor_m2_terreno", "valor_mercado", "liquidez",
     "status_agente5", "qtd_comparaveis_construcao", "qtd_terrenos",
     "lance_maximo", "sobra", "decisao", "tempo_venda", "alertas",
 )
-COLUNAS_JSON = {"parametros", "fontes", "modelos_ia", "falhas", "campos_presumidos", "alertas"}
+COLUNAS_JSON = {"parametros", "fontes", "modelos_ia", "falhas", "campos_presumidos", "alertas", "formas_pagamento"}
 COLUNAS_COMPARAVEIS = (
     "id_execucao", "tipo", "preco", "area", "valor_m2", "endereco", "bairro",
     "portal", "link", "status_zona", "entrou_no_calculo",

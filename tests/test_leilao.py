@@ -138,6 +138,20 @@ def test_laudo_avisa_endereco_nao_localizado():
     leilao["alvo_sem_localizacao"] = False
     assert not any("não localizado" in l for l in linhas_laudo(leilao, _brl))
 
+def test_ler_data_br():
+    from datetime import date
+    from services.leilao import ler_data_br
+    assert ler_data_br("25/11/2026") == date(2026, 11, 25)
+    assert ler_data_br(" 25/11/26 ") == date(2026, 11, 25)
+    assert ler_data_br("") is None and ler_data_br(None) is None
+    for texto in ("31/02/2026", "2026-11-25", "amanhã"):
+        try:
+            ler_data_br(texto)
+        except ValueError:
+            continue
+        raise AssertionError(f"aceitou data invalida: {texto}")
+
+
 def test_fator_unico():
     assert FATOR_LUCRO_LEILAO == 1.55
 

@@ -204,6 +204,62 @@ def test_excel_comparaveis_um_por_linha_com_link():
     assert aba.freeze_panes == "A2"
 
 
+def _registro_com_localizacao_e_leilao():
+    from datetime import date
+    entrada = {"origem": "CAIXA", "valor_minimo": 323158, "data_leilao": date(2026, 11, 25),
+               "formas_pagamento": ["Recursos próprios (à vista)", "FGTS"],
+               "regras_despesas": "Condomínio: sob responsabilidade do comprador."}
+    coletados = [{"escopo_busca": "rua+bairro+proximidade"},
+                 {"escopo_busca": "rua+bairro+proximidade", "origem_busca": "proximidade"},
+                 {"escopo_busca": "rua+bairro+proximidade", "origem_busca": "proximidade"}]
+    return _registro(leilao_entrada=entrada, imoveis_coletados=coletados, localizacao_alvo="rua_numero")
+
+
+def test_grava_localizacao_busca_e_dados_do_leilao():
+    from datetime import date
+    e, _ = _registro_com_localizacao_e_leilao()
+    assert e["localizacao_alvo"] == "rua_numero"
+    assert e["escopo_busca"] == "rua+bairro+proximidade" and e["anuncios_por_proximidade"] == 2
+    assert e["data_leilao"] == date(2026, 11, 25)
+    assert e["formas_pagamento"] == ["Recursos próprios (à vista)", "FGTS"]
+    assert e["regras_despesas"].startswith("Condomínio")
+
+
+def test_sem_dados_novos_ficam_vazios():
+    e, _ = _registro(leilao_entrada=None, imoveis_coletados=[])
+    assert e["localizacao_alvo"] is None and e["escopo_busca"] is None
+    assert e["anuncios_por_proximidade"] == 0
+    assert e["data_leilao"] is None and e["formas_pagamento"] is None and e["regras_despesas"] is None
+
+
+def test_excel_mostra_localizacao_e_dados_do_leilao():
+    import io
+    from datetime import datetime
+    from openpyxl import load_workbook
+    from services.registro_execucao import excel_resultado
+    e, comps = _registro_com_localizacao_e_leilao()
+    livro = load_workbook(io.BytesIO(excel_resultado(e, comps)))
+    resumo = {linha[0]: linha[1] for linha in livro["Resumo"].iter_rows(values_only=True)}
+    assert resumo["Localização do imóvel no mapa"] == "Rua e número"
+    assert resumo["Onde os anúncios foram buscados"] == "Rua, bairro e proximidade"
+    assert resumo["Anúncios trazidos por proximidade (até 1,5 km)"] == 2
+    assert resumo["Data do leilão"] == datetime(2026, 11, 25)
+    assert resumo["Formas de pagamento"] == "Recursos próprios (à vista), FGTS"
+    assert resumo["Regras de despesas"].startswith("Condomínio")
+    e["localizacao_alvo"] = "nao_localizado"
+    livro = load_workbook(io.BytesIO(excel_resultado(e, comps)))
+    resumo = {linha[0]: linha[1] for linha in livro["Resumo"].iter_rows(values_only=True)}
+    assert resumo["Localização do imóvel no mapa"].startswith("Não localizado")
+
+
+def test_migracao_002_cria_as_colunas_novas():
+    sql = open("db/migracoes/002_localizacao_e_dados_do_leilao.sql", encoding="utf-8").read()
+    for coluna in ("localizacao_alvo", "escopo_busca", "anuncios_por_proximidade",
+                   "data_leilao", "formas_pagamento", "regras_despesas"):
+        assert f"ADD COLUMN IF NOT EXISTS {coluna}" in sql, coluna
+        assert coluna in COLUNAS_EXECUCOES, coluna
+
+
 def test_versao_codigo_do_git():
     v = versao_codigo()
     assert v == "desconhecida" or re.fullmatch(r"[0-9a-f]{40}", v), v

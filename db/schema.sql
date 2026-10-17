@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS execucoes (
     campos_presumidos           JSONB,                     -- campos supostos quando não informados (hoje vazio)
     valor_minimo                NUMERIC(14, 2),            -- valor mínimo de venda CAIXA
     valor_avaliacao             NUMERIC(14, 2),            -- valor de avaliação CAIXA (só informativo)
+    data_leilao                 DATE,                      -- data do leilão/venda informada
+    formas_pagamento            JSONB,                     -- formas aceitas pela CAIXA (lista)
+    regras_despesas             TEXT,                      -- condomínio/tributos, copiado do site da CAIXA
+
+    -- Localização e busca -----------------------------------------------------
+    localizacao_alvo            TEXT,                      -- endereco_completo / rua_numero / rua / bairro / coordenada_informada / nao_localizado
+    escopo_busca                TEXT,                      -- rua+bairro / rua+bairro+proximidade / proximidade / cidade
+    anuncios_por_proximidade    INTEGER,                   -- trazidos pela busca por proximidade (até 1,5 km)
 
     -- Funil -------------------------------------------------------------------
     anuncios_encontrados        INTEGER,                   -- imóveis únicos entregues pelo Agente 1
@@ -68,6 +76,7 @@ CREATE TABLE IF NOT EXISTS execucoes (
 CREATE INDEX IF NOT EXISTS idx_execucoes_data_hora ON execucoes (data_hora DESC);
 CREATE INDEX IF NOT EXISTS idx_execucoes_cidade_uf ON execucoes (uf, cidade);
 CREATE INDEX IF NOT EXISTS idx_execucoes_decisao ON execucoes (decisao);
+CREATE INDEX IF NOT EXISTS idx_execucoes_localizacao ON execucoes (localizacao_alvo);
 
 
 CREATE TABLE IF NOT EXISTS comparaveis (

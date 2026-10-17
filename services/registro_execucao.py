@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from services.alertas import calcular_alertas
@@ -106,8 +107,14 @@ def montar_registro(
     resultado_ag5: dict | None,
     tempos: dict | None = None,
     falhas: list | None = None,
+    localizacao_alvo: str | None = None,
 ) -> tuple[dict, list[dict]]:
-    """Retorna (linha de execucoes, linhas de comparaveis)."""
+    """
+    Retorna (linha de execucoes, linhas de comparaveis).
+
+    localizacao_alvo: precisao com que o imovel foi achado no mapa (endereco_completo,
+    rua_numero, rua, bairro, coordenada_informada ou nao_localizado).
+    """
     from agents.price_liquidity import MIN_AMOSTRAS_CONFIAVEL
     from agents.comparables import MIN_CONFIRMADOS_ZONA
 
@@ -172,6 +179,13 @@ def montar_registro(
         "campos_presumidos": [],
         "valor_minimo": _num(leilao_entrada.get("valor_minimo")),
         "valor_avaliacao": _num(leilao_entrada.get("valor_avaliacao")),
+        "data_leilao": leilao_entrada.get("data_leilao"),
+        "formas_pagamento": list(leilao_entrada.get("formas_pagamento") or []) or None,
+        "regras_despesas": leilao_entrada.get("regras_despesas") or None,
+
+        "localizacao_alvo": localizacao_alvo,
+        "escopo_busca": (coletados[0].get("escopo_busca") if coletados else None),
+        "anuncios_por_proximidade": sum(1 for im in coletados if im.get("origem_busca") == "proximidade"),
 
         "anuncios_encontrados": len(coletados),
         "repetidos": sum(len(im.get("duplicatas") or []) for im in coletados),
@@ -210,6 +224,22 @@ def montar_registro(
 FORMATO_REAIS = '"R$" #,##0.00'
 FORMATO_AREA = '#,##0.00 "m²"'
 FORMATO_INTEIRO = "#,##0"
+FORMATO_DATA = "DD/MM/YYYY"
+
+ROTULOS_LOCALIZACAO = {
+    "endereco_completo": "Endereço completo",
+    "rua_numero": "Rua e número",
+    "rua": "Rua (sem o número)",
+    "bairro": "Só o bairro",
+    "coordenada_informada": "Coordenada informada",
+    "nao_localizado": "Não localizado (distância dos comparáveis não verificada)",
+}
+ROTULOS_ESCOPO_BUSCA = {
+    "rua+bairro": "Rua e bairro",
+    "rua+bairro+proximidade": "Rua, bairro e proximidade",
+    "proximidade": "Só por proximidade",
+    "cidade": "Cidade toda",
+}
 
 # (rotulo, chave em execucao, formato). Chave None = titulo de secao.
 LINHAS_RESUMO = (
@@ -237,10 +267,16 @@ LINHAS_RESUMO = (
     ("Sobra (negativo = falta)", "sobra", FORMATO_REAIS),
     ("Valor de avaliação CAIXA (informativo)", "valor_avaliacao", FORMATO_REAIS),
     ("Modalidade", "modalidade", None),
+    ("Data do leilão", "data_leilao", FORMATO_DATA),
+    ("Formas de pagamento", "_formas_pagamento", None),
+    ("Regras de despesas", "regras_despesas", None),
     ("Código do imóvel na CAIXA", "codigo_caixa", None),
     ("Link do imóvel na CAIXA", "link", None),
     ("Como chegamos ao valor", None, None),
+    ("Localização do imóvel no mapa", "_localizacao_alvo", None),
+    ("Onde os anúncios foram buscados", "_escopo_busca", None),
     ("Anúncios encontrados na região", "anuncios_encontrados", FORMATO_INTEIRO),
+    ("Anúncios trazidos por proximidade (até 1,5 km)", "anuncios_por_proximidade", FORMATO_INTEIRO),
     ("Anúncios repetidos descartados", "repetidos", FORMATO_INTEIRO),
     ("Imóveis parecidos com o seu", "parecidos", FORMATO_INTEIRO),
     ("Confirmados na zona homogênea", "confirmados_na_zona", FORMATO_INTEIRO),
@@ -299,6 +335,11 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     valores["_confiavel"] = "Sim" if execucao.get("status_agente5") == "ok" else "Não"
     n_alertas = len(execucao.get("alertas") or [])
     valores["_alertas"] = f"{n_alertas} (veja a aba Alertas)" if n_alertas else "Nenhum"
+    valores["_formas_pagamento"] = ", ".join(execucao.get("formas_pagamento") or []) or None
+    localizacao = execucao.get("localizacao_alvo")
+    valores["_localizacao_alvo"] = ROTULOS_LOCALIZACAO.get(localizacao, localizacao)
+    escopo = execucao.get("escopo_busca")
+    valores["_escopo_busca"] = ROTULOS_ESCOPO_BUSCA.get(escopo, escopo)
     for rotulo, chave, formato in LINHAS_RESUMO:
         if chave is None:
             resumo.append([rotulo, None])
@@ -308,8 +349,10 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
         valor = valores.get(chave)
         resumo.append([rotulo, valor])
         celula = resumo.cell(row=resumo.max_row, column=2)
-        if formato and isinstance(valor, (int, float)):
+        if formato and isinstance(valor, (int, float, date)):
             celula.number_format = formato
+        if chave == "regras_despesas" and valor:
+            celula.alignment = Alignment(wrap_text=True, vertical="top")
         if chave == "link" and valor:
             celula.hyperlink, celula.font = valor, link
         if chave == "decisao" and valor:
@@ -317,7 +360,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     resumo.column_dimensions["A"].width = 40
     resumo.column_dimensions["B"].width = 42
     for linha in resumo.iter_rows(min_col=2, max_col=2):
-        linha[0].alignment = Alignment(horizontal="left")
+        linha[0].alignment = Alignment(horizontal="left", vertical="top", wrap_text=linha[0].alignment.wrap_text)
 
     # ── Alertas (motivo exato; anuncios envolvidos logo abaixo de cada um) ─────
     aba_alertas = livro.create_sheet("Alertas")
