@@ -33,6 +33,7 @@ ORIGEM_CAIXA = "CAIXA"
 MODALIDADES_CAIXA = [
     "Venda Online",
     "Venda Direta Online",
+    "Compra Direta",
     "Licitação Aberta",
     "Leilão SFI (valor do 1º leilão)",
     "Leilão SFI (valor do 2º leilão)",
