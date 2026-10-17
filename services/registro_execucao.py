@@ -157,6 +157,8 @@ def montar_registro(
             "aviso_raio": texto_aviso_raio(zona),
             # Casa com 1 a 4 terrenos: calculo sem separar o terreno.
             "aviso_terreno": ag5.get("aviso_terreno"),
+            # Sem nota de infraestrutura: tempo de venda com infraestrutura neutra (0,50).
+            "aviso_infraestrutura": ag5.get("aviso_infraestrutura"),
         },
         "fontes": {
             "athena_coletas": coletas,
@@ -267,6 +269,7 @@ LINHAS_RESUMO = (
     ("Valor do m² da construção", "valor_m2_construcao", FORMATO_REAIS),
     ("Valor do m² do terreno", "valor_m2_terreno", FORMATO_REAIS),
     ("Tempo estimado de venda", "tempo_venda", None),
+    ("Tempo de venda sem infraestrutura", "_aviso_infraestrutura", None),
     ("Estimativa confiável", "_confiavel", None),
     ("Leilão CAIXA", None, None),
     ("Decisão", "decisao", None),
@@ -353,6 +356,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     valores["_raio_terrenos"] = parametros.get("raio_final_terrenos_m", execucao.get("raio_zona_m"))
     valores["_aviso_raio"] = parametros.get("aviso_raio") or "Não houve ampliação"
     valores["_aviso_terreno"] = parametros.get("aviso_terreno")
+    valores["_aviso_infraestrutura"] = parametros.get("aviso_infraestrutura")
     localizacao = execucao.get("localizacao_alvo")
     valores["_localizacao_alvo"] = ROTULOS_LOCALIZACAO.get(localizacao, localizacao)
     escopo = execucao.get("escopo_busca")
@@ -368,7 +372,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
         celula = resumo.cell(row=resumo.max_row, column=2)
         if formato and isinstance(valor, (int, float, date)):
             celula.number_format = formato
-        if chave in ("regras_despesas", "_aviso_raio", "_aviso_terreno") and valor:
+        if chave in ("regras_despesas", "_aviso_raio", "_aviso_terreno", "_aviso_infraestrutura") and valor:
             celula.alignment = Alignment(wrap_text=True, vertical="top")
         if chave == "link" and valor:
             celula.hyperlink, celula.font = valor, link

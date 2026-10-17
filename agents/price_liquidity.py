@@ -166,6 +166,12 @@ AVISO_TERRENO_NAO_SEPARADO = (
     "casas parecidas, sem separar o terreno; se o lote do imóvel for bem maior ou menor "
     "que o das casas comparadas, o valor fica menos preciso."
 )
+# Sem nota de infraestrutura (Agente 4 nao localizou o endereco ou falhou): o tempo de
+# venda usa a nota neutra 0,50 e os pesos de sempre (decisao da usuaria, 17/10/2026).
+AVISO_SEM_INFRAESTRUTURA = (
+    "Tempo estimado sem a infraestrutura do entorno (endereço não localizado no mapa): a "
+    "infraestrutura foi considerada média. Confira o entorno do imóvel."
+)
 MIN_AMOSTRAS_CONFIAVEL = 5        # abaixo disso a estimativa e marcada baixa confianca (era 3 ate out/2026)
 
 CAMINHO_ZONA = "data/zona_homogenea_ag2.json"
@@ -1125,6 +1131,14 @@ def executar_agente5(
 
     score_liquidez = calcular_score_liquidez(score_agente3, score_agente4, desconto_liquidez)
     classificacao_liquidez, tempo_estimado = classificar_tempo_liquidez(score_liquidez)
+    aviso_infraestrutura = None
+    if score_agente4 is None:
+        aviso_infraestrutura = AVISO_SEM_INFRAESTRUTURA
+        import logging as _log_i
+        _log_i.getLogger(__name__).warning(
+            f"[Ag5] liquidez sem nota de infraestrutura: usado neutro 0,50 | "
+            f"score={score_liquidez:.3f} | tempo={tempo_estimado}"
+        )
 
     # ========================================================
     # 8. RESULTADO FINAL
@@ -1202,6 +1216,8 @@ def executar_agente5(
             "score_agente3_usado": round(score_agente3, 3) if score_agente3 is not None else None,
             "score_agente4_usado": round(score_agente4, 3) if score_agente4 is not None else None,
             "aviso": "Resultado experimental ainda nao validado com Days on Market dos comparaveis.",
+            # Sem nota do Agente 4: infraestrutura neutra (0,50) e este aviso.
+            "aviso_infraestrutura": aviso_infraestrutura,
         },
         "comparaveis_usados": {
             "construcao": usados_construcao,
@@ -1230,6 +1246,8 @@ def executar_agente5(
         "avisos": avisos,
         # Casa com 1 a 4 terrenos: calculo sem separar o terreno (None quando nao se aplica).
         "aviso_terreno": aviso_terreno,
+        # Sem nota de infraestrutura: tempo de venda com infraestrutura neutra (0,50).
+        "aviso_infraestrutura": aviso_infraestrutura,
         "justificativa": (
             f"O valor do imovel foi estimado a partir do m2 da zona homogenea. "
             f"Terreno: {len(valores_m2_terreno)} amostras, m2 referencia R$ {medio_m2_terreno:.2f}. "

@@ -649,7 +649,10 @@ elif submitted:
             score_infra = resultado_ag4.get("scores", {}).get("score_final", 0)
             classif = resultado_ag4.get("scores", {}).get("classificacao_infraestrutura", "?")
             with log_area:
-                st.success(f"✅ Mapeou escolas, hospitais, comércio e transporte no entorno. Classificação: **{classif}**")
+                if resultado_ag4.get("status") == "endereco_nao_localizado":
+                    st.warning(f"⚠️ {resultado_ag4.get('mensagem')}")
+                else:
+                    st.success(f"✅ Mapeou escolas, hospitais, comércio e transporte no entorno. Classificação: **{classif}**")
                 if classif == "insuficiente":
                     st.caption("ℹ️ Classificação insuficiente indica pouco comércio, transporte ou serviços no raio de 1500m. Comum em bairros residenciais afastados.")
         except Exception as e:
@@ -885,6 +888,8 @@ if "resultado" in st.session_state:
         with col_c:
             tempo = liquidez_info.get("tempo_estimado", "?")
             st.metric("⏱️ Tempo Estimado de Venda", tempo if avaliacao_confiavel else "—")
+            if avaliacao_confiavel and (preco or {}).get("aviso_infraestrutura"):
+                st.caption(f"⚠️ {preco['aviso_infraestrutura']}")
 
         # Comparaveis com a distancia nao verificada (contam para o minimo de 5) e
         # busca na cidade toda: aviso com numeros, com ou sem valor minimo CAIXA.
@@ -1245,141 +1250,145 @@ if "resultado" in st.session_state:
         score_final_infra = scores_infra.get("score_final", 0) or 0
         classif_infra = resumo_infra.get("classificacao_infraestrutura", "?")
         with st.expander("🏥 Agente Avaliador de Infraestrutura"):
-            st.write(f"O entorno do seu imóvel tem infraestrutura **{classif_infra}** (score {score_final_infra:.2f}).")
-
-            # Mensagem alinhada a classificacao real do Ag4 (5 niveis:
-            # excelente >=0.85, boa >=0.70, moderada >=0.50, basica >=0.30, insuficiente <0.30)
-            if classif_infra == "excelente":
-                st.success("Região com infraestrutura excelente — escolas, hospitais, comércio e transporte fartos no entorno.")
-            elif classif_infra == "boa":
-                st.success("Região com boa infraestrutura — tem o essencial por perto e boa cobertura na maioria das categorias.")
-            elif classif_infra == "moderada":
-                st.info("Região com infraestrutura moderada — tem o básico por perto, mas pode faltar algo em alguma categoria.")
-            elif classif_infra == "basica":
-                st.warning("Região com infraestrutura básica — poucas opções de serviços no entorno.")
+            if (infra_data or {}).get("status") == "endereco_nao_localizado":
+                # Agente 4 sem localizacao precisa: nao avalia a partir do centro da cidade.
+                st.warning(f"⚠️ {infra_data.get('mensagem')}. O tempo estimado de venda usou a infraestrutura como média.")
             else:
-                st.error("Região com infraestrutura insuficiente — pouco comércio, transporte ou serviços próximos.")
+                st.write(f"O entorno do seu imóvel tem infraestrutura **{classif_infra}** (score {score_final_infra:.2f}).")
 
-            # Nivel 2: perfil da regiao classificado pela LLM + ajuste aplicado ao score
-            perfil_regiao = scores_infra.get("perfil_regiao")
-            ajuste_llm = scores_infra.get("ajuste_llm")
-            score_det = scores_infra.get("score_deterministico")
-            justif_ajuste = scores_infra.get("justificativa_ajuste")
-            if perfil_regiao and perfil_regiao != "desconhecido":
-                perfil_label = perfil_regiao.replace("_", " ")
-                if ajuste_llm and abs(float(ajuste_llm)) >= 0.001 and score_det is not None:
-                    sinal = "aumentou" if float(ajuste_llm) > 0 else "reduziu"
-                    st.caption(
-                        f"🧭 A IA classificou a região como **{perfil_label}** e {sinal} o score "
-                        f"em {abs(float(ajuste_llm)):.2f} (de {float(score_det):.2f} para {score_final_infra:.2f})."
-                    )
-                    if justif_ajuste:
-                        st.caption(f"_{justif_ajuste}_")
+                # Mensagem alinhada a classificacao real do Ag4 (5 niveis:
+                # excelente >=0.85, boa >=0.70, moderada >=0.50, basica >=0.30, insuficiente <0.30)
+                if classif_infra == "excelente":
+                    st.success("Região com infraestrutura excelente — escolas, hospitais, comércio e transporte fartos no entorno.")
+                elif classif_infra == "boa":
+                    st.success("Região com boa infraestrutura — tem o essencial por perto e boa cobertura na maioria das categorias.")
+                elif classif_infra == "moderada":
+                    st.info("Região com infraestrutura moderada — tem o básico por perto, mas pode faltar algo em alguma categoria.")
+                elif classif_infra == "basica":
+                    st.warning("Região com infraestrutura básica — poucas opções de serviços no entorno.")
                 else:
-                    st.caption(f"🧭 A IA classificou a região como **{perfil_label}** (sem ajuste no score).")
+                    st.error("Região com infraestrutura insuficiente — pouco comércio, transporte ou serviços próximos.")
 
-            # Gráfico radar
-            infra_full = resultado.get("infraestrutura", {})
-            if infra_full:
-                scores_cat = infra_full.get("scores", {}).get("scores_categoria", {})
-                if not scores_cat:
-                    # Fallback: tenta pegar do nivel raiz dos scores
-                    scores_cat = {k: v for k, v in infra_full.get("scores", {}).items() if isinstance(v, (int, float)) and k != "score_final"}
-                if scores_cat:
-                    import plotly.graph_objects as go
-                    categorias = list(scores_cat.keys())
-                    valores_radar = list(scores_cat.values())
-                    fig = go.Figure(data=go.Scatterpolar(
-                        r=valores_radar + [valores_radar[0]],
-                        theta=categorias + [categorias[0]],
-                        fill="toself",
-                        name="Infraestrutura"
-                    ))
-                    fig.update_layout(
-                        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-                        showlegend=False, height=300, margin=dict(l=40, r=40, t=20, b=20)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                # Nivel 2: perfil da regiao classificado pela LLM + ajuste aplicado ao score
+                perfil_regiao = scores_infra.get("perfil_regiao")
+                ajuste_llm = scores_infra.get("ajuste_llm")
+                score_det = scores_infra.get("score_deterministico")
+                justif_ajuste = scores_infra.get("justificativa_ajuste")
+                if perfil_regiao and perfil_regiao != "desconhecido":
+                    perfil_label = perfil_regiao.replace("_", " ")
+                    if ajuste_llm and abs(float(ajuste_llm)) >= 0.001 and score_det is not None:
+                        sinal = "aumentou" if float(ajuste_llm) > 0 else "reduziu"
+                        st.caption(
+                            f"🧭 A IA classificou a região como **{perfil_label}** e {sinal} o score "
+                            f"em {abs(float(ajuste_llm)):.2f} (de {float(score_det):.2f} para {score_final_infra:.2f})."
+                        )
+                        if justif_ajuste:
+                            st.caption(f"_{justif_ajuste}_")
+                    else:
+                        st.caption(f"🧭 A IA classificou a região como **{perfil_label}** (sem ajuste no score).")
 
-                # POIs por faixa — mostra destaques úteis
-                pois = infra_full.get("pois_por_faixa", {})
-                if pois:
-                    st.markdown("---")
-                    st.markdown("**📍 O que tem perto do seu imóvel**")
+                # Gráfico radar
+                infra_full = resultado.get("infraestrutura", {})
+                if infra_full:
+                    scores_cat = infra_full.get("scores", {}).get("scores_categoria", {})
+                    if not scores_cat:
+                        # Fallback: tenta pegar do nivel raiz dos scores
+                        scores_cat = {k: v for k, v in infra_full.get("scores", {}).items() if isinstance(v, (int, float)) and k != "score_final"}
+                    if scores_cat:
+                        import plotly.graph_objects as go
+                        categorias = list(scores_cat.keys())
+                        valores_radar = list(scores_cat.values())
+                        fig = go.Figure(data=go.Scatterpolar(
+                            r=valores_radar + [valores_radar[0]],
+                            theta=categorias + [categorias[0]],
+                            fill="toself",
+                            name="Infraestrutura"
+                        ))
+                        fig.update_layout(
+                            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                            showlegend=False, height=300, margin=dict(l=40, r=40, t=20, b=20)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
 
-                    # Junta todas as faixas e mostra os mais relevantes por categoria
-                    nomes_emojis = {
-                        "comercio": "🛒", "educacao": "🏫", "saude_basica": "💊",
-                        "hospital": "🏥", "lazer": "🌳", "transporte": "🚌",
-                        "equipamentos_regionais": "🎓", "servicos_e_alimentacao": "🍽️",
-                    }
-                    linhas_destaque = []
-                    for cat in ["comercio", "educacao", "saude_basica", "hospital", "lazer", "equipamentos_regionais", "transporte", "servicos_e_alimentacao"]:
-                        # Pega os 3 mais próximos de todas as faixas
-                        todos_cat = []
-                        if cat == "transporte":
-                            # Transporte vem de campo separado
-                            trans_data = infra_full.get("transporte", {})
-                            todos_cat = trans_data.get("paradas", []) + trans_data.get("estacoes", [])
-                            todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
-                        else:
-                            for faixa_nome in ["0_400", "401_800", "801_1500"]:
-                                items = pois.get(faixa_nome, {}).get(cat, [])
-                                if isinstance(items, list):
-                                    todos_cat.extend(items)
-                            todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
-                        if todos_cat:
-                            emoji = nomes_emojis.get(cat, "📌")
-                            # Filtra POIs sem nome real
-                            com_nome = [p for p in todos_cat if p.get("nome") and p.get("nome") != "?" and p.get("nome") != "parada"]
-                            if not com_nome:
-                                com_nome = todos_cat  # usa todos se nenhum tem nome
-                            destaques = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in com_nome[:3]]
-                            qtd_total = len(todos_cat)
-                            extra_qtd = f" — {qtd_total} encontrados" if qtd_total > 3 else ""
-                            linhas_destaque.append(f"{emoji} **{cat.replace('_', ' ').title()}** ({qtd_total}): {' · '.join(destaques)}")
-                    if linhas_destaque:
-                        st.markdown("\n\n".join(linhas_destaque))
+                    # POIs por faixa — mostra destaques úteis
+                    pois = infra_full.get("pois_por_faixa", {})
+                    if pois:
+                        st.markdown("---")
+                        st.markdown("**📍 O que tem perto do seu imóvel**")
 
-                    # Resumo total — MESMA base das categorias exibidas acima:
-                    # POIs por faixa + transporte (que vem de campo separado e tambem
-                    # aparece na lista). Antes o total ignorava transporte, gerando
-                    # divergencia (soma das categorias != total).
-                    total_pois_faixa = sum(
-                        len(v) for fd in pois.values() for v in fd.values() if isinstance(v, list)
-                    )
-                    _trans = infra_full.get("transporte", {})
-                    total_transporte = len(_trans.get("paradas", []) or []) + len(_trans.get("estacoes", []) or [])
-                    total_all = total_pois_faixa + total_transporte
-                    st.caption(f"Total: {total_all} pontos de interesse mapeados até 1500m")
+                        # Junta todas as faixas e mostra os mais relevantes por categoria
+                        nomes_emojis = {
+                            "comercio": "🛒", "educacao": "🏫", "saude_basica": "💊",
+                            "hospital": "🏥", "lazer": "🌳", "transporte": "🚌",
+                            "equipamentos_regionais": "🎓", "servicos_e_alimentacao": "🍽️",
+                        }
+                        linhas_destaque = []
+                        for cat in ["comercio", "educacao", "saude_basica", "hospital", "lazer", "equipamentos_regionais", "transporte", "servicos_e_alimentacao"]:
+                            # Pega os 3 mais próximos de todas as faixas
+                            todos_cat = []
+                            if cat == "transporte":
+                                # Transporte vem de campo separado
+                                trans_data = infra_full.get("transporte", {})
+                                todos_cat = trans_data.get("paradas", []) + trans_data.get("estacoes", [])
+                                todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
+                            else:
+                                for faixa_nome in ["0_400", "401_800", "801_1500"]:
+                                    items = pois.get(faixa_nome, {}).get(cat, [])
+                                    if isinstance(items, list):
+                                        todos_cat.extend(items)
+                                todos_cat.sort(key=lambda x: x.get("distancia_metros", 9999))
+                            if todos_cat:
+                                emoji = nomes_emojis.get(cat, "📌")
+                                # Filtra POIs sem nome real
+                                com_nome = [p for p in todos_cat if p.get("nome") and p.get("nome") != "?" and p.get("nome") != "parada"]
+                                if not com_nome:
+                                    com_nome = todos_cat  # usa todos se nenhum tem nome
+                                destaques = [f"{p.get('nome', '?')} ({p.get('distancia_metros', '?')}m)" for p in com_nome[:3]]
+                                qtd_total = len(todos_cat)
+                                extra_qtd = f" — {qtd_total} encontrados" if qtd_total > 3 else ""
+                                linhas_destaque.append(f"{emoji} **{cat.replace('_', ' ').title()}** ({qtd_total}): {' · '.join(destaques)}")
+                        if linhas_destaque:
+                            st.markdown("\n\n".join(linhas_destaque))
 
-                # Imobiliária mais próxima
-                imob = infra_full.get("imobiliaria_proxima", {})
-                if imob and imob.get("encontrada"):
-                    st.markdown("---")
-                    st.markdown("**📞 Imobiliária mais próxima**")
-                    nome_imob = imob.get("nome", "?")
-                    tel_imob = imob.get("telefone", "")
-                    end_imob = imob.get("endereco", "")
-                    dist_imob = imob.get("distancia_metros", "?")
-                    email_imob = imob.get("email", "")
-                    site_imob = imob.get("website", "")
-                    horario_imob = imob.get("opening_hours", "")
+                        # Resumo total — MESMA base das categorias exibidas acima:
+                        # POIs por faixa + transporte (que vem de campo separado e tambem
+                        # aparece na lista). Antes o total ignorava transporte, gerando
+                        # divergencia (soma das categorias != total).
+                        total_pois_faixa = sum(
+                            len(v) for fd in pois.values() for v in fd.values() if isinstance(v, list)
+                        )
+                        _trans = infra_full.get("transporte", {})
+                        total_transporte = len(_trans.get("paradas", []) or []) + len(_trans.get("estacoes", []) or [])
+                        total_all = total_pois_faixa + total_transporte
+                        st.caption(f"Total: {total_all} pontos de interesse mapeados até 1500m")
 
-                    st.write(f"**{nome_imob}**")
-                    infos_imob = []
-                    if tel_imob:
-                        infos_imob.append(f"📱 {tel_imob}")
-                    if email_imob:
-                        infos_imob.append(f"✉️ {email_imob}")
-                    if site_imob:
-                        infos_imob.append(f"🌐 [{site_imob}]({site_imob})")
-                    if infos_imob:
-                        st.markdown(" | ".join(infos_imob))
-                    if end_imob:
-                        st.caption(f"📍 {end_imob} ({dist_imob}m)")
-                    if horario_imob:
-                        st.caption(f"🕐 {horario_imob}")
+                    # Imobiliária mais próxima
+                    imob = infra_full.get("imobiliaria_proxima", {})
+                    if imob and imob.get("encontrada"):
+                        st.markdown("---")
+                        st.markdown("**📞 Imobiliária mais próxima**")
+                        nome_imob = imob.get("nome", "?")
+                        tel_imob = imob.get("telefone", "")
+                        end_imob = imob.get("endereco", "")
+                        dist_imob = imob.get("distancia_metros", "?")
+                        email_imob = imob.get("email", "")
+                        site_imob = imob.get("website", "")
+                        horario_imob = imob.get("opening_hours", "")
+
+                        st.write(f"**{nome_imob}**")
+                        infos_imob = []
+                        if tel_imob:
+                            infos_imob.append(f"📱 {tel_imob}")
+                        if email_imob:
+                            infos_imob.append(f"✉️ {email_imob}")
+                        if site_imob:
+                            infos_imob.append(f"🌐 [{site_imob}]({site_imob})")
+                        if infos_imob:
+                            st.markdown(" | ".join(infos_imob))
+                        if end_imob:
+                            st.caption(f"📍 {end_imob} ({dist_imob}m)")
+                        if horario_imob:
+                            st.caption(f"🕐 {horario_imob}")
 
         # Ag.5
         m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
@@ -1610,6 +1619,8 @@ if "resultado" in st.session_state:
                 f"Valor de Liquidez (-10%): {_brl_txt(avaliacao.get('valor_liquidez', 0))}\n"
                 f"Tempo Estimado de Venda: {liquidez_info.get('tempo_estimado', '?')}"
             )
+            if preco.get("aviso_infraestrutura"):
+                bloco_resultado += f"\n({preco['aviso_infraestrutura']})"
         else:
             bloco_resultado = (
                 "Não foi possível estimar um valor confiável para este imóvel "

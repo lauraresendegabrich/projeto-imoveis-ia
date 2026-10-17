@@ -288,6 +288,11 @@ NORMALIZADORES = {
 # GEOLOCALIZACAO
 # =============================================================================
 
+# Sem localizacao precisa (rua ou bairro), a infraestrutura nao e avaliada: o Agente 5
+# usa a nota neutra 0,50 no tempo de venda e avisa (decisao da usuaria, 17/10/2026).
+MENSAGEM_INFRA_NAO_AVALIADA = "Infraestrutura não avaliada (endereço não localizado)"
+
+
 def _geocodificar(endereco: str) -> tuple:
 
     try:
@@ -4263,33 +4268,34 @@ def avaliar_infraestrutura(
 
     if not lat:
 
+        # Mesma geocodificacao do Agente 2: recusa resultado com precisao de cidade
+        # (antes o _geocodificar proprio aceitava o centro da cidade e a
+        # infraestrutura era avaliada de la). Decisao da usuaria, 17/10/2026.
+        from agents.comparables import _geocodificar_com_fallback
 
-        logger.info(
-
-            f"Geocodificando: "
-            f"{endereco}"
+        logger.info(f"Geocodificando (com checagem de precisao): {endereco}")
+        lat, lon, nivel_geo, _ = _geocodificar_com_fallback(
+            endereco_principal=endereco,
+            rua=rua,
+            numero=str(numero or ""),
+            bairro=bairro,
+            cidade=cidade,
+            estado=estado,
+            permitir_cidade=False,
         )
 
-
-        lat, lon = (
-            _geocodificar(
-                endereco
+        if lat is None or lon is None:
+            logger.warning(
+                "[Ag4] Infraestrutura nao avaliada: endereco nao localizado com precisao "
+                "de rua ou bairro (o centro da cidade nao e usado)"
             )
-        )
-
-
-        if not lat:
-
-
-            logger.error(
-
-                "Nao foi possivel "
-                "geocodificar "
-                "o endereco"
-            )
-
-
-            return {}
+            return {
+                "status": "endereco_nao_localizado",
+                "id_execucao": id_execucao,
+                "mensagem": MENSAGEM_INFRA_NAO_AVALIADA,
+                "scores": {},
+            }
+        logger.info(f"[Ag4][Geo] alvo localizado | nivel={nivel_geo} | lat={lat:.6f} | lon={lon:.6f}")
 
 
     # ----------------------------------------------------------------

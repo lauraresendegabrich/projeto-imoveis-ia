@@ -61,10 +61,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   merge), então hoje o Agente 1 nunca marca `origem_busca="cidade"` e essa parte da
   trava não tem efeito. Os anúncios da busca antiga na cidade (sem nenhum na
   rua/bairro) não são marcados e podem entrar pelo fallback e pelo socorro.
-- [ ] **Agente 4 tem geocodificação própria** (`agents/infra_evaluator.py`,
-  `_geocodificar`) sem a checagem de precisão do Agente 2. Usada só para buscar
-  pontos de interesse perto do imóvel; não afeta o valor. Avaliar se deve usar a
-  mesma função.
 - [ ] **Prioridade baixa. Apify sem contar a proximidade.** O Agente 1 aciona a coleta
   complementar do Apify quando a rua e o bairro têm menos de 10 anúncios, sem contar
   os que vieram por proximidade. Em Londrina/Aritana o Apify rodou mesmo com 319
@@ -91,6 +87,16 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Agente 4 tinha geocodificação própria.** Decisão da usuária (17/10/2026): sem a
+  coordenada da zona do Agente 2, o Agente 4 usa `_geocodificar_com_fallback` (com
+  checagem de precisão, sem aceitar cidade). Sem localização precisa, não avalia a
+  infraestrutura (antes avaliava a partir do centro da cidade): a nota fica vazia e a
+  tela mostra "Infraestrutura não avaliada (endereço não localizado)". O tempo de
+  venda usa a nota neutra 0,50 e os pesos de sempre (35/40/25; fórmula sem mudança)
+  e avisa na tela, no laudo e no Excel: "Tempo estimado sem a infraestrutura do
+  entorno (endereço não localizado no mapa): a infraestrutura foi considerada média.
+  Confira o entorno do imóvel." Log: `[Ag5] liquidez sem nota de infraestrutura`.
 
 - **ImovelWeb em SP: coleta concluída** (17/10/2026). `tools.atualizar_particoes`
   rodado (só `MSCK REPAIR TABLE`): nenhuma partição nova — a pasta de SP já estava
