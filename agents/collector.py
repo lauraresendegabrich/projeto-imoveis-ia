@@ -1903,6 +1903,11 @@ def coletar_imoveis(
     logger.info(f"[Ag1]   TEMPO TOTAL: {t_total_final:.1f}s ({t_total_final/60:.1f} min)")
     logger.info("=" * 55)
 
+    # Escopo que a busca usou ("rua+bairro" ou "cidade"), para a tela mostrar o que
+    # aconteceu de fato em vez de adivinhar comparando nomes de bairro.
+    for im in combinados:
+        im["escopo_busca"] = escopo
+
     # JSONs continuam como snapshots/debug. O pipeline deve usar o retorno em memoria.
     # Sempre sobrescreve, inclusive com [], para nunca servir dados de outra coleta:
     # um resultado antigo sobrevivendo no disco seria pior que vazio (poderia ser

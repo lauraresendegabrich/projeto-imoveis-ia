@@ -331,7 +331,7 @@ elif submitted:
     import os
     import time
     import threading
-    from agents.collector import coletar_imoveis
+    from agents.collector import _mesma_rua, coletar_imoveis
     from agents.comparables import identificar_comparaveis, analisar_zona_homogenea
     from agents.text_analyzer import analisar_comparaveis
     from agents.infra_evaluator import avaliar_infraestrutura
@@ -479,17 +479,20 @@ elif submitted:
                 f"ℹ️ {len(duplicatas_descartadas)} anúncio(s) repetido(s) do mesmo imóvel "
                 f"(em outro portal ou por outra imobiliária) foram descartados."
             )
-        # Avisa se não encontrou na rua ou bairro
-        if rua and imoveis_coletados:
-            na_rua = sum(1 for im in imoveis_coletados if rua.lower() in (im.get("street") or im.get("rua") or "").lower())
+        # Mostra o que a busca (Agente 1) realmente fez: o escopo vem dela, e a
+        # contagem na rua usa a mesma comparacao da busca (sem acento/maiusculas).
+        # Antes a tela comparava os nomes letra por letra e dizia "cidade toda"
+        # quando o bairro so estava escrito sem acento (ITAJUBA x Itajubá).
+        escopo_busca = imoveis_coletados[0].get("escopo_busca")
+        if (rua or bairro) and escopo_busca == "cidade":
+            local = " / ".join(x for x in (rua, bairro) if x)
+            st.caption(f"ℹ️ Nenhum imóvel encontrado em {local}. Usando imóveis da cidade toda.")
+        elif rua and escopo_busca == "rua+bairro":
+            na_rua = sum(1 for im in imoveis_coletados if _mesma_rua(im.get("street") or im.get("rua"), rua))
             if na_rua > 0:
                 st.caption(f"ℹ️ {na_rua} imóveis encontrados na mesma rua ({rua})")
-            else:
-                st.caption(f"ℹ️ Nenhum imóvel encontrado na mesma rua ({rua}). Usando imóveis do bairro.")
-        if bairro and imoveis_coletados:
-            no_bairro = sum(1 for im in imoveis_coletados if bairro.lower() in (im.get("neighborhood") or im.get("bairro") or "").lower())
-            if no_bairro == 0:
-                st.caption(f"ℹ️ Nenhum imóvel encontrado no bairro {bairro}. Usando imóveis da cidade toda.")
+            elif bairro:
+                st.caption(f"ℹ️ Nenhum imóvel encontrado na mesma rua ({rua}). Usando imóveis do bairro {bairro}.")
 
     # ==============================================================
     # ETAPA 2 — Identificação dos comparáveis (~30s)
