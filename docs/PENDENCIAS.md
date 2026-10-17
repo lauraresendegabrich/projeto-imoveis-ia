@@ -14,13 +14,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Regras para levar ao professor
 
-- [ ] **Socorro com o imóvel localizado: usar só os parecidos mais próximos.** Hoje,
-  quando a zona não confirma nenhum comparável, o socorro do Agente 5 usa todos os
-  parecidos (Cluster A). Proposta: com o imóvel localizado, usar só os mais próximos
-  (ex.: os 5 mais perto, até 3 km), em vez de todos.
-- [ ] **Imóvel não localizado e sem anúncios no bairro.** O socorro usa parecidos da
-  cidade toda, sem verificar distância. Aceitar com aviso (como hoje) ou dar
-  "sem estimativa"?
 - [ ] **Mínimo de terrenos incoerente no Agente 5** (`agents/price_liquidity.py`).
   Casa com área de terreno informada: com 0 terrenos na zona, o valor sai pelo m²
   das casas (sem separar o terreno); com 1 a 4 terrenos, o terreno é separado e,
@@ -113,6 +106,10 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Imóvel não localizado e sem anúncios no bairro: socorro usa parecidos da cidade
+  toda.** Decisão (17/10/2026): aceitar com aviso. O aviso já existe
+  (`texto_aviso_zona`, escopo "cidade"). Não alterar o código.
 
 - **Raio da zona ampliado até ter 5 comparáveis** (decisão da usuária, 17/10/2026;
   branch `raio-ampliado`). Depois de classificar os anúncios no raio escolhido pela
