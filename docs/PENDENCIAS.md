@@ -5,13 +5,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Coletas e base de anúncios
 
-- [ ] **ImovelWeb em SP ainda coletando** (07/10/2026: 24 estados prontos, só SP em
-  andamento; Chaves na Mão completo). A migração já está no `main` e usa o que
-  existe; quando SP terminar, registrar as pastas novas no Athena:
-  `.venv/Scripts/python.exe -m tools.atualizar_particoes` (só roda
-  `MSCK REPAIR TABLE`). Ideal: a coleta (repositório scraper-imoveis) rodar isso
-  ao fim de cada estado.
-
 ## Regras para levar ao professor
 
 - [ ] **Confirmar o ID 4 dos testes** (1 comparável e valor exibido): provavelmente
@@ -98,6 +91,14 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **ImovelWeb em SP: coleta concluída** (17/10/2026). `tools.atualizar_particoes`
+  rodado (só `MSCK REPAIR TABLE`): nenhuma partição nova — a pasta de SP já estava
+  registrada. No Athena, SP (coleta mais recente de cada portal): ImovelWeb
+  3.887.261 linhas de 642 cidades (última coleta gravada em 12/10/2026), Chaves na
+  Mão 2.890.862 (574), VivaReal 2.929.346 (608), Lugar Certo 3.365 (79). Ideal
+  continua: a coleta (repositório scraper-imoveis) rodar o registro ao fim de cada
+  estado.
 
 - **Mínimo de terrenos incoerente no Agente 5.** Decisão da usuária (17/10/2026):
   casa com área de terreno separa o terreno só com 5 ou mais terrenos na zona
