@@ -129,6 +129,41 @@ def texto_aviso_zona(contagem: dict, escopo_busca: str | None = None) -> str | N
     return " ".join(partes) or None
 
 
+def _metros(valor) -> str:
+    return f"{int(round(float(valor))):,}".replace(",", ".")
+
+
+def texto_aviso_raio(zona: dict | None) -> str | None:
+    """
+    Aviso quando o Agente 2 ampliou o raio da zona para chegar ao minimo de
+    comparaveis (sem chamar a IA de novo). None quando nao houve ampliacao.
+    """
+    zona = zona or {}
+    amp = zona.get("ampliacao_raio") or {}
+    if not amp.get("ampliado"):
+        return None
+    minimo, limite = amp.get("minimo", 5), amp.get("limite_m", 1500)
+    raio_ia = zona.get("raio_ia_m")
+    partes = []
+    for nome, raio_final, n in (
+        ("comparáveis", zona.get("raio_final_m"), amp.get("confirmados_depois", 0)),
+        ("terrenos", zona.get("raio_final_terrenos_m"), amp.get("terrenos_depois", 0)),
+    ):
+        if raio_final is None or raio_ia is None or raio_final == raio_ia:
+            continue
+        if n >= minimo:
+            partes.append(
+                f"Havia menos de {minimo} {nome} no raio de {_metros(raio_ia)} m; o raio foi "
+                f"ampliado para {_metros(raio_final)} m para chegar a {n}."
+            )
+        else:
+            partes.append(
+                f"Havia menos de {minimo} {nome} no raio de {_metros(raio_ia)} m; o raio foi "
+                f"ampliado até {_metros(limite)} m e ainda assim só {n} foram confirmados."
+            )
+    return " ".join(partes) or None
+
+
 def _numero(valor) -> float | None:
     try:
         numero = float(valor)

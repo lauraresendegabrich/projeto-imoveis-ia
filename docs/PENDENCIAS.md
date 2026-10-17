@@ -114,6 +114,21 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Raio da zona ampliado até ter 5 comparáveis** (decisão da usuária, 17/10/2026;
+  branch `raio-ampliado`). Depois de classificar os anúncios no raio escolhido pela
+  IA de visão, se houver menos de 5 confirmados (`MIN_CONFIRMADOS_ZONA`), o Agente 2
+  amplia o raio em passos de ×1,5 até ter 5 ou chegar a 1.500 m
+  (`RAIO_PROXIMIDADE_M`); raio da IA ≥ 1.500 m não é ampliado. Casas/aptos e
+  terrenos são ampliados separadamente (5 de cada). Não chama a IA nem geocodifica de
+  novo: usa a distância já calculada, e só de posições exatas (anúncio localizado só
+  pelo bairro ou com coordenada genérica continua "zona não verificada"). O fallback
+  dos "zona não verificada" só entra depois, se ainda faltar. Banco: `raio_zona_m` é
+  o raio final; `parametros` guarda `raio_ia_m`, `raio_final_m`,
+  `raio_final_terrenos_m` e o aviso. Excel: "Raio escolhido pela IA", "Raio usado no
+  cálculo", "Raio usado para os terrenos" e "Ampliação do raio". Tela e laudo
+  mostram o aviso. Convive com a decisão do professor de manter o raio da IA: a
+  variação da IA continua; a ampliação só entra quando faltam comparáveis.
+
 - **Comparáveis por fallback contam para o mínimo de 5.** Decisão do professor
   (17/10/2026): manter; aviso com números na tela, no laudo e nos logs. A tela
   mostra, abaixo do valor e no bloco do leilão, quantos comparáveis foram

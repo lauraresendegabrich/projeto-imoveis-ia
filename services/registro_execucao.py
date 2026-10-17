@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from services.alertas import calcular_alertas
+from services.leilao import texto_aviso_raio
 from services.leilao import FATOR_LUCRO_LEILAO, ORIGEM_CAIXA
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -149,6 +150,11 @@ def montar_registro(
             "min_amostras_confiavel": MIN_AMOSTRAS_CONFIAVEL,
             "min_confirmados_zona": MIN_CONFIRMADOS_ZONA,
             "raio_zona_m": raio,
+            # Raio da IA de visao e o usado depois da ampliacao (ate 1.500 m).
+            "raio_ia_m": _int(zona.get("raio_ia_m")) if zona.get("raio_ia_m") is not None else raio,
+            "raio_final_m": raio,
+            "raio_final_terrenos_m": _int(zona.get("raio_final_terrenos_m")) if zona.get("raio_final_terrenos_m") is not None else raio,
+            "aviso_raio": texto_aviso_raio(zona),
         },
         "fontes": {
             "athena_coletas": coletas,
@@ -283,7 +289,10 @@ LINHAS_RESUMO = (
     ("Usados de fora da zona confirmada", "usados_por_fallback", FORMATO_INTEIRO),
     ("Comparáveis de construção no cálculo", "qtd_comparaveis_construcao", FORMATO_INTEIRO),
     ("Terrenos no cálculo", "qtd_terrenos", FORMATO_INTEIRO),
-    ("Raio da zona homogênea (m)", "raio_zona_m", FORMATO_INTEIRO),
+    ("Raio escolhido pela IA (m)", "_raio_ia", FORMATO_INTEIRO),
+    ("Raio usado no cálculo (m)", "raio_zona_m", FORMATO_INTEIRO),
+    ("Raio usado para os terrenos (m)", "_raio_terrenos", FORMATO_INTEIRO),
+    ("Ampliação do raio", "_aviso_raio", None),
     ("Atenção", None, None),
     ("Alertas", "_alertas", None),
     ("Registro", None, None),
@@ -336,6 +345,10 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     n_alertas = len(execucao.get("alertas") or [])
     valores["_alertas"] = f"{n_alertas} (veja a aba Alertas)" if n_alertas else "Nenhum"
     valores["_formas_pagamento"] = ", ".join(execucao.get("formas_pagamento") or []) or None
+    parametros = execucao.get("parametros") or {}
+    valores["_raio_ia"] = parametros.get("raio_ia_m", execucao.get("raio_zona_m"))
+    valores["_raio_terrenos"] = parametros.get("raio_final_terrenos_m", execucao.get("raio_zona_m"))
+    valores["_aviso_raio"] = parametros.get("aviso_raio") or "Não houve ampliação"
     localizacao = execucao.get("localizacao_alvo")
     valores["_localizacao_alvo"] = ROTULOS_LOCALIZACAO.get(localizacao, localizacao)
     escopo = execucao.get("escopo_busca")
@@ -351,7 +364,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
         celula = resumo.cell(row=resumo.max_row, column=2)
         if formato and isinstance(valor, (int, float, date)):
             celula.number_format = formato
-        if chave == "regras_despesas" and valor:
+        if chave in ("regras_despesas", "_aviso_raio") and valor:
             celula.alignment = Alignment(wrap_text=True, vertical="top")
         if chave == "link" and valor:
             celula.hyperlink, celula.font = valor, link

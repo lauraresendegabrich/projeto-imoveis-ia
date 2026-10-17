@@ -2694,6 +2694,60 @@ def _so_entra_com_circulo(im: dict) -> bool:
     return im.get("origem_busca") in ORIGENS_SO_COM_CIRCULO
 
 
+# Ampliacao do raio (decisao da usuaria, 17/10/2026): com menos de
+# MIN_CONFIRMADOS_ZONA confirmados no raio da IA de visao, o raio cresce x1,5 por
+# passo ate ter o minimo ou chegar a RAIO_PROXIMIDADE_M (o mesmo raio da busca por
+# proximidade do Agente 1, que traz os anuncios ate essa distancia). Sem chamar a IA
+# nem geocodificar de novo: usa a distancia ja calculada. Casas/aptos e terrenos
+# sao ampliados separadamente (cada grupo precisa de 5).
+from agents.collector import RAIO_PROXIMIDADE_M  # noqa: E402
+FATOR_AMPLIACAO_RAIO = 1.5
+
+
+def _distancia_exata(im: dict) -> float | None:
+    """
+    Distancia que pode ser usada para ampliar o raio: medida da posicao do proprio
+    anuncio. Nunca a do centro do bairro (geocodificacao so por bairro) nem a de uma
+    coordenada generica (centro da cidade ou repetida em varios bairros).
+    """
+    dist = im.get("distancia_metros")
+    if dist is None or im.get("geocodificacao_nivel") == "bairro" or im.get("motivo_zona_nao_verificada"):
+        return None
+    try:
+        return float(dist)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ampliar_raio(
+    confirmados: list[dict],
+    fora: list[dict],
+    raio_ia: float,
+    limite: float = RAIO_PROXIMIDADE_M,
+    minimo: int = MIN_CONFIRMADOS_ZONA,
+) -> tuple[list[dict], list[dict], float]:
+    """
+    Amplia o raio em passos de FATOR_AMPLIACAO_RAIO ate `minimo` confirmados ou `limite`.
+    Retorna (confirmados, fora, raio_final). Os promovidos saem de `fora`, viram
+    na_zona e ficam marcados com incluido_por_ampliacao_raio=True.
+    Raio da IA ja igual ou maior que o limite: nao amplia.
+    """
+    raio = float(raio_ia)
+    if len(confirmados) >= minimo or raio >= limite:
+        return confirmados, fora, raio_ia
+    confirmados, fora = list(confirmados), list(fora)
+    while len(confirmados) < minimo and raio < limite:
+        raio = min(raio * FATOR_AMPLIACAO_RAIO, float(limite))
+        entram = [im for im in fora if (_distancia_exata(im) or float("inf")) <= raio]
+        for im in entram:
+            im["classificacao_zona"] = "na_zona"
+            im["incluido_por_ampliacao_raio"] = True
+        confirmados += entram
+        ids_entram = {id(im) for im in entram}
+        fora = [im for im in fora if id(im) not in ids_entram]
+    return confirmados, fora, int(round(raio))
+
+
 def _classificar_imovel_na_zona(
     im: dict,
     lat_alvo: float,
@@ -3034,7 +3088,23 @@ def analisar_zona_homogenea(
             terrenos_fora_zona.append(t)
         _log_classificacao(t, idx, len(terrenos), classificacao, prefixo="terreno ")
 
-    # 3c. Fallback de baixa confianca (Opcao B).
+    # 3c. Ampliacao do raio (antes do fallback): sem chamar a IA de novo.
+    raio_ia = raio
+    n_conf_antes, n_terr_antes = len(confirmados), len(terrenos_confirmados)
+    confirmados, fora, raio_final = _ampliar_raio(confirmados, fora, raio_ia)
+    terrenos_confirmados, terrenos_fora_zona, raio_final_terrenos = (
+        _ampliar_raio(terrenos_confirmados, terrenos_fora_zona, raio_ia) if terrenos else
+        (terrenos_confirmados, terrenos_fora_zona, raio_ia)
+    )
+    raio_ampliado = raio_final != raio_ia or raio_final_terrenos != raio_ia
+    if raio_ampliado:
+        logger.info(
+            f"[Ag2][Zona] raio ampliado: {raio_ia}m -> {raio_final}m | confirmados "
+            f"{n_conf_antes} -> {len(confirmados)} | terrenos {n_terr_antes} -> "
+            f"{len(terrenos_confirmados)} (raio dos terrenos {raio_final_terrenos}m)"
+        )
+
+    # 3d. Fallback de baixa confianca (Opcao B).
     # Quando poucos comparaveis foram confirmados geograficamente, os imoveis
     # "zona_nao_verificada" (posicao real desconhecida) sao anexados a lista de
     # confirmados para que os Agentes 3/5 tenham amostra suficiente. Eles ficam
@@ -3098,8 +3168,23 @@ def analisar_zona_homogenea(
             "endereco_usado": endereco_geo_alvo,
             "confianca": "baixa" if nivel_geo_alvo == "bairro" else "alta",
         },
+        # Raio escolhido pela IA de visao e o usado depois da ampliacao.
+        "raio_ia_m": raio_ia,
+        "raio_final_m": raio_final,
+        "raio_final_terrenos_m": raio_final_terrenos,
+        "ampliacao_raio": {
+            "ampliado": raio_ampliado,
+            "confirmados_antes": n_conf_antes,
+            "confirmados_depois": len(confirmados),
+            "terrenos_antes": n_terr_antes,
+            "terrenos_depois": len(terrenos_confirmados),
+            "limite_m": RAIO_PROXIMIDADE_M,
+            "minimo": MIN_CONFIRMADOS_ZONA,
+        },
         "resumo_zona": {
-            "raio_usado_metros": raio,
+            "raio_usado_metros": raio_final,
+            "raio_ia_metros": raio_ia,
+            "raio_terrenos_metros": raio_final_terrenos,
             "confirmados": len(confirmados),
             "fora_zona": len(fora),
             "nao_verificados": len(nao_verificados),

@@ -18,7 +18,7 @@ from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
 from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, contar_status_zona,
-    ler_data_br, ler_valor_reais, texto_aviso_zona,
+    ler_data_br, ler_valor_reais, texto_aviso_raio, texto_aviso_zona,
 )
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
@@ -572,12 +572,18 @@ elif submitted:
             fora = zona_resultado.get("fora_zona", [])
             tempo_zona = time.time() - t2z
             total_analisados_zona = len(confirmados) + len(fora)
-            raio_usado = zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros") or zona_resultado.get("zona_homogenea", {}).get("raio_metros") or 500
+            raio_usado = (
+                zona_resultado.get("raio_final_m")
+                or zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros")
+                or zona_resultado.get("zona_homogenea", {}).get("raio_metros") or 500
+            )
             with log_area:
                 # Separa comparaveis e terrenos na zona pra log claro
                 terrenos_na_zona = [c for c in confirmados if (c.get("propertyType", "") or "").lower() in ("terrenos", "terreno", "lote", "residential_allotment_land", "allotment_land")]
                 comparaveis_na_zona = [c for c in confirmados if c not in terrenos_na_zona]
                 st.success(f"✅ Zona homogênea definida (raio {raio_usado}m): **{len(comparaveis_na_zona)} comparáveis** e **{len(terrenos_na_zona)} terrenos** na zona")
+                if texto_aviso_raio(zona_resultado):
+                    st.caption(f"ℹ️ {texto_aviso_raio(zona_resultado)}")
                 if len(fora) > len(confirmados):
                     st.caption("ℹ️ Muitos imóveis foram descartados porque estão longe. O sistema só usa imóveis próximos para garantir que o valor reflete a sua vizinhança.")
         except Exception as e:
@@ -763,6 +769,7 @@ elif submitted:
         "status": "completo",
         "id_execucao": id_execucao,
         "aviso_zona": aviso_zona,
+        "aviso_raio": texto_aviso_raio(zona_resultado),
         "leilao_entrada": leilao_entrada,
         "leilao": leilao,
         "duplicatas_descartadas": duplicatas_descartadas,
@@ -881,6 +888,8 @@ if "resultado" in st.session_state:
 
         # Comparaveis com a distancia nao verificada (contam para o minimo de 5) e
         # busca na cidade toda: aviso com numeros, com ou sem valor minimo CAIXA.
+        if resultado.get("aviso_raio"):
+            st.info(f"📏 {resultado['aviso_raio']}")
         if resultado.get("aviso_zona"):
             st.warning(f"⚠️ {resultado['aviso_zona']}")
 
@@ -894,7 +903,7 @@ if "resultado" in st.session_state:
 
         zona = resultado.get("zona_homogenea", {})
         zh = zona.get("zona_homogenea", {}) if zona else {}
-        raio = zh.get("raio_metros") or zh.get("raio_sugerido_metros") or 500
+        raio = (zona or {}).get("raio_final_m") or zh.get("raio_metros") or zh.get("raio_sugerido_metros") or 500
         confirmados = zona.get("comparaveis_confirmados", []) if zona else []
         fora_zona = zona.get("fora_zona", []) if zona else []
         ag3_data = resultado.get("analise_qualitativa", {})
@@ -962,7 +971,11 @@ if "resultado" in st.session_state:
             st.markdown("**Zona homogênea**")
             st.write("A zona homogênea é a área ao redor do seu imóvel onde as construções têm características parecidas (mesmo tipo, tamanho e padrão). Só imóveis dentro dessa zona são usados no cálculo do valor, porque representam melhor o mercado local.")
             if zh:
-                st.write(f"- Raio utilizado: **{raio} metros**")
+                raio_ia_zona = (zona or {}).get("raio_ia_m")
+                if raio_ia_zona and raio_ia_zona != raio:
+                    st.write(f"- Raio escolhido pela IA: **{raio_ia_zona} metros**; ampliado para **{raio} metros** para completar a amostra")
+                else:
+                    st.write(f"- Raio utilizado: **{raio} metros**")
                 st.write(f"- Padrão construtivo: {zh.get('padrao_construtivo', 'não disponível')}")
                 st.write(f"- Homogeneidade visual: {zh.get('homogeneidade_visual', 'não disponível')}")
                 st.write(f"- Densidade urbana: {zh.get('densidade_urbana', 'não disponível')}")
@@ -1601,6 +1614,9 @@ if "resultado" in st.session_state:
                 + ("(a zona homogênea não foi calculada nesta avaliação)."
                    if not zona_calculada else "(comparáveis insuficientes na região).")
             )
+
+        if resultado.get("aviso_raio"):
+            bloco_resultado += f"\nAtenção: {resultado['aviso_raio']}"
 
         linhas_leilao = linhas_laudo_leilao(resultado.get("leilao"), _brl_txt)
         bloco_leilao = "\n".join(
