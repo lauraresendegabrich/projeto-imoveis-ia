@@ -155,6 +155,8 @@ def montar_registro(
             "raio_final_m": raio,
             "raio_final_terrenos_m": _int(zona.get("raio_final_terrenos_m")) if zona.get("raio_final_terrenos_m") is not None else raio,
             "aviso_raio": texto_aviso_raio(zona),
+            # Casa com 1 a 4 terrenos: calculo sem separar o terreno.
+            "aviso_terreno": ag5.get("aviso_terreno"),
         },
         "fontes": {
             "athena_coletas": coletas,
@@ -289,6 +291,7 @@ LINHAS_RESUMO = (
     ("Usados de fora da zona confirmada", "usados_por_fallback", FORMATO_INTEIRO),
     ("Comparáveis de construção no cálculo", "qtd_comparaveis_construcao", FORMATO_INTEIRO),
     ("Terrenos no cálculo", "qtd_terrenos", FORMATO_INTEIRO),
+    ("Terreno não separado", "_aviso_terreno", None),
     ("Raio escolhido pela IA (m)", "_raio_ia", FORMATO_INTEIRO),
     ("Raio usado no cálculo (m)", "raio_zona_m", FORMATO_INTEIRO),
     ("Raio usado para os terrenos (m)", "_raio_terrenos", FORMATO_INTEIRO),
@@ -349,6 +352,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     valores["_raio_ia"] = parametros.get("raio_ia_m", execucao.get("raio_zona_m"))
     valores["_raio_terrenos"] = parametros.get("raio_final_terrenos_m", execucao.get("raio_zona_m"))
     valores["_aviso_raio"] = parametros.get("aviso_raio") or "Não houve ampliação"
+    valores["_aviso_terreno"] = parametros.get("aviso_terreno")
     localizacao = execucao.get("localizacao_alvo")
     valores["_localizacao_alvo"] = ROTULOS_LOCALIZACAO.get(localizacao, localizacao)
     escopo = execucao.get("escopo_busca")
@@ -364,7 +368,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
         celula = resumo.cell(row=resumo.max_row, column=2)
         if formato and isinstance(valor, (int, float, date)):
             celula.number_format = formato
-        if chave in ("regras_despesas", "_aviso_raio") and valor:
+        if chave in ("regras_despesas", "_aviso_raio", "_aviso_terreno") and valor:
             celula.alignment = Alignment(wrap_text=True, vertical="top")
         if chave == "link" and valor:
             celula.hyperlink, celula.font = valor, link

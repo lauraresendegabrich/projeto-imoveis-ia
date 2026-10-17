@@ -890,6 +890,8 @@ if "resultado" in st.session_state:
         # busca na cidade toda: aviso com numeros, com ou sem valor minimo CAIXA.
         if resultado.get("aviso_raio"):
             st.info(f"📏 {resultado['aviso_raio']}")
+        if (preco or {}).get("aviso_terreno"):
+            st.info(f"🏞️ {preco['aviso_terreno']}")
         if resultado.get("aviso_zona"):
             st.warning(f"⚠️ {resultado['aviso_zona']}")
 
@@ -1617,6 +1619,8 @@ if "resultado" in st.session_state:
 
         if resultado.get("aviso_raio"):
             bloco_resultado += f"\nAtenção: {resultado['aviso_raio']}"
+        if (preco or {}).get("aviso_terreno"):
+            bloco_resultado += f"\nAtenção: {preco['aviso_terreno']}"
 
         linhas_leilao = linhas_laudo_leilao(resultado.get("leilao"), _brl_txt)
         bloco_leilao = "\n".join(

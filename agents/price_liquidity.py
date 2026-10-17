@@ -157,6 +157,15 @@ M2_TERRENO_MIN = 50.0              # R$/m2 de terreno plausivel (minimo)
 M2_TERRENO_MAX = 30000.0          # R$/m2 de terreno plausivel (maximo)
 M2_CONSTRUCAO_MIN = 500.0         # R$/m2 de construcao plausivel (minimo)
 M2_CONSTRUCAO_MAX = 50000.0       # R$/m2 de construcao plausivel (maximo)
+# Casa com menos de MIN_AMOSTRAS_CONFIAVEL terrenos: o terreno nao e separado (calculo
+# pelo m2 das casas, como sem nenhum terreno). Decisao da usuaria, 17/10/2026: antes,
+# com 1 a 4 terrenos o terreno era separado e a avaliacao dava amostra_insuficiente,
+# enquanto com 0 terrenos calculava normalmente.
+AVISO_TERRENO_NAO_SEPARADO = (
+    "Só {n} terreno(s) à venda na região (mínimo de 5). O valor foi calculado pelo m² das "
+    "casas parecidas, sem separar o terreno; se o lote do imóvel for bem maior ou menor "
+    "que o das casas comparadas, o valor fica menos preciso."
+)
 MIN_AMOSTRAS_CONFIAVEL = 5        # abaixo disso a estimativa e marcada baixa confianca (era 3 ate out/2026)
 
 CAMINHO_ZONA = "data/zona_homogenea_ag2.json"
@@ -839,16 +848,28 @@ def executar_agente5(
     # 2. DECISAO: SEPARAR TERRENO OU NAO
     # Regra da planilha:
     # - Se condominial (apto/sala): terreno = 0
-    # - Se casa/sobrado com area_terreno: separa
-    # - Se casa sem area_terreno: usa m2 total (nao separa)
+    # - Se casa/sobrado com area_terreno e 5+ terrenos na zona: separa
+    # - Se casa com 1 a 4 terrenos: nao separa (m2 total), terrenos fora do calculo
+    # - Se casa sem area_terreno ou sem terrenos: usa m2 total (nao separa)
     # ========================================================
 
+    aviso_terreno = None
     if eh_condominial or eh_terreno:
         separar_terreno = False
-    elif area_terreno_alvo > 0 and valores_m2_terreno:
+    elif area_terreno_alvo > 0 and len(valores_m2_terreno) >= MIN_AMOSTRAS_CONFIAVEL:
         separar_terreno = True
     else:
         separar_terreno = False
+        if area_terreno_alvo > 0 and valores_m2_terreno:
+            # Poucos terrenos: nao entram no calculo (ficam como descartados).
+            n_terrenos_poucos = len(valores_m2_terreno)
+            usados_terreno = []
+            aviso_terreno = AVISO_TERRENO_NAO_SEPARADO.format(n=n_terrenos_poucos)
+            import logging as _log_t
+            _log_t.getLogger(__name__).info(
+                f"[Ag5] terreno nao separado: {n_terrenos_poucos} terrenos "
+                f"(< {MIN_AMOSTRAS_CONFIAVEL}); calculo pelo m2 das casas"
+            )
 
     # ========================================================
     # 3. DUAS SERIES DE M2 DA CONSTRUCAO (fiel a planilha)
@@ -1207,6 +1228,8 @@ def executar_agente5(
             "construcao_descartados_sanidade": construcao_descartados,
         },
         "avisos": avisos,
+        # Casa com 1 a 4 terrenos: calculo sem separar o terreno (None quando nao se aplica).
+        "aviso_terreno": aviso_terreno,
         "justificativa": (
             f"O valor do imovel foi estimado a partir do m2 da zona homogenea. "
             f"Terreno: {len(valores_m2_terreno)} amostras, m2 referencia R$ {medio_m2_terreno:.2f}. "

@@ -14,14 +14,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Regras para levar ao professor
 
-- [ ] **Mínimo de terrenos incoerente no Agente 5** (`agents/price_liquidity.py`).
-  Casa com área de terreno informada: com 0 terrenos na zona, o valor sai pelo m²
-  das casas (sem separar o terreno); com 1 a 4 terrenos, o terreno é separado e,
-  por não chegar a 5, a avaliação dá "sem estimativa", mesmo com muitas casas.
-  Ou seja, achar poucos terrenos dá resultado pior do que não achar nenhum. A
-  busca por proximidade diminui o caso (traz mais terrenos), mas não elimina.
-  Proposta: com menos de 5 terrenos, não separar o terreno (calcular como no caso
-  de 0 terrenos). Não alterado: muda o método.
 - [ ] **Confirmar o ID 4 dos testes** (1 comparável e valor exibido): provavelmente
   rodou em 19/09 antes do commit `e2c843e`, que criou a regra dos 3 comparáveis.
   Rodar os IDs 4 e 5 de novo para confirmar.
@@ -106,6 +98,16 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Mínimo de terrenos incoerente no Agente 5.** Decisão da usuária (17/10/2026):
+  casa com área de terreno separa o terreno só com 5 ou mais terrenos na zona
+  (`MIN_AMOSTRAS_CONFIAVEL`). Com 1 a 4, calcula como com 0: pelo m² das casas, sem
+  separar; os terrenos ficam fora do cálculo (`comparaveis_descartados`; banco e Excel
+  mostram "Terrenos no cálculo: 0") e a tela, o laudo e o Excel avisam: "Só {n}
+  terreno(s) à venda na região (mínimo de 5). O valor foi calculado pelo m² das casas
+  parecidas, sem separar o terreno…". Antes, com 1 a 4 terrenos dava
+  amostra_insuficiente. Terreno puro e apartamento não mudaram. Ex.: Curitiba/Cajuru
+  (4 terrenos): R$ 913.061,64 com o terreno separado → R$ 920.256,98 pelo m² das casas.
 
 - **Imóvel não localizado e sem anúncios no bairro: socorro usa parecidos da cidade
   toda.** Decisão (17/10/2026): aceitar com aviso. O aviso já existe

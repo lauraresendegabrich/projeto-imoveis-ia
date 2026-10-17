@@ -52,14 +52,16 @@ def test_bh_floresta_6_aptos_cada_um_conta_uma_vez():
     assert r["status_avaliacao"] == "ok"
 
 
-def test_casa_curitiba_continua_com_as_duas_series():
-    # Casa: as duas series sao diferentes e continuam juntas (valor igual ao do banco).
+def test_casa_curitiba_com_4_terrenos_nao_separa_o_terreno():
+    # Caso real (Cajuru, 10/10/2026). Antes, com 4 terrenos o terreno era separado
+    # (R$ 913.061,64); desde 17/10/2026 so com 5+: calcula pelo m2 das casas.
     comps = [casa(690000, 146, 105), casa(699900, 126, 126), casa(799000, 136, 136), casa(899000, 173, 173)]
     terrenos = [terreno(515000, 540), terreno(789000, 600), terreno(836000, 418), terreno(1950000, 1824)]
     r = calcular({"propertyType": "casa", "area": 171.19, "area_terreno": 146.76}, comps, terrenos)
-    assert r["calculo_construcao"]["valor_m2_referencia"] == 4311.69, r["calculo_construcao"]
-    assert valor_medio(r) == 913061.64, valor_medio(r)
-    assert r["valor_m2_zona_homogenea"]["construcao"]["combinados"]["quantidade_total"] == 8
+    assert r["calculo_terreno"]["aplicado"] is False
+    assert valor_medio(r) == 920256.98, valor_medio(r)
+    assert r["comparaveis_usados"]["terreno"] == [] and len(r["comparaveis_descartados"]["terreno"]) == 4
+    assert r["aviso_terreno"].startswith("Só 4 terreno(s) à venda na região (mínimo de 5).")
 
 
 def test_minimo_de_5_comparaveis():
@@ -77,20 +79,47 @@ def test_casa_sem_nenhum_terreno_usa_preco_m2_total():
     r = calcular(ALVO_CASA, CASAS_5, [])
     assert r["status_avaliacao"] == "ok", r["status_avaliacao"]
     assert r["calculo_terreno"]["aplicado"] is False
+    assert r["aviso_terreno"] is None
 
 
-def test_casa_com_1_a_4_terrenos_fica_sem_estimativa():
-    for n in (1, 4):
-        terrenos = [terreno(200000 + i * 10000, 250) for i in range(n)]
-        r = calcular(ALVO_CASA, CASAS_5, terrenos)
-        assert r["status_avaliacao"] == "amostra_insuficiente", (n, r["status_avaliacao"])
+def test_casa_com_3_terrenos_calcula_sem_separar_com_aviso():
+    # Decisao da usuaria (17/10/2026): com 1 a 4 terrenos, calcula como sem terreno.
+    sem_terreno = calcular(ALVO_CASA, CASAS_5, [])
+    terrenos = [terreno(200000 + i * 10000, 250) for i in range(3)]
+    r = calcular(ALVO_CASA, CASAS_5, terrenos)
+    assert r["status_avaliacao"] == "ok", r["status_avaliacao"]
+    assert r["calculo_terreno"]["aplicado"] is False
+    assert valor_medio(r) == valor_medio(sem_terreno)
+    assert r["comparaveis_usados"]["terreno"] == [] and len(r["comparaveis_descartados"]["terreno"]) == 3
+    assert r["aviso_terreno"] == (
+        "Só 3 terreno(s) à venda na região (mínimo de 5). O valor foi calculado pelo m² das casas "
+        "parecidas, sem separar o terreno; se o lote do imóvel for bem maior ou menor que o das "
+        "casas comparadas, o valor fica menos preciso."), r["aviso_terreno"]
 
 
 def test_casa_com_5_terrenos_separa_terreno():
     terrenos = [terreno(200000 + i * 10000, 250) for i in range(5)]
     r = calcular(ALVO_CASA, CASAS_5, terrenos)
     assert r["status_avaliacao"] == "ok" and r["calculo_terreno"]["aplicado"] is True, r["status_avaliacao"]
+    assert len(r["comparaveis_usados"]["terreno"]) == 5 and r["aviso_terreno"] is None
+    # Casa separando o terreno: as duas series (menor e medio m2 de terreno) continuam juntas.
+    assert r["valor_m2_zona_homogenea"]["construcao"]["combinados"]["quantidade_total"] == 10
 
+
+
+def test_banco_e_excel_com_terreno_nao_separado():
+    import io
+    from openpyxl import load_workbook
+    from services.registro_execucao import excel_resultado, montar_registro
+    r = calcular(ALVO_CASA, CASAS_5, [terreno(200000 + i * 10000, 250) for i in range(3)])
+    e, comps = montar_registro(id_execucao="x", imovel_alvo={}, leilao_entrada={}, leilao={},
+                               imoveis_coletados=[], resultado_ag2={}, zona_resultado={}, resultado_ag3={},
+                               resultado_ag4={}, resultado_ag5=r)
+    assert e["qtd_terrenos"] == 0 and e["valor_m2_terreno"] is None
+    assert sum(1 for c in comps if c["tipo"] == "terreno" and not c["entrou_no_calculo"]) == 3
+    resumo = {l[0]: l[1] for l in load_workbook(io.BytesIO(excel_resultado(e, comps)))["Resumo"].iter_rows(values_only=True)}
+    assert resumo["Terrenos no cálculo"] == 0
+    assert resumo["Terreno não separado"].startswith("Só 3 terreno(s) à venda na região")
 
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
