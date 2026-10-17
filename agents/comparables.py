@@ -2421,8 +2421,47 @@ def _validar_zona_llm(texto: str) -> dict | None:
             return None
     return dados
 
-def _geocodificar(endereco: str) -> tuple:
-    """Geocodifica uma tentativa: Nominatim primeiro, Google depois."""
+# Resultados com precisao de cidade/municipio (ou maior) nao localizam um imovel:
+# o Nominatim e o Google devolvem o centro da cidade quando nao acham a rua, e esse
+# ponto era aceito como "endereco completo" (Itaborai, out/2026).
+TIPOS_IMPRECISOS_NOMINATIM = {
+    "city", "town", "village", "municipality", "county", "state", "administrative", "country",
+}
+# Anuncio com coordenada a menos disto do centro da cidade: provavel coordenada
+# generica do portal (o centro da cidade), nao a posicao do imovel.
+RAIO_CENTRO_CIDADE_SUSPEITO_M = 300
+# Mesma coordenada (4 casas decimais) em pelo menos esta quantidade de anuncios, de
+# bairros diferentes: coordenada generica, nao a posicao de cada imovel.
+MIN_ANUNCIOS_COORDENADA_REPETIDA = 3
+
+
+def _motivo_impreciso_nominatim(item: dict) -> str | None:
+    for campo in ("addresstype", "type"):
+        valor = str(item.get(campo) or "").lower()
+        if valor in TIPOS_IMPRECISOS_NOMINATIM:
+            return f"{campo}={valor}"
+    return None
+
+
+def _motivo_impreciso_google(item: dict) -> str | None:
+    tipos = [str(t) for t in (item.get("types") or [])]
+    imprecisos = [t for t in tipos if t in ("locality", "country") or t.startswith("administrative_area_level_")]
+    if imprecisos:
+        return f"types={','.join(imprecisos)}"
+    tipo_local = (item.get("geometry") or {}).get("location_type")
+    if tipo_local == "APPROXIMATE" and item.get("partial_match"):
+        return "location_type=APPROXIMATE com partial_match"
+    return None
+
+
+def _geocodificar(endereco: str, aceitar_cidade: bool = False) -> tuple:
+    """
+    Geocodifica uma tentativa: Nominatim primeiro, Google depois.
+
+    Recusa resultados com precisao de cidade/municipio (o centro da cidade nao e a
+    posicao do imovel) e devolve (None, None), para _geocodificar_com_fallback seguir
+    para a proxima tentativa. aceitar_cidade=True so para achar o centro da cidade.
+    """
     import requests
     if not endereco or not str(endereco).strip():
         return None, None
@@ -2436,7 +2475,11 @@ def _geocodificar(endereco: str) -> tuple:
         )
         if r.status_code == 200 and r.json():
             data = r.json()[0]
-            return float(data["lat"]), float(data["lon"])
+            motivo = None if aceitar_cidade else _motivo_impreciso_nominatim(data)
+            if motivo:
+                logger.info(f"[Geo] Nominatim recusado ({motivo}, precisao de cidade) para {endereco!r}")
+            else:
+                return float(data["lat"]), float(data["lon"])
     except Exception as e:
         logger.debug(f"Nominatim falhou para {endereco!r}: {e}")
 
@@ -2451,11 +2494,74 @@ def _geocodificar(endereco: str) -> tuple:
             if r.status_code == 200:
                 results = r.json().get("results", [])
                 if results:
-                    loc = results[0]["geometry"]["location"]
-                    return float(loc["lat"]), float(loc["lng"])
+                    motivo = None if aceitar_cidade else _motivo_impreciso_google(results[0])
+                    if motivo:
+                        logger.info(f"[Geo] Google recusado ({motivo}) para {endereco!r}")
+                    else:
+                        loc = results[0]["geometry"]["location"]
+                        return float(loc["lat"]), float(loc["lng"])
         except Exception as e:
             logger.debug(f"Google Geocoding falhou para {endereco!r}: {e}")
     return None, None
+
+
+def _centros_da_cidade(cidade: str, estado: str) -> list[tuple]:
+    """
+    Centro da cidade segundo o Nominatim E segundo o Google (podem ficar a km um do
+    outro; em Itaborai, 2,7 km). Os portais gravam um ou outro como coordenada
+    generica, entao os dois servem de referencia.
+    """
+    import requests
+    if not cidade:
+        return []
+    endereco = ", ".join(p for p in (cidade, estado, "Brasil") if p)
+    centros = []
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": endereco, "format": "json", "limit": 1, "countrycodes": "br"},
+            headers={"User-Agent": "ProjetoImoveisIA/1.0"},
+            timeout=10,
+        )
+        if r.status_code == 200 and r.json():
+            centros.append((float(r.json()[0]["lat"]), float(r.json()[0]["lon"])))
+    except Exception as e:
+        logger.debug(f"Nominatim (centro da cidade) falhou: {e}")
+    maps_key = os.getenv("GOOGLE_MAPS_KEY", "")
+    if maps_key:
+        try:
+            r = requests.get(
+                "https://maps.googleapis.com/maps/api/geocode/json",
+                params={"address": endereco, "key": maps_key, "region": "br"},
+                timeout=10,
+            )
+            resultados = r.json().get("results", []) if r.status_code == 200 else []
+            if resultados:
+                loc = resultados[0]["geometry"]["location"]
+                centros.append((float(loc["lat"]), float(loc["lng"])))
+        except Exception as e:
+            logger.debug(f"Google (centro da cidade) falhou: {e}")
+    return centros
+
+
+def _coordenadas_repetidas(imoveis: list[dict]) -> set:
+    """
+    Coordenadas (4 casas decimais) que vem prontas do portal e se repetem em
+    MIN_ANUNCIOS_COORDENADA_REPETIDA ou mais anuncios, de bairros diferentes.
+    """
+    grupos: dict[tuple, list[str]] = {}
+    for im in imoveis:
+        lat = im.get("lat") if im.get("lat") is not None else im.get("latitude")
+        lon = im.get("lon") if im.get("lon") is not None else im.get("longitude")
+        try:
+            chave = (round(float(lat), 4), round(float(lon), 4))
+        except (TypeError, ValueError):
+            continue
+        grupos.setdefault(chave, []).append(_normalizar_texto(im.get("neighborhood") or im.get("bairro") or ""))
+    return {
+        chave for chave, bairros in grupos.items()
+        if len(bairros) >= MIN_ANUNCIOS_COORDENADA_REPETIDA and len(set(bairros)) >= 2
+    }
 
 
 def _inferir_componentes_endereco(endereco: str, cidade: str = "", estado: str = "") -> dict:
@@ -2546,6 +2652,8 @@ def _classificar_imovel_na_zona(
     raio: float,
     cidade: str,
     estado: str,
+    centros_cidade: list | None = None,
+    coords_repetidas: set | None = None,
 ) -> str:
     """
     Geocodifica um imovel (reusa lat/lon do Athena quando existem) e classifica
@@ -2593,6 +2701,27 @@ def _classificar_imovel_na_zona(
     im["geocodificacao_nivel"] = nivel
     im["endereco_geocodificado"] = endereco_usado
     im["confianca_geocodificacao"] = "baixa" if nivel == "bairro" else "alta"
+
+    # Coordenada generica (centro da cidade ou repetida em varios bairros): a
+    # posicao real e desconhecida, entao nunca confirma na_zona.
+    motivo_generica = None
+    for centro in centros_cidade or []:
+        dist_centro = _distancia_haversine(centro[0], centro[1], lat, lon)
+        if dist_centro < RAIO_CENTRO_CIDADE_SUSPEITO_M:
+            motivo_generica = f"a {dist_centro:.0f} m do centro da cidade"
+            break
+    if not motivo_generica and coords_repetidas and (round(lat, 4), round(lon, 4)) in coords_repetidas:
+        motivo_generica = "mesma coordenada em varios anuncios de bairros diferentes"
+    if motivo_generica:
+        im["classificacao_zona"] = "zona_nao_verificada"
+        im["confianca_geocodificacao"] = "baixa"
+        im["motivo_zona_nao_verificada"] = f"coordenada generica ({motivo_generica})"
+        logger.info(
+            f"[Ag2][Zona] coordenada generica ({motivo_generica}): "
+            f"{im.get('neighborhood') or im.get('bairro') or '?'} | {str(im.get('url') or '')[:60]} "
+            f"-> zona_nao_verificada"
+        )
+        return "zona_nao_verificada"
 
     # A geocodificacao no nivel bairro usa o centroide do bairro como aproximacao
     # da posicao do imovel (nao ha rua/coordenada propria). A regra:
@@ -2780,6 +2909,16 @@ def analisar_zona_homogenea(
                 f"raio={raio}m | {rotulo}"
             )
 
+    # 3a. Referencias para detectar coordenada generica do portal (centro da cidade
+    # ou o mesmo ponto em anuncios de varios bairros): esses nunca confirmam na_zona.
+    centros_cidade = _centros_da_cidade(cidade, estado)
+    coords_repetidas = _coordenadas_repetidas(list(imoveis) + list(terrenos))
+    if centros_cidade or coords_repetidas:
+        logger.info(
+            f"[Ag2][Zona] referencias de coordenada generica: centros_cidade={centros_cidade} | "
+            f"coordenadas repetidas em varios bairros={len(coords_repetidas)}"
+        )
+
     # 3. Geocodifica/classifica candidatos construidos
     logger.info(f"[Ag2][Zona] classificando {len(imoveis)} comparaveis | raio={raio}m")
     confirmados = []
@@ -2787,7 +2926,10 @@ def analisar_zona_homogenea(
     nao_verificados = []
 
     for idx, im in enumerate(imoveis, 1):
-        classificacao = _classificar_imovel_na_zona(im, lat_alvo, lon_alvo, raio, cidade, estado)
+        classificacao = _classificar_imovel_na_zona(
+            im, lat_alvo, lon_alvo, raio, cidade, estado,
+            centros_cidade=centros_cidade, coords_repetidas=coords_repetidas,
+        )
         if classificacao == "zona_nao_verificada":
             nao_verificados.append(im)
         elif classificacao == "na_zona":
@@ -2821,7 +2963,10 @@ def analisar_zona_homogenea(
     if terrenos:
         logger.info(f"[Ag2][Zona] classificando {len(terrenos)} terreno(s) | raio={raio}m")
     for idx, t in enumerate(terrenos, 1):
-        classificacao = _classificar_imovel_na_zona(t, lat_alvo, lon_alvo, raio, cidade, estado)
+        classificacao = _classificar_imovel_na_zona(
+            t, lat_alvo, lon_alvo, raio, cidade, estado,
+            centros_cidade=centros_cidade, coords_repetidas=coords_repetidas,
+        )
         if classificacao == "zona_nao_verificada":
             terrenos_nao_verificados.append(t)
         elif classificacao == "na_zona":

@@ -64,6 +64,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   professor; opções: fixar o raio, usar a média de algumas leituras, ou guardar o
   raio por endereço. Não mexer sem decisão (fora do escopo atual).
 
+- [ ] **Agente 4 tem geocodificação própria** (`agents/infra_evaluator.py`,
+  `_geocodificar`) sem a checagem de precisão do Agente 2. Usada só para buscar
+  pontos de interesse perto do imóvel; não afeta o valor. Avaliar se deve usar a
+  mesma função.
+- [ ] **Etapas seguintes (decididas em 17/10/2026):** Etapa 2 — branch
+  `comparaveis-sem-bairro` (a IA do Agente 2 não julga bairro/rua; a localização fica
+  com a zona). Etapa 3 — refazer o teste de Itaborai com o branch
+  `busca-cidade-poucos-locais` e só então fazer o merge.
+
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
 
 - [ ] **Ordem dos provedores para comparáveis.** Hoje Groq → NVIDIA → Gemini. No
@@ -73,6 +82,17 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Localização imprecisa tratada como exata** (branch `geocodificacao-precisa`):
+  `_geocodificar` recusa resultados com precisão de cidade (Nominatim
+  addresstype/type city, town, municipality…; Google types locality/
+  administrative_area_level_* ou APPROXIMATE com partial_match) e segue para a
+  próxima tentativa (rua → bairro). A tela usa a mesma função para o imóvel; sem
+  precisão de rua ou bairro, segue "sem localização" com aviso. Anúncios a menos de
+  300 m do centro da cidade (Nominatim ou Google) ou com a mesma coordenada em 3+
+  anúncios de bairros diferentes viram `zona_nao_verificada`. Itaboraí: o imóvel
+  estava no centro da cidade como "endereço completo" e terrenos entravam a 0–53 m.
+  Curitiba/Cajuru: classificação idêntica antes e depois.
 
 - **Mínimo de comparáveis passou de 3 para 5** (17/10/2026, decisão da usuária):
   - Agente 5 (`MIN_AMOSTRAS_CONFIAVEL = 5`): menos de 5 casas/apartamentos, ou menos

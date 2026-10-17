@@ -348,53 +348,29 @@ elif submitted:
     # ==============================================================
     # GEOCODIFICAÇÃO ÚNICA DO ALVO (persistida pra todos os agentes)
     # ==============================================================
+    # Mesma geocodificacao do Agente 2: tenta endereco completo -> rua+numero -> rua
+    # -> bairro e recusa resultados com precisao de cidade (o Google/Nominatim
+    # devolvem o centro da cidade quando nao acham a rua; antes isso era aceito).
+    alvo_sem_localizacao = False
     if not imovel_alvo.get("lat") or not imovel_alvo.get("lon"):
-        import requests as _geo_req
-        endereco_geo = f"{rua}, {numero}, {bairro}, {cidade}, {estado}, Brasil".strip(", ")
+        from agents.comparables import _geocodificar_com_fallback
+        endereco_geo = ", ".join(p for p in (rua, numero, bairro, cidade, estado, "Brasil") if p)
         _logger.info(f"[Geo][Alvo] endereco={endereco_geo}")
-        _lat, _lon, _fonte_geo = None, None, None
-
-        # Tentativa 1: Nominatim
-        try:
-            r_geo = _geo_req.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": endereco_geo, "format": "json", "limit": 1},
-                headers={"User-Agent": "ProjetoImoveisIA/1.0"},
-                timeout=10,
-            )
-            if r_geo.status_code == 200 and r_geo.json():
-                data_geo = r_geo.json()[0]
-                _lat, _lon = float(data_geo["lat"]), float(data_geo["lon"])
-                _fonte_geo = "Nominatim"
-        except Exception:
-            pass
-
-        # Tentativa 2: Google Geocoding
-        if not _lat:
-            maps_key_geo = os.getenv("GOOGLE_MAPS_KEY", "")
-            if maps_key_geo:
-                try:
-                    r_geo = _geo_req.get(
-                        "https://maps.googleapis.com/maps/api/geocode/json",
-                        params={"address": endereco_geo, "key": maps_key_geo},
-                        timeout=10,
-                    )
-                    if r_geo.status_code == 200:
-                        results_geo = r_geo.json().get("results", [])
-                        if results_geo:
-                            loc_geo = results_geo[0]["geometry"]["location"]
-                            _lat, _lon = float(loc_geo["lat"]), float(loc_geo["lng"])
-                            _fonte_geo = "Google Geocoding"
-                except Exception:
-                    pass
-
-        if _lat and _lon:
+        _lat, _lon, _nivel_geo, _endereco_usado = _geocodificar_com_fallback(
+            endereco_principal=endereco_geo, rua=rua, numero=numero, bairro=bairro,
+            cidade=cidade, estado=estado, permitir_cidade=False,
+        )
+        if _lat is not None and _lon is not None:
             imovel_alvo["lat"] = _lat
             imovel_alvo["lon"] = _lon
-            imovel_alvo["_geo_fonte"] = _fonte_geo
-            _logger.info(f"[Geo][Alvo] lat={_lat:.6f} | lon={_lon:.6f} | fonte={_fonte_geo} | geocodificacao_nova=true")
+            imovel_alvo["geocodificacao_nivel"] = _nivel_geo
+            _logger.info(
+                f"[Geo][Alvo] lat={_lat:.6f} | lon={_lon:.6f} | nivel={_nivel_geo} | "
+                f"endereco_usado={_endereco_usado!r} | geocodificacao_nova=true"
+            )
         else:
-            _logger.warning("[Geo][Alvo] Nao foi possivel geocodificar o alvo")
+            alvo_sem_localizacao = True
+            _logger.warning("[Geo][Alvo] Nao foi possivel localizar o alvo com precisao de rua ou bairro")
     else:
         _logger.info(f"[Geo][Alvo] lat={imovel_alvo['lat']} | lon={imovel_alvo['lon']} | geocodificacao_nova=false (ja existente)")
 
@@ -405,6 +381,12 @@ elif submitted:
     progress = st.progress(0)
     status_box = st.empty()
     log_area = st.container()
+    if alvo_sem_localizacao:
+        with log_area:
+            st.warning(
+                "⚠️ Não foi possível localizar o endereço no mapa com precisão de rua ou bairro. "
+                "A distância dos comparáveis até o imóvel não será verificada, e o valor fica menos preciso."
+            )
 
     inicio_total = time.time()
 
