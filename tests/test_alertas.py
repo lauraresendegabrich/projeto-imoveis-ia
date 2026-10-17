@@ -175,6 +175,15 @@ def test_possivel_repetido_mesmo_preco_area_e_numero():
     assert grupo["numero"] == "314" and len(grupo["anuncios"]) == 2
 
 
+
+def test_area_diferente_entre_portais():
+    c = comp(590_000, 80, "Rua A, 1")
+    c["areas_entre_portais"] = [{"portal": "VivaReal", "area": 80.0, "url": "https://vr/1"},
+                                {"portal": "Chaves na Mão", "area": 110.0, "url": "https://cnm/2"}]
+    alertas = calcular_alertas(execucao(), ag5(usados={"construcao": [c], "terreno": []}))
+    assert codigos(alertas) == ["area_diferente_entre_portais"], codigos(alertas)
+    assert alertas[0]["detalhe"][0]["motivo"] == "VivaReal 80 m² · Chaves na Mão 110 m²; usada 80 m²", alertas[0]["detalhe"][0]["motivo"]
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

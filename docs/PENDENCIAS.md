@@ -40,7 +40,7 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Agente 1 — Repetidos entre portais (`agents/identidade.py`)
 
-- [ ] **Prioridade baixa. Área do par juntado depende do anúncio que fica.** Ao
+- [x] **Resolvido em 17/10/2026: menor área + alerta `area_diferente_entre_portais`.** Área do par juntado dependia do anúncio que fica. Ao
   juntar o mesmo imóvel de dois portais, fica o anúncio mais completo (mais campos
   preenchidos) com a área dele, sem comparar com a do outro. Curitiba/Cajuru
   (10/10/2026): 6 de 123 pares tinham área mais de 2% diferente, todos com mesmo

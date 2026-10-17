@@ -40,6 +40,8 @@ Diferencas em relacao a proposta original:
     Na calibracao de BH nao mudou as taxas (quase nenhum par tinha numero nos dois
     lados); no Santa Monica juntou 16 anuncios a mais.
 
+  - Mesmo imovel com areas mais de 5% diferentes entre portais: casa/apto usa a
+    menor area do grupo e guarda as areas em `areas_entre_portais` (alerta).
   - Na prova direta (mesmo codigo + anunciante), o nome do anunciante e comparado
     sem palavras genericas ("Habicarmo" = "Habicarmo Imoveis"): em Sao Jose do Rio
     Preto (out/2026) a mesma casa e o mesmo terreno escapavam por isso.
@@ -65,6 +67,10 @@ CASA_DESC = 0.75
 # Casa com mesma rua E mesmo numero dispensa a descricao (cada portal reescreve o
 # texto; casas vizinhas iguais de construtora tem numeros diferentes).
 CASA_AREA_COM_NUMERO = 0.02
+# Mesmo imovel com areas diferentes entre portais (ex.: um portal mostra a area do
+# terreno no lugar da construida): acima desta diferenca, casa/apto usa a MENOR area
+# do grupo e o anuncio e marcado para o alerta "area diferente entre portais".
+AREA_DIVERGENTE_ENTRE_PORTAIS = 0.05
 
 SUFIXOS_ANUNCIANTE = {"ltda", "me", "eireli", "sa", "epp", "s", "a"}
 # Palavras genericas que cada portal poe ou tira do nome da mesma imobiliaria
@@ -358,6 +364,38 @@ def _resumo(d: dict) -> dict:
     }
 
 
+def _ajustar_area_do_grupo(rep: dict, membros: list[dict]) -> None:
+    """
+    Compara a area do representante com a dos anuncios absorvidos. Com diferenca
+    acima de AREA_DIVERGENTE_ENTRE_PORTAIS, guarda as areas de cada portal em
+    `areas_entre_portais` e, para casa/apto, usa a menor (o erro mais comum e um
+    portal mostrar a area do terreno, maior que a construida). Terreno mantem a
+    area (a menor daria um R$/m2 maior, nao conservador); so fica marcado.
+    """
+    areas = []
+    for d in [rep] + membros:
+        a = _num(area(d))
+        if a and a > 0:
+            areas.append({"portal": _campo(d, "source") or portal(d) or None, "area": a, "url": _campo(d, "url")})
+    if len(areas) < 2:
+        return
+    menor, maior = min(x["area"] for x in areas), max(x["area"] for x in areas)
+    if (maior - menor) / maior <= AREA_DIVERGENTE_ENTRE_PORTAIS:
+        return
+    rep["areas_entre_portais"] = areas
+    area_atual = _num(area(rep))
+    if grupo(rep) is None or area_atual == menor:
+        return
+    rep["area_original"] = area_atual
+    rep["area"] = menor
+    for campo in ("area_construida", "usableArea"):
+        if not _vazio(rep.get(campo)):
+            rep[campo] = menor
+    p = _num(preco(rep))
+    if p and not _vazio(rep.get("pricePerSqm")):
+        rep["pricePerSqm"] = round(p / menor, 2)
+
+
 def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
     """
     Agrupa anuncios que sao o mesmo imovel e devolve (unicos, descartados).
@@ -465,6 +503,7 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
                 if fonte and fonte not in fontes:
                     fontes.append(fonte)
             rep["fontes_origem"] = fontes
+            _ajustar_area_do_grupo(rep, [original[k] for k, _ in outros])
             for k, motivo in outros:
                 descartados.append({
                     **original[k],

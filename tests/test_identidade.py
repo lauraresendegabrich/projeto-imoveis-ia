@@ -145,6 +145,46 @@ def test_imobiliarias_diferentes_com_mesmo_codigo_nao_sao_fundidas():
     assert mesmo_imovel(a, b)[0] is False
 
 
+
+# ---------------------------------------------------------------- area entre portais
+def _par(area_a, area_b, tipo="casa", extra_a=None):
+    """Mesmo imovel em 2 portais (mesmo codigo e anunciante), areas diferentes.
+    O primeiro tem mais campos (fica como representante)."""
+    a = casa(tipo=tipo, preco=590000.0, area_construida=area_a, codigo_imovel_anunciante="CA77",
+             anunciante_nome="Imobiliaria Paes", portal="vivareal", source="VivaReal",
+             listing_id="1", url="https://vr/1", vagas=2, **(extra_a or {}))
+    b = casa(tipo=tipo, preco=590000.0, area_construida=area_b, codigo_imovel_anunciante="CA77",
+             anunciante_nome="Imobiliaria Paes Imoveis", portal="chavesnamao", source="Chaves na Mão",
+             listing_id="2", url="https://cnm/2", vagas=None, suites=None)
+    unicos, descartados = deduplicar([a, b])
+    assert len(unicos) == 1 and len(descartados) == 1
+    return unicos[0]
+
+
+def test_area_divergente_usa_a_menor_quando_o_mais_completo_tem_a_maior():
+    # Curitiba R$ 590.000: 80 m2 num portal e 110 m2 (area do terreno) no outro.
+    rep = _par(110.0, 80.0)
+    assert rep["area"] == 80.0 and rep["area_construida"] == 80.0, rep.get("area")
+    assert rep["area_original"] == 110.0
+    assert sorted(a["area"] for a in rep["areas_entre_portais"]) == [80.0, 110.0]
+
+
+def test_area_divergente_ja_com_a_menor_so_marca():
+    rep = _par(80.0, 110.0)
+    assert rep["area_construida"] == 80.0 and "area_original" not in rep
+    assert len(rep["areas_entre_portais"]) == 2
+
+
+def test_area_ate_5_por_cento_nao_muda_nada():
+    rep = _par(104.0, 100.0)
+    assert rep["area_construida"] == 104.0 and "areas_entre_portais" not in rep
+
+
+def test_terreno_com_area_divergente_mantem_e_marca():
+    rep = _par(720.0, 600.0, tipo="terreno")
+    assert rep["area_construida"] == 720.0 and "area_original" not in rep
+    assert len(rep["areas_entre_portais"]) == 2
+
 # ---------------------------------------------------------------- deduplicar
 def test_deduplicar_guarda_descartado_completo_e_motivo():
     a = anuncio(listing_id="1", url="https://vr/1")

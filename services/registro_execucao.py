@@ -267,6 +267,7 @@ ROTULOS_ALERTAS = {
     "amostra_concentrada": "Amostra concentrada",
     "terreno_fora_do_padrao": "Terreno fora do padrão",
     "possivel_repetido_no_calculo": "Possível repetido no cálculo",
+    "area_diferente_entre_portais": "Área diferente entre portais",
 }
 
 ROTULOS_STATUS_ZONA = {

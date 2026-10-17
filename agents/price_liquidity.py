@@ -777,6 +777,10 @@ def executar_agente5(
                 else "confirmado"
             ),
             "portal": im.get("source") or im.get("portal") or "",
+            # Mesmo imovel com areas diferentes entre portais (Ag1): area de cada
+            # portal; o calculo ja usa a area escolhida (menor, para casa/apto).
+            "areas_entre_portais": im.get("areas_entre_portais"),
+            "area_original": im.get("area_original"),
         }
 
     # Tipo do imovel alvo

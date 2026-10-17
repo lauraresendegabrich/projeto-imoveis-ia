@@ -6,7 +6,8 @@ Regras simples (sem IA e sem mudar nenhum calculo) que apontam avaliacoes que
 merecem atencao: poucos comparaveis, comparaveis fora da zona, precos espalhados,
 divergencia com o valor de avaliacao CAIXA, decisao apertada, possivel anuncio do
 proprio imovel no calculo, falha de agente, amostra concentrada num mesmo
-empreendimento, terrenos fora do padrao e possiveis repetidos que ficaram no calculo.
+empreendimento, terrenos fora do padrao, possiveis repetidos que ficaram no calculo
+e mesmo imovel com areas diferentes entre portais.
 
 Gravados no banco (coluna execucoes.alertas) para quem for analisar os resultados
 filtrar as avaliacoes que precisam ser olhadas. Nao aparecem na tela.
@@ -252,6 +253,26 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             n_anuncios, 0,
             [{"preco": k[2], "area": k[3], "numero": k[1], "anuncios": [_anuncio(c) for c in g]}
              for k, g in grupos_rep.items() if len(g) >= 2],
+        ))
+
+    # 11. Mesmo imovel com areas diferentes entre portais (Ag1 juntou os anuncios):
+    #     casa/apto ja usa a menor area; terreno mantem a do anuncio que ficou.
+    divergentes = [c for c in usados_todos if c.get("areas_entre_portais")]
+    if divergentes:
+        detalhe = []
+        for c in divergentes:
+            areas_txt = " · ".join(
+                f"{a.get('portal') or '?'} {a['area']:g} m²" for a in c["areas_entre_portais"]
+            )
+            usada = f"usada {float(c['area']):g} m²" if c.get("area") else ""
+            detalhe.append({**_anuncio(c), "motivo": f"{areas_txt}; {usada}".strip("; "),
+                            "areas_entre_portais": c["areas_entre_portais"]})
+        alertas.append(_alerta(
+            "area_diferente_entre_portais",
+            f"{len(divergentes)} comparável(is) do cálculo aparecem em mais de um portal com áreas "
+            f"diferentes (mais de 5%). Para casa e apartamento foi usada a menor área (o erro "
+            f"mais comum é um portal mostrar a área do terreno); confira os anúncios.",
+            len(divergentes), 0.05, detalhe,
         ))
 
     return alertas
