@@ -60,6 +60,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Apartamento contado duas vezes na média do Agente 5** — a planilha junta as
+  colunas F e G (`MÉDIA.INTERNA($F$38:$G$57)`), que para apartamento/sala são
+  iguais. Com 3, 6, 7, 10, 11, 14 ou 15 comparáveis isso mudava o valor (BH/Floresta,
+  6 aptos: R$ 620.394 → R$ 623.600). Não era intencional (confirmado em
+  17/10/2026): para apartamento/sala o código usa uma série só. Casa não muda.
+  Testes em `tests/test_calculo_ag5.py`.
+
 - **Migração para a tabela `anuncios` (4 portais) no `main`** — 07/10/2026, com o
   ImovelWeb SP ainda incompleto (decisão da usuária).
 - **Situação C: agentes usando arquivos de uma avaliação anterior** — `id_execucao`

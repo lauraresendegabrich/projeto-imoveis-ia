@@ -48,6 +48,9 @@ CALCULO OFICIAL (fiel a planilha):
     Combina as duas series:
       menor_m2_construcao = MIN da lista combinada
       medio_m2_construcao = TRIMMEAN(0.5) da lista combinada
+    Apartamento/sala: as duas series sao iguais, entao usa uma so (cada
+    comparavel entra uma vez). A planilha juntava F e G tambem para apartamento,
+    o que contava cada um duas vezes; nao era intencional.
 
   ETAPA 4 — VALOR DO TERRENO DO ALVO
   ────────────────────────────────────
@@ -942,8 +945,16 @@ def executar_agente5(
             f"descartado(s) por estar fora da faixa R$ {M2_CONSTRUCAO_MIN:.0f}-{M2_CONSTRUCAO_MAX:.0f}"
         )
 
-    # Combina as duas series para MIN e MEDIA
-    todos_valores_construcao = valores_m2_construcao_min_terreno + valores_m2_construcao_med_terreno
+    # Combina as duas series para MIN e MEDIA (planilha: MEDIA.INTERNA($F$38:$G$57)).
+    # Apartamento/sala: as duas series sao iguais (preco/area, sem terreno), e juntar
+    # contaria cada comparavel duas vezes. Com 3, 6, 7, 10, 11... comparaveis o corte
+    # do TRIMMEAN separava as duas copias de um mesmo anuncio e mudava o valor (ex.:
+    # BH/Floresta, 6 aptos: R$ 5.691,69 x R$ 5.721,10/m2). Nao era intencional na
+    # planilha (confirmado em 17/10/2026): para condominial usa uma serie so.
+    if eh_condominial:
+        todos_valores_construcao = list(valores_m2_construcao_min_terreno)
+    else:
+        todos_valores_construcao = valores_m2_construcao_min_terreno + valores_m2_construcao_med_terreno
 
     if todos_valores_construcao:
         menor_m2_construcao = min(todos_valores_construcao)
@@ -1192,7 +1203,8 @@ def executar_agente5(
         "justificativa": (
             f"O valor do imovel foi estimado a partir do m2 da zona homogenea. "
             f"Terreno: {len(valores_m2_terreno)} amostras, m2 referencia R$ {medio_m2_terreno:.2f}. "
-            f"Construcao: {len(todos_valores_construcao)} amostras (2 series combinadas), "
+            f"Construcao: {len(todos_valores_construcao)} amostras"
+            f"{'' if eh_condominial else ' (2 series combinadas)'}, "
             f"m2 referencia R$ {medio_m2_construcao:.2f}. "
             f"Valor medio estimado: R$ {valor_medio_imovel:,.2f}. "
             f"Valor de liquidez (desconto 10%%): R$ {valor_liquidez:,.2f}."
