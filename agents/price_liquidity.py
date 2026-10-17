@@ -172,6 +172,12 @@ AVISO_SEM_INFRAESTRUTURA = (
     "Tempo estimado sem a infraestrutura do entorno (endereço não localizado no mapa): a "
     "infraestrutura foi considerada média. Confira o entorno do imóvel."
 )
+# Mesma situacao, mas o Agente 4 falhou por outro motivo (tempo esgotado, servico fora
+# do ar, arquivo desta avaliacao ausente): o endereco pode estar localizado.
+AVISO_FALHA_INFRAESTRUTURA = (
+    "Tempo estimado sem a infraestrutura do entorno (a avaliação da infraestrutura falhou "
+    "nesta rodada): a infraestrutura foi considerada média."
+)
 MIN_AMOSTRAS_CONFIAVEL = 5        # abaixo disso a estimativa e marcada baixa confianca (era 3 ate out/2026)
 
 CAMINHO_ZONA = "data/zona_homogenea_ag2.json"
@@ -1133,11 +1139,13 @@ def executar_agente5(
     classificacao_liquidez, tempo_estimado = classificar_tempo_liquidez(score_liquidez)
     aviso_infraestrutura = None
     if score_agente4 is None:
-        aviso_infraestrutura = AVISO_SEM_INFRAESTRUTURA
+        nao_localizado = (dados_ag4 or {}).get("status") == "endereco_nao_localizado"
+        aviso_infraestrutura = AVISO_SEM_INFRAESTRUTURA if nao_localizado else AVISO_FALHA_INFRAESTRUTURA
         import logging as _log_i
         _log_i.getLogger(__name__).warning(
             f"[Ag5] liquidez sem nota de infraestrutura: usado neutro 0,50 | "
-            f"score={score_liquidez:.3f} | tempo={tempo_estimado}"
+            f"score={score_liquidez:.3f} | tempo={tempo_estimado} | "
+            f"motivo={'endereco_nao_localizado' if nao_localizado else 'falha_agente4'}"
         )
 
     # ========================================================

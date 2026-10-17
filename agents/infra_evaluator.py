@@ -4289,12 +4289,17 @@ def avaliar_infraestrutura(
                 "[Ag4] Infraestrutura nao avaliada: endereco nao localizado com precisao "
                 "de rua ou bairro (o centro da cidade nao e usado)"
             )
-            return {
+            saida_nao_localizado = {
                 "status": "endereco_nao_localizado",
                 "id_execucao": id_execucao,
                 "mensagem": MENSAGEM_INFRA_NAO_AVALIADA,
                 "scores": {},
             }
+            # Gravado como o resultado normal: o Agente 5 le o status para dizer, no
+            # aviso do tempo de venda, se faltou a localizacao ou se o Agente 4 falhou.
+            with open(os.path.join(DATA_DIR, arquivo_saida), "w", encoding="utf-8") as f:
+                json.dump(saida_nao_localizado, f, ensure_ascii=False, indent=2)
+            return saida_nao_localizado
         logger.info(f"[Ag4][Geo] alvo localizado | nivel={nivel_geo} | lat={lat:.6f} | lon={lon:.6f}")
 
 

@@ -96,7 +96,12 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   venda usa a nota neutra 0,50 e os pesos de sempre (35/40/25; fórmula sem mudança)
   e avisa na tela, no laudo e no Excel: "Tempo estimado sem a infraestrutura do
   entorno (endereço não localizado no mapa): a infraestrutura foi considerada média.
-  Confira o entorno do imóvel." Log: `[Ag5] liquidez sem nota de infraestrutura`.
+  Confira o entorno do imóvel." Quando a nota falta por outro motivo (o Agente 4
+  falhou: tempo esgotado, serviço fora do ar), o aviso é: "Tempo estimado sem a
+  infraestrutura do entorno (a avaliação da infraestrutura falhou nesta rodada): a
+  infraestrutura foi considerada média." Para distinguir, o Agente 4 grava o status
+  `endereco_nao_localizado` no seu arquivo. Log: `[Ag5] liquidez sem nota de
+  infraestrutura … | motivo=endereco_nao_localizado` ou `motivo=falha_agente4`.
 
 - **ImovelWeb em SP: coleta concluída** (17/10/2026). `tools.atualizar_particoes`
   rodado (só `MSCK REPAIR TABLE`): nenhuma partição nova — a pasta de SP já estava
