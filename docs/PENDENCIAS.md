@@ -90,7 +90,11 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   próxima tentativa (rua → bairro). A tela usa a mesma função para o imóvel; sem
   precisão de rua ou bairro, segue "sem localização" com aviso. Anúncios a menos de
   300 m do centro da cidade (Nominatim ou Google) ou com a mesma coordenada em 3+
-  anúncios de bairros diferentes viram `zona_nao_verificada`. Itaboraí: o imóvel
+  anúncios de bairros diferentes viram `zona_nao_verificada` — só quando a
+  coordenada veio pronta do portal (`coordenadas_athena`); a da nossa
+  geocodificação não é rebaixada. O nível gravado é o achado (rua_numero/rua/
+  bairro), não o pesquisado. Centro de Curitiba (apartamento): 1 de 31 anúncios
+  rebaixado (coordenada do portal perto do centro). Itaboraí: o imóvel
   estava no centro da cidade como "endereço completo" e terrenos entravam a 0–53 m.
   Curitiba/Cajuru: classificação idêntica antes e depois.
 

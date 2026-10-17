@@ -152,6 +152,29 @@ def test_coordenada_repetida_no_mesmo_bairro_nao_e_suspeita():
     assert ag2._coordenadas_repetidas(ims) == set()
 
 
+
+def test_imovel_no_centro_localizado_por_nos_nao_e_rebaixado():
+    # Anuncio sem coordenada do portal, localizado pela nossa geocodificacao (que ja
+    # recusa precisao de cidade) a poucos metros do centro: imovel de verdade no Centro.
+    original = ag2._geocodificar_com_fallback
+    ag2._geocodificar_com_fallback = lambda **k: (-22.7473, -42.8585, "rua", "Rua do Centro")
+    try:
+        im = {"street": "Rua do Centro", "neighborhood": "Centro"}
+        assert _classificar(im) == "na_zona", im.get("motivo_zona_nao_verificada")
+    finally:
+        ag2._geocodificar_com_fallback = original
+
+
+def test_nivel_gravado_e_o_achado_nao_o_pesquisado():
+    # Pesquisou o endereco completo, mas o servico so achou o bairro.
+    end = "Rua Z, 10, Bairro W, Itaboraí, RJ"
+    r = _com({end: nominatim(-22.7701, -42.8801, "suburb")}, {},
+             lambda: ag2._geocodificar_com_fallback(endereco_principal=end, cidade="Itaboraí", estado="RJ"))
+    assert r[2] == "bairro", r
+    r = _com({}, {end: google(-22.75, -42.87, ["street_address"])},
+             lambda: ag2._geocodificar_com_fallback(endereco_principal=end, cidade="Itaboraí", estado="RJ"))
+    assert r[2] == "rua_numero", r
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
