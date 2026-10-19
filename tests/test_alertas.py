@@ -140,16 +140,31 @@ def test_amostra_concentrada_mesma_area():
         comp(400_000 + i * 20_000, 100 + i * 7, f"Rua B, {i}") for i in range(6)]
     alertas = calcular_alertas(execucao(), ag5(usados={"construcao": construcao, "terreno": []}))
     assert codigos(alertas) == ["amostra_concentrada"], codigos(alertas)
-    assert "4 de 10" in alertas[0]["mensagem"] and "142 m²" in alertas[0]["mensagem"]
+    assert alertas[0]["mensagem"] == (
+        "Amostra concentrada: 4 dos 10 imóveis usados no cálculo (40%) têm exatamente a mesma área: "
+        "142 m². Isso costuma indicar um mesmo empreendimento (casas novas iguais ou unidades de um "
+        "lançamento) dominando a amostra. O valor fica puxado para o preço desse empreendimento, que "
+        "pode ser diferente do imóvel avaliado. Confira os anúncios abaixo."), alertas[0]["mensagem"]
+    assert len(alertas[0]["detalhe"]["anuncios"]) == 4
 
 
-def test_amostra_concentrada_texto_apto_e_preco():
+def test_amostra_concentrada_preco():
     construcao = [comp(300_000, 60 + i, f"Rua A, {i}") for i in range(4)] + [
         comp(400_000 + i * 20_000, 100 + i * 7, f"Rua B, {i}") for i in range(6)]
     alertas = calcular_alertas(execucao(tipo="apartamento"), ag5(usados={"construcao": construcao, "terreno": []}))
     assert codigos(alertas) == ["amostra_concentrada"], codigos(alertas)
-    assert "o mesmo preço (R$ 300.000)" in alertas[0]["mensagem"], alertas[0]["mensagem"]
-    assert "mesmo prédio ou lançamento" in alertas[0]["mensagem"]
+    assert alertas[0]["mensagem"].startswith(
+        "Amostra concentrada: 4 dos 10 imóveis usados no cálculo (40%) têm exatamente o mesmo preço: "
+        "R$ 300.000. Isso costuma indicar"), alertas[0]["mensagem"]
+
+
+def test_amostra_concentrada_area_e_preco_juntos():
+    construcao = [comp(550_000, 142, f"Rua A, {i}") for i in range(4)] + [
+        comp(400_000 + i * 20_000, 100 + i * 7, f"Rua B, {i}") for i in range(6)]
+    alertas = [a for a in calcular_alertas(execucao(), ag5(usados={"construcao": construcao, "terreno": []}))
+               if a["codigo"] == "amostra_concentrada"]
+    assert [a["detalhe"]["campo"] for a in alertas] == ["area", "preco"], alertas
+    assert "a mesma área: 142 m²" in alertas[0]["mensagem"] and "o mesmo preço: R$ 550.000" in alertas[1]["mensagem"]
 
 
 def test_amostra_pequena_nao_e_concentrada():

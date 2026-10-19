@@ -88,6 +88,16 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Alerta de amostra concentrada na tela, com explicação** (decisão da usuária,
+  19/10/2026; branch `tomtom-geocodificacao`). A regra do alerta não mudou; só o
+  texto, que agora é o mesmo na tela, no laudo e no Excel: "Amostra concentrada:
+  {qtd} dos {total} imóveis usados no cálculo ({parcela}) têm exatamente a mesma
+  área: X m² / o mesmo preço: R$ X. Isso costuma indicar um mesmo empreendimento…
+  Confira os anúncios abaixo." A tela mostra um aviso para área e outro para preço
+  (se os dois dispararem), junto dos outros avisos do resultado, cada um com um
+  expander "Ver os {qtd} anúncios iguais" (endereço, preço, área, portal e link). O
+  laudo traz a frase, sem a lista.
+
 - **Lançamentos: anúncios iguais juntados como 1 imóvel, com aviso** (decisão da
   usuária, 19/10/2026; branch `tomtom-geocodificacao`). A regra de repetidos
   (`agents/identidade.py`) não muda. Depois de juntar, o Agente 1 marca como

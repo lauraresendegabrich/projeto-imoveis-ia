@@ -185,8 +185,6 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
     #    nao representar o imovel avaliado.
     construcao = usados.get("construcao") or []
     if len(construcao) >= MIN_AMOSTRA_CONCENTRADA:
-        eh_apto = "apart" in str(execucao.get("tipo") or "").lower()
-        exemplo = "unidades iguais do mesmo prédio ou lançamento" if eh_apto else "casas novas iguais"
         for campo, nome, fmt in (("area", "a mesma área", lambda v: f"{v:g} m²"), ("preco", "o mesmo preço", _brl)):
             valores = [round(float(c[campo])) for c in construcao if c.get(campo)]
             if not valores:
@@ -197,9 +195,12 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
                 iguais = [c for c in construcao if c.get(campo) and round(float(c[campo])) == valor]
                 alertas.append(_alerta(
                     "amostra_concentrada",
-                    f"{qtd} de {len(construcao)} comparáveis ({parcela:.0%}) têm exatamente {nome} "
-                    f"({fmt(valor)}); limite: {LIMITE_AMOSTRA_CONCENTRADA:.0%}. Pode ser um mesmo "
-                    f"empreendimento dominando a amostra (ex.: {exemplo}), diferente do imóvel avaliado.",
+                    # Mesmo texto na tela, no laudo e no Excel (a regra nao mudou).
+                    f"Amostra concentrada: {qtd} dos {len(construcao)} imóveis usados no cálculo "
+                    f"({parcela:.0%}) têm exatamente {nome}: {fmt(valor)}. Isso costuma indicar um "
+                    f"mesmo empreendimento (casas novas iguais ou unidades de um lançamento) dominando "
+                    f"a amostra. O valor fica puxado para o preço desse empreendimento, que pode ser "
+                    f"diferente do imóvel avaliado. Confira os anúncios abaixo.",
                     round(parcela, 3), LIMITE_AMOSTRA_CONCENTRADA,
                     {"campo": campo, "valor": valor, "quantidade": qtd, "total": len(construcao),
                      "anuncios": [_anuncio(c) for c in iguais]},

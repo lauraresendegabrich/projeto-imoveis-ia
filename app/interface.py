@@ -55,6 +55,31 @@ def buscar_cep_cache(cep):
     return endereco, situacao
 
 
+def alertas_amostra_concentrada(resultado):
+    """Alertas amostra_concentrada desta avaliacao (os mesmos gravados no banco)."""
+    alertas = ((resultado.get("registro") or {}).get("execucao") or {}).get("alertas") or []
+    return [a for a in alertas if a.get("codigo") == "amostra_concentrada"]
+
+
+def mostrar_amostra_concentrada(resultado):
+    """Aviso de amostra concentrada (area e/ou preco) e os anuncios iguais em um expander."""
+    import pandas as pd
+    for alerta in alertas_amostra_concentrada(resultado):
+        texto = str(alerta.get("mensagem") or "").replace("R$", "R\\$")   # $ nao vira formula
+        st.warning(f"⚠️ {texto}")
+        anuncios = (alerta.get("detalhe") or {}).get("anuncios") or []
+        with st.expander(f"Ver os {len(anuncios)} anúncios iguais"):
+            linhas = [{
+                "Endereço": ", ".join(x for x in (a.get("endereco"), a.get("bairro")) if x) or "-",
+                "Preço": fmt_brl(a["preco"]) if a.get("preco") else "-",
+                "Área": f"{float(a['area']):g} m²" if a.get("area") else "-",
+                "Portal": a.get("portal") or "-",
+                "Anúncio": f"[ver]({a['link']})" if a.get("link") else "-",
+            } for a in anuncios]
+            if linhas:
+                st.markdown(pd.DataFrame(linhas).to_markdown(index=False), unsafe_allow_html=True)
+
+
 def mostrar_avaliacao_leilao(leilao):
     """
     Bloco "Avaliação de leilão" (services/leilao.py). So aparece quando o valor
@@ -902,6 +927,7 @@ if "resultado" in st.session_state:
             st.info(f"🏞️ {preco['aviso_terreno']}")
         if texto_aviso_lancamento(preco):
             st.info(f"🏗️ {texto_aviso_lancamento(preco)}")
+        mostrar_amostra_concentrada(resultado)
         if resultado.get("aviso_zona"):
             st.warning(f"⚠️ {resultado['aviso_zona']}")
 
@@ -1639,6 +1665,8 @@ if "resultado" in st.session_state:
             bloco_resultado += f"\nAtenção: {preco['aviso_terreno']}"
         if texto_aviso_lancamento(preco):
             bloco_resultado += f"\nAtenção: {texto_aviso_lancamento(preco)}"
+        for alerta_conc in alertas_amostra_concentrada(resultado):
+            bloco_resultado += f"\nAtenção: {alerta_conc.get('mensagem')}"
 
         linhas_leilao = linhas_laudo_leilao(resultado.get("leilao"), _brl_txt)
         bloco_leilao = "\n".join(
