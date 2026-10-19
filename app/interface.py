@@ -372,6 +372,9 @@ elif submitted:
     # Identifica esta avaliacao nos JSONs que os agentes trocam: os Agentes 3/4/5
     # ignoram arquivos de avaliacoes anteriores (ver agents/execucao.py).
     id_execucao = novo_id_execucao()
+    # Limite de chamadas da TomTom (ultima tentativa de geocodificacao) e por avaliacao.
+    from agents.comparables import reiniciar_contagem_tomtom
+    reiniciar_contagem_tomtom()
     # Falhas desta avaliacao, gravadas no banco (a tela continua mostrando os avisos).
     falhas_execucao = []
 

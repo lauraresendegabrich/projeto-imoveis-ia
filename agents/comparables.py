@@ -127,6 +127,7 @@ QUEM USA A SAIDA:
 """
 
 import os
+import threading
 import re
 import json
 import logging
@@ -2480,15 +2481,127 @@ def _nivel_google(item: dict) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- TomTom
+# Ultima tentativa de cada geocodificacao (Nominatim -> Google -> TomTom), so quando os
+# dois primeiros falham ou sao recusados por imprecisao. Decisao da usuaria, 17/10/2026.
+# Aceita nivel rua (Point Address, Address Range, Street) e bairro (Geography de
+# subdivisao do municipio); recusa cidade/estado e resultado de outra cidade.
+LIMITE_TOMTOM_POR_AVALIACAO = 200
+TIPOS_TOMTOM_RUA = {"Point Address": "rua_numero", "Address Range": "rua", "Street": "rua", "Cross Street": "rua"}
+ENTIDADES_TOMTOM_BAIRRO = {"MunicipalitySubdivision", "Neighbourhood"}
+_TOMTOM = {"chamadas": 0, "localizados": 0, "limite_avisado": False}
+_TOMTOM_LOCK = threading.Lock()
+
+
+def reiniciar_contagem_tomtom() -> None:
+    """Zera a contagem de chamadas da TomTom (uma vez por avaliacao, na tela)."""
+    with _TOMTOM_LOCK:
+        _TOMTOM.update(chamadas=0, localizados=0, limite_avisado=False)
+
+
+def contagem_tomtom() -> dict:
+    """Chamadas feitas e localizacoes aceitas da TomTom nesta avaliacao."""
+    with _TOMTOM_LOCK:
+        return {"chamadas": _TOMTOM["chamadas"], "localizados": _TOMTOM["localizados"]}
+
+
+def _mesma_cidade_tomtom(endereco: dict, cidade_esperada: str | None) -> bool:
+    """O resultado e da cidade pesquisada? Sem cidade esperada ou sem municipio, nao veta."""
+    alvo = _normalizar_texto(cidade_esperada or "")
+    if not alvo:
+        return True
+    municipios = [m for m in (endereco.get("municipality"), endereco.get("localName")) if m]
+    if not municipios:
+        return True
+    for m in municipios:
+        for parte in str(m).split(","):
+            parte = _normalizar_texto(parte)
+            if parte and (parte == alvo or parte in alvo or alvo in parte):
+                return True
+    return False
+
+
+def _geocodificar_tomtom(endereco: str, cidade_esperada: str | None = None) -> tuple:
+    """
+    (lat, lon, nivel) pela TomTom ou (None, None, None). Sem chave, pula sem erro;
+    erro, limite (429) ou tempo esgotado: registra no log e devolve "nao achou".
+    """
+    import requests
+    from urllib.parse import quote
+
+    chave = os.getenv("TOMTOM_API_KEY", "")
+    if not chave:
+        return None, None, None
+    with _TOMTOM_LOCK:
+        if _TOMTOM["chamadas"] >= LIMITE_TOMTOM_POR_AVALIACAO:
+            if not _TOMTOM["limite_avisado"]:
+                _TOMTOM["limite_avisado"] = True
+                logger.warning(
+                    f"[Geo] TomTom: limite de {LIMITE_TOMTOM_POR_AVALIACAO} chamadas nesta avaliacao "
+                    f"atingido; os demais enderecos ficam sem a TomTom"
+                )
+            return None, None, None
+        _TOMTOM["chamadas"] += 1
+    try:
+        r = requests.get(
+            f"https://api.tomtom.com/search/2/geocode/{quote(str(endereco))}.json",
+            params={"key": chave, "countrySet": "BR", "limit": 1, "language": "pt-BR"},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.warning(f"[Geo] TomTom: falha na chamada ({type(e).__name__}) para {endereco!r}")
+        return None, None, None
+    if r.status_code == 429:
+        logger.warning(f"[Geo] TomTom: limite de uso estourado (HTTP 429) para {endereco!r}")
+        return None, None, None
+    if r.status_code != 200:
+        logger.warning(f"[Geo] TomTom: HTTP {r.status_code} para {endereco!r}")
+        return None, None, None
+    try:
+        resultados = r.json().get("results") or []
+    except Exception:
+        logger.warning(f"[Geo] TomTom: resposta invalida para {endereco!r}")
+        return None, None, None
+    if not resultados:
+        logger.info(f"[Geo] TomTom: nada encontrado para {endereco!r}")
+        return None, None, None
+
+    item = resultados[0]
+    tipo = item.get("type")
+    entidade = item.get("entityType")
+    if tipo in TIPOS_TOMTOM_RUA:
+        nivel = TIPOS_TOMTOM_RUA[tipo]
+    elif tipo == "Geography" and entidade in ENTIDADES_TOMTOM_BAIRRO:
+        nivel = "bairro"
+    else:
+        logger.info(f"[Geo] TomTom: type={tipo} entityType={entidade} | nivel=cidade ou maior | recusado | {endereco!r}")
+        return None, None, None
+    if not _mesma_cidade_tomtom(item.get("address") or {}, cidade_esperada):
+        logger.info(
+            f"[Geo] TomTom: type={tipo} | nivel={nivel} | recusado (outra cidade: "
+            f"{(item.get('address') or {}).get('municipality')!r}) | {endereco!r}"
+        )
+        return None, None, None
+    pos = item.get("position") or {}
+    try:
+        lat, lon = float(pos["lat"]), float(pos["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None, None, None
+    with _TOMTOM_LOCK:
+        _TOMTOM["localizados"] += 1
+    logger.info(f"[Geo] TomTom: type={tipo} | nivel={nivel} | aceito | {endereco!r}")
+    return lat, lon, nivel
+
+
 def _geocodificar(endereco: str, aceitar_cidade: bool = False) -> tuple:
     """(lat, lon) de _geocodificar_detalhado, para quem nao precisa do nivel."""
     lat, lon, _ = _geocodificar_detalhado(endereco, aceitar_cidade=aceitar_cidade)
     return lat, lon
 
 
-def _geocodificar_detalhado(endereco: str, aceitar_cidade: bool = False) -> tuple:
+def _geocodificar_detalhado(endereco: str, aceitar_cidade: bool = False, cidade_esperada: str | None = None) -> tuple:
     """
-    Geocodifica uma tentativa: Nominatim primeiro, Google depois. Retorna
+    Geocodifica uma tentativa: Nominatim, Google e, por ultimo, TomTom. Retorna
     (lat, lon, nivel_real), onde nivel_real e rua_numero / rua / bairro conforme o
     que o servico achou (None quando o servico nao informa).
 
@@ -2536,6 +2649,10 @@ def _geocodificar_detalhado(endereco: str, aceitar_cidade: bool = False) -> tupl
                         return float(loc["lat"]), float(loc["lng"]), _nivel_google(results[0])
         except Exception as e:
             logger.debug(f"Google Geocoding falhou para {endereco!r}: {e}")
+
+    # Ultima tentativa: TomTom (nunca para o centro da cidade).
+    if not aceitar_cidade:
+        return _geocodificar_tomtom(endereco, cidade_esperada)
     return None, None, None
 
 
@@ -2648,7 +2765,7 @@ def _geocodificar_com_fallback(
         add("cidade", [cidade, estado, "Brasil"])
 
     for idx, (nivel, endereco) in enumerate(tentativas):
-        lat, lon, nivel_real = _geocodificar_detalhado(endereco)
+        lat, lon, nivel_real = _geocodificar_detalhado(endereco, cidade_esperada=cidade)
         if lat is not None and lon is not None:
             # Grava o nivel do que foi ACHADO (ex.: endereco completo pesquisado mas
             # so o bairro encontrado -> "bairro"); sem essa informacao, o pesquisado.
@@ -3032,6 +3149,8 @@ def analisar_zona_homogenea(
             f"coordenadas repetidas em varios bairros={len(coords_repetidas)}"
         )
 
+    tomtom_antes = contagem_tomtom()
+
     # 3. Geocodifica/classifica candidatos construidos
     logger.info(f"[Ag2][Zona] classificando {len(imoveis)} comparaveis | raio={raio}m")
     confirmados = []
@@ -3087,6 +3206,17 @@ def analisar_zona_homogenea(
         else:
             terrenos_fora_zona.append(t)
         _log_classificacao(t, idx, len(terrenos), classificacao, prefixo="terreno ")
+
+    tomtom_depois = contagem_tomtom()
+    tomtom_zona = {
+        "localizados": tomtom_depois["localizados"] - tomtom_antes["localizados"],
+        "chamadas": tomtom_depois["chamadas"] - tomtom_antes["chamadas"],
+    }
+    if tomtom_zona["chamadas"]:
+        logger.info(
+            f"[Geo] TomTom nesta zona: {tomtom_zona['localizados']} anuncio(s) localizado(s) "
+            f"em {tomtom_zona['chamadas']} chamada(s)"
+        )
 
     # 3c. Ampliacao do raio (antes do fallback): sem chamar a IA de novo.
     raio_ia = raio
@@ -3169,6 +3299,7 @@ def analisar_zona_homogenea(
             "confianca": "baixa" if nivel_geo_alvo == "bairro" else "alta",
         },
         # Raio escolhido pela IA de visao e o usado depois da ampliacao.
+        "tomtom_zona": tomtom_zona,
         "raio_ia_m": raio_ia,
         "raio_final_m": raio_final,
         "raio_final_terrenos_m": raio_final_terrenos,

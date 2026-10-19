@@ -1,0 +1,147 @@
+"""
+Testes da TomTom como ultima tentativa de geocodificacao (agents/comparables.py).
+Sem rede: Nominatim, Google e TomTom simulados.
+
+    .venv/Scripts/python.exe -m tests.test_tomtom
+"""
+import os
+import sys
+import time
+
+sys.path.insert(0, ".")
+
+import requests
+
+import agents.comparables as ag2
+
+END = "Rua Nossa Senhora da Conceição, JARDIM ITAJUBA, Itaboraí, RJ, Brasil"
+
+
+class _Resposta:
+    def __init__(self, dados, status=200):
+        self.status_code, self._dados = status, dados
+
+    def json(self):
+        return self._dados
+
+
+def _rodar(func, tomtom=None, status=200, nominatim=None, chave="teste"):
+    """Roda func com Nominatim/Google vazios (ou `nominatim`) e a TomTom respondendo `tomtom`."""
+    chamadas = {"tomtom": 0}
+
+    def get(url, params=None, **_):
+        if "nominatim" in url:
+            return _Resposta(nominatim or [])
+        if "googleapis" in url:
+            return _Resposta({"results": []})
+        chamadas["tomtom"] += 1
+        return _Resposta(tomtom if tomtom is not None else {"results": []}, status)
+
+    originais = (requests.get, time.sleep, os.environ.get("TOMTOM_API_KEY"), os.environ.get("GOOGLE_MAPS_KEY"))
+    requests.get, time.sleep = get, (lambda *_: None)
+    os.environ["GOOGLE_MAPS_KEY"] = "teste"
+    if chave:
+        os.environ["TOMTOM_API_KEY"] = chave
+    else:
+        os.environ.pop("TOMTOM_API_KEY", None)
+    ag2.reiniciar_contagem_tomtom()
+    try:
+        return func(), chamadas["tomtom"]
+    finally:
+        requests.get, time.sleep = originais[0], originais[1]
+        for nome, valor in (("TOMTOM_API_KEY", originais[2]), ("GOOGLE_MAPS_KEY", originais[3])):
+            if valor is None:
+                os.environ.pop(nome, None)
+            else:
+                os.environ[nome] = valor
+
+
+def tomtom(tipo, entidade=None, municipio="Itaboraí", lat=-22.70, lon=-42.80):
+    item = {"type": tipo, "position": {"lat": lat, "lon": lon}, "address": {"municipality": municipio}}
+    if entidade:
+        item["entityType"] = entidade
+    return {"results": [item]}
+
+
+def detalhado():
+    return ag2._geocodificar_detalhado(END, cidade_esperada="Itaboraí")
+
+
+def test_aceita_nivel_rua():
+    (r, n) = _rodar(detalhado, tomtom("Point Address"))
+    assert r == (-22.70, -42.80, "rua_numero") and n == 1, r
+    (r, _) = _rodar(detalhado, tomtom("Street"))
+    assert r[2] == "rua", r
+
+
+def test_aceita_nivel_bairro():
+    (r, _) = _rodar(detalhado, tomtom("Geography", "MunicipalitySubdivision"))
+    assert r == (-22.70, -42.80, "bairro"), r
+
+
+def test_recusa_nivel_cidade():
+    for entidade in ("Municipality", "CountrySubdivision"):
+        (r, _) = _rodar(detalhado, tomtom("Geography", entidade))
+        assert r == (None, None, None), (entidade, r)
+
+
+def test_recusa_outra_cidade():
+    (r, _) = _rodar(detalhado, tomtom("Street", municipio="Niterói"))
+    assert r == (None, None, None), r
+
+
+def test_sem_chave_pula_sem_erro():
+    (r, n) = _rodar(detalhado, tomtom("Point Address"), chave=None)
+    assert r == (None, None, None) and n == 0
+
+
+def test_erro_429_segue_como_hoje():
+    (r, n) = _rodar(detalhado, {"error": "too many requests"}, status=429)
+    assert r == (None, None, None) and n == 1
+
+
+def test_so_chama_a_tomtom_se_nominatim_e_google_falharem():
+    aceito = [{"lat": "-22.71", "lon": "-42.81", "addresstype": "road", "type": "residential"}]
+    (r, n) = _rodar(detalhado, tomtom("Point Address"), nominatim=aceito)
+    assert r == (-22.71, -42.81, "rua") and n == 0, (r, n)
+
+
+def test_limite_por_avaliacao():
+    def rodar_alem_do_limite():
+        for _ in range(ag2.LIMITE_TOMTOM_POR_AVALIACAO + 5):
+            ag2._geocodificar_tomtom(END, "Itaboraí")
+        return ag2.contagem_tomtom()
+    (contagem, n) = _rodar(rodar_alem_do_limite, tomtom("Point Address"))
+    assert n == ag2.LIMITE_TOMTOM_POR_AVALIACAO and contagem["chamadas"] == ag2.LIMITE_TOMTOM_POR_AVALIACAO
+    # Depois do limite, nenhuma chamada nova: o anuncio fica sem localizacao (zona nao verificada).
+    (r, n) = _rodar(lambda: (ag2._TOMTOM.update(chamadas=ag2.LIMITE_TOMTOM_POR_AVALIACAO), detalhado())[1],
+                    tomtom("Point Address"))
+    assert r == (None, None, None) and n == 0
+
+
+def test_fallback_completo_grava_o_nivel_da_tomtom_e_conta_no_banco():
+    def rodar():
+        r = ag2._geocodificar_com_fallback(endereco_principal=END, rua="Rua Nossa Senhora da Conceição",
+                                           bairro="JARDIM ITAJUBA", cidade="Itaboraí", estado="RJ")
+        from services.registro_execucao import montar_registro
+        e, _ = montar_registro(id_execucao="x", imovel_alvo={}, leilao_entrada={}, leilao={},
+                               imoveis_coletados=[], resultado_ag2={}, zona_resultado={}, resultado_ag3={},
+                               resultado_ag4={}, resultado_ag5={})
+        return r, e["fontes"]
+    ((r, fontes), _) = _rodar(rodar, tomtom("Street"))
+    assert r[:3] == (-22.70, -42.80, "rua"), r
+    assert fontes["tomtom_localizacoes"] == 1 and fontes["tomtom_chamadas"] == 1, fontes
+
+
+if __name__ == "__main__":
+    testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
+    falhas = 0
+    for nome, fn in testes:
+        try:
+            fn()
+            print(f"OK    {nome}")
+        except AssertionError as e:
+            falhas += 1
+            print(f"FALHA {nome}: {e}")
+    print(f"\n{len(testes) - falhas}/{len(testes)} testes passaram")
+    sys.exit(1 if falhas else 0)

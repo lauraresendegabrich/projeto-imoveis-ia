@@ -94,6 +94,16 @@ def _linhas_comparaveis(id_execucao: str, resultado_ag5: dict) -> list[dict]:
     return linhas
 
 
+def _fontes_tomtom() -> dict:
+    try:
+        from agents.comparables import contagem_tomtom
+        contagem = contagem_tomtom()
+    except Exception:
+        return {"tomtom_localizacoes": None, "tomtom_chamadas": None}
+    return {"tomtom_localizacoes": contagem["localizados"], "tomtom_chamadas": contagem["chamadas"],
+            "tomtom_configurado": bool(os.getenv("TOMTOM_API_KEY"))}
+
+
 def montar_registro(
     *,
     id_execucao: str,
@@ -165,6 +175,9 @@ def montar_registro(
             "athena_tabela": os.getenv("ATHENA_TABLE") or "anuncios",
             "anuncios_apify": sum(1 for im in coletados if not im.get("fonte_dados")),
             "google_maps": bool(os.getenv("GOOGLE_MAPS_KEY")),
+            # Localizacoes que vieram da TomTom (ultima tentativa, depois de Nominatim e
+            # Google) e chamadas feitas nesta avaliacao (limite LIMITE_TOMTOM_POR_AVALIACAO).
+            **_fontes_tomtom(),
             "zona_calculada": ag5.get("zona_calculada_nesta_avaliacao"),
             "qwen_configurado": bool(os.getenv("QWEN_API_URL")),
         },

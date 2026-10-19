@@ -78,6 +78,16 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   inteira traz os anúncios mais recentes, não os mais próximos (Londrina/Aritana: 353
   anúncios, 0 casas no círculo, +114 s). Substituído pela busca por proximidade.
 
+- [ ] **Google aceita rua homônima de outro bairro (`partial_match`).** Itaboraí
+  (19/10/2026), "Rua Nossa Senhora da Conceição, Jardim Itajubá": o Nominatim não
+  achou; o Google devolveu uma rua com o mesmo nome no bairro **Pachecos**
+  (`types=route`, `GEOMETRIC_CENTER`, `partial_match`), a 17,3 km de Porto das Caixas
+  (distrito do CEP 24830-068). A regra atual só recusa `APPROXIMATE` com
+  `partial_match`, então esse ponto é aceito como nível rua e a TomTom (que achou a
+  rua a 136 m de Porto das Caixas) nem é chamada. Proposta: recusar o Google com
+  `partial_match` quando o bairro devolvido for diferente do informado (ou sempre que
+  houver `partial_match`), para cair na TomTom.
+
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
 
 - [ ] **Ordem dos provedores para comparáveis.** Hoje Groq → NVIDIA → Gemini. No
@@ -87,6 +97,17 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **TomTom como última tentativa de geocodificação** (decisão da usuária, 17/10/2026;
+  branch `tomtom-geocodificacao`). Ordem em cada tentativa: Nominatim → Google →
+  TomTom, só quando os dois primeiros falham ou são recusados por imprecisão; vale
+  para o imóvel e para os anúncios (e para o Agente 4, que usa a mesma função).
+  Aceita `Point Address`, `Address Range`, `Street`/`Cross Street` (nível rua) e
+  `Geography` com `MunicipalitySubdivision`/`Neighbourhood` (nível bairro); recusa
+  cidade/estado e resultado de outra cidade. Sem `TOMTOM_API_KEY`, pula sem erro;
+  erro, 429 ou tempo esgotado ficam no log. Limite de 200 chamadas por avaliação
+  (`LIMITE_TOMTOM_POR_AVALIACAO`). Banco: `fontes.tomtom_localizacoes` e
+  `fontes.tomtom_chamadas`. Não existe `.env.example` no repositório.
 
 - **Agente 4 tinha geocodificação própria.** Decisão da usuária (17/10/2026): sem a
   coordenada da zona do Agente 2, o Agente 4 usa `_geocodificar_com_fallback` (com
