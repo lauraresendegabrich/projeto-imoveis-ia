@@ -179,7 +179,10 @@ def test_terreno_fora_do_padrao_preco_com_digito_a_menos_e_gleba():
     alertas = calcular_alertas(execucao(), ag5(usados={"construcao": [], "terreno": terrenos}))
     assert codigos(alertas) == ["terreno_fora_do_padrao"], codigos(alertas)
     assert len(alertas[0]["detalhe"]["anuncios"]) == 2
-    assert "cenário conservador" in alertas[0]["mensagem"]
+    assert alertas[0]["mensagem"].startswith(
+        "Terreno fora do padrão: 2 dos 10 terrenos usados no cálculo têm preço por m² muito diferente "
+        "dos outros (menos de 1/4 ou mais de 4 vezes o valor típico de R$ 562/m²)"), alertas[0]["mensagem"]
+    assert "conservador" not in alertas[0]["mensagem"]
 
 
 def test_possivel_repetido_mesmo_preco_area_e_numero():

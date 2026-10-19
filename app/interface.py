@@ -55,27 +55,65 @@ def buscar_cep_cache(cep):
     return endereco, situacao
 
 
-def alertas_amostra_concentrada(resultado):
-    """Alertas amostra_concentrada desta avaliacao (os mesmos gravados no banco)."""
+# Alertas (os mesmos gravados no banco) mostrados na tela com explicacao e anuncios.
+ALERTAS_NA_TELA = (
+    "amostra_concentrada", "terreno_fora_do_padrao", "possivel_repetido_no_calculo",
+    "area_diferente_entre_portais",
+)
+
+
+def alertas_na_tela(resultado, codigos=ALERTAS_NA_TELA):
+    """Alertas desta avaliacao que a tela mostra, na ordem em que foram gerados."""
     alertas = ((resultado.get("registro") or {}).get("execucao") or {}).get("alertas") or []
-    return [a for a in alertas if a.get("codigo") == "amostra_concentrada"]
+    return [a for a in alertas if a.get("codigo") in codigos]
 
 
-def mostrar_amostra_concentrada(resultado):
-    """Aviso de amostra concentrada (area e/ou preco) e os anuncios iguais em um expander."""
+def alertas_amostra_concentrada(resultado):
+    return alertas_na_tela(resultado, ("amostra_concentrada",))
+
+
+def _anuncios_do_alerta(alerta):
+    """Anuncios do detalhe do alerta, em lista unica (grupos de repetidos viram motivo)."""
+    detalhe = alerta.get("detalhe")
+    if isinstance(detalhe, dict):
+        itens = detalhe.get("anuncios") or []
+    else:
+        itens = detalhe or []
+    anuncios = []
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        if "anuncios" in item:      # grupo de possivel repetido
+            grupo = f"Grupo: nº {item.get('numero')}, {item.get('area')} m², {fmt_brl(item.get('preco') or 0)}"
+            anuncios += [{**a, "motivo": grupo} for a in item.get("anuncios") or []]
+        else:
+            anuncios.append(item)
+    return anuncios
+
+
+def mostrar_alertas_na_tela(resultado):
+    """Aviso de cada alerta (texto explicativo) e os anuncios envolvidos num expander."""
     import pandas as pd
-    for alerta in alertas_amostra_concentrada(resultado):
+    for alerta in alertas_na_tela(resultado):
         texto = str(alerta.get("mensagem") or "").replace("R$", "R\\$")   # $ nao vira formula
         st.warning(f"⚠️ {texto}")
-        anuncios = (alerta.get("detalhe") or {}).get("anuncios") or []
-        with st.expander(f"Ver os {len(anuncios)} anúncios iguais"):
-            linhas = [{
-                "Endereço": ", ".join(x for x in (a.get("endereco"), a.get("bairro")) if x) or "-",
-                "Preço": fmt_brl(a["preco"]) if a.get("preco") else "-",
-                "Área": f"{float(a['area']):g} m²" if a.get("area") else "-",
-                "Portal": a.get("portal") or "-",
-                "Anúncio": f"[ver]({a['link']})" if a.get("link") else "-",
-            } for a in anuncios]
+        anuncios = _anuncios_do_alerta(alerta)
+        rotulo = (f"Ver os {len(anuncios)} anúncios iguais" if alerta.get("codigo") == "amostra_concentrada"
+                  else "Ver os anúncios")
+        with st.expander(rotulo):
+            com_motivo = any(a.get("motivo") for a in anuncios)
+            linhas = []
+            for a in anuncios:
+                linha = {
+                    "Endereço": ", ".join(x for x in (a.get("endereco"), a.get("bairro")) if x) or "-",
+                    "Preço": fmt_brl(a["preco"]) if a.get("preco") else "-",
+                    "Área": f"{float(a['area']):g} m²" if a.get("area") else "-",
+                    "Portal": a.get("portal") or "-",
+                    "Anúncio": f"[ver]({a['link']})" if a.get("link") else "-",
+                }
+                if com_motivo:
+                    linha["Motivo"] = str(a.get("motivo") or "-").replace("R$", "R\\$")
+                linhas.append(linha)
             if linhas:
                 st.markdown(pd.DataFrame(linhas).to_markdown(index=False), unsafe_allow_html=True)
 
@@ -927,7 +965,7 @@ if "resultado" in st.session_state:
             st.info(f"🏞️ {preco['aviso_terreno']}")
         if texto_aviso_lancamento(preco):
             st.info(f"🏗️ {texto_aviso_lancamento(preco)}")
-        mostrar_amostra_concentrada(resultado)
+        mostrar_alertas_na_tela(resultado)
         if resultado.get("aviso_zona"):
             st.warning(f"⚠️ {resultado['aviso_zona']}")
 
@@ -1510,14 +1548,6 @@ if "resultado" in st.session_state:
                     f"{fmt_brl(m2c_ref, 2)} × {area_calc:.0f}m² = **{fmt_brl(valor_med)}**."
                 )
 
-            # Faixa mínimo / médio (transparencia da estimativa)
-            valor_min = avaliacao.get("valor_minimo_imovel", 0) or 0
-            if valor_min and valor_min != valor_med:
-                st.caption(
-                    f"Faixa da estimativa: de {fmt_brl(valor_min)} (cenário conservador) "
-                    f"a {fmt_brl(valor_med)} (referência)."
-                )
-
             st.caption(f"Método estatístico: {preco.get('metodo_estatistico', '?')}")
 
             # Como o tempo de venda foi estimado
@@ -1665,12 +1695,15 @@ if "resultado" in st.session_state:
             bloco_resultado += f"\nAtenção: {preco['aviso_terreno']}"
         if texto_aviso_lancamento(preco):
             bloco_resultado += f"\nAtenção: {texto_aviso_lancamento(preco)}"
-        for alerta_conc in alertas_amostra_concentrada(resultado):
+        for alerta_tela in alertas_na_tela(resultado):
             # No laudo nao ha a lista de anuncios: aponta para a tela e o Excel.
-            texto_conc = str(alerta_conc.get("mensagem") or "").replace(
-                "Confira os anúncios abaixo.", "Confira os anúncios na tela ou no Excel."
+            texto_alerta = (
+                str(alerta_tela.get("mensagem") or "")
+                .replace("Confira os anúncios abaixo.", "Confira os anúncios na tela ou no Excel.")
+                .replace("Confira os anúncios.", "Confira os anúncios na tela ou no Excel.")
+                .replace("confira esses anúncios.", "confira esses anúncios na tela ou no Excel.")
             )
-            bloco_resultado += f"\nAtenção: {texto_conc}"
+            bloco_resultado += f"\nAtenção: {texto_alerta}"
 
         linhas_leilao = linhas_laudo_leilao(resultado.get("leilao"), _brl_txt)
         bloco_leilao = "\n".join(

@@ -226,14 +226,15 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             if motivos:
                 fora_padrao.append({**_anuncio(c), "valor_m2": round(v, 2), "motivo": "; ".join(motivos)})
         if fora_padrao:
-            menor_vem_daqui = min(m2) < med_m2 / LIMITE_TERRENO_M2_FORA
             alertas.append(_alerta(
                 "terreno_fora_do_padrao",
-                f"{len(fora_padrao)} de {len(terrenos)} terrenos estão fora do padrão (R$/m² abaixo de "
-                f"1/{LIMITE_TERRENO_M2_FORA} ou acima de {LIMITE_TERRENO_M2_FORA}x a mediana de "
-                f"{_brl(med_m2)}, ou área acima de {LIMITE_TERRENO_AREA_FORA}x a mediana). "
-                + ("O cenário conservador usa o menor R$/m², que vem desses anúncios: não é confiável."
-                   if menor_vem_daqui else "A média sem extremos tende a absorver."),
+                # Mesmo texto na tela, no laudo e no Excel (a regra nao mudou).
+                f"Terreno fora do padrão: {len(fora_padrao)} dos {len(terrenos)} terrenos usados no "
+                f"cálculo têm preço por m² muito diferente dos outros (menos de 1/4 ou mais de 4 vezes "
+                f"o valor típico de {_brl(med_m2)}/m²) ou área muito maior que a dos demais (gleba ou "
+                f"fazenda). Pode ser preço digitado errado no anúncio ou um terreno de outro tipo. O "
+                f"cálculo usa a média sem os extremos, o que costuma diminuir o efeito, mas confira "
+                f"esses anúncios.",
                 len(fora_padrao), 0,
                 {"mediana_m2": round(med_m2, 2), "mediana_area": round(med_area, 2), "anuncios": fora_padrao},
             ))
@@ -252,9 +253,11 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
         n_anuncios = sum(len(g) for g in repetidos)
         alertas.append(_alerta(
             "possivel_repetido_no_calculo",
-            f"{n_anuncios} anúncios em {len(repetidos)} grupo(s) têm o mesmo preço, a mesma área e o "
-            f"mesmo número de endereço e continuam no cálculo. Podem ser o mesmo imóvel (sem prova "
-            f"para descartar) ou casas iguais de um mesmo loteamento.",
+            f"Possível repetido no cálculo: {n_anuncios} anúncios, em {len(repetidos)} grupo(s), têm o "
+            f"mesmo preço, a mesma área e o mesmo número de endereço e continuam no cálculo. Podem "
+            f"ser o mesmo imóvel anunciado mais de uma vez (sem prova suficiente para juntar) ou "
+            f"casas iguais de um mesmo condomínio ou loteamento. Se forem o mesmo imóvel, ele está "
+            f"pesando mais de uma vez na média. Confira os anúncios.",
             n_anuncios, 0,
             [{"preco": k[2], "area": k[3], "numero": k[1], "anuncios": [_anuncio(c) for c in g]}
              for k, g in grupos_rep.items() if len(g) >= 2],
@@ -274,9 +277,11 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
                             "areas_entre_portais": c["areas_entre_portais"]})
         alertas.append(_alerta(
             "area_diferente_entre_portais",
-            f"{len(divergentes)} comparável(is) do cálculo aparecem em mais de um portal com áreas "
-            f"diferentes (mais de 5%). Para casa e apartamento foi usada a menor área (o erro "
-            f"mais comum é um portal mostrar a área do terreno); confira os anúncios.",
+            f"Área diferente entre portais: {len(divergentes)} imóvel(is) usados no cálculo aparecem "
+            f"em mais de um portal com áreas diferentes (mais de 5%). Foi usada a menor área, porque "
+            f"o erro mais comum é um portal mostrar a área do terreno no lugar da área construída. "
+            f"Se a área certa for a maior, o valor do m² desse imóvel está mais alto do que deveria. "
+            f"Confira os anúncios.",
             len(divergentes), 0.05, detalhe,
         ))
 

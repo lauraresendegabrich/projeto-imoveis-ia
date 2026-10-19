@@ -88,6 +88,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Mais 3 alertas na tela, com explicação** (decisão da usuária, 19/10/2026; branch
+  `tomtom-geocodificacao`): `terreno_fora_do_padrao`, `possivel_repetido_no_calculo` e
+  `area_diferente_entre_portais` aparecem como o de amostra concentrada (aviso + expander
+  "Ver os anúncios" com endereço, preço, área, portal, link e motivo). As regras não
+  mudaram; o texto é o mesmo na tela, no laudo e no Excel (no laudo termina com
+  "Confira os anúncios na tela ou no Excel."). Nenhum texto mostrado menciona mais o
+  "cenário conservador": saiu do alerta de terreno e da linha "Faixa da estimativa"
+  em "Como chegamos neste valor".
+
 - **Alerta de amostra concentrada na tela, com explicação** (decisão da usuária,
   19/10/2026; branch `tomtom-geocodificacao`). A regra do alerta não mudou; só o
   texto, que agora é o mesmo na tela, no laudo e no Excel: "Amostra concentrada:
