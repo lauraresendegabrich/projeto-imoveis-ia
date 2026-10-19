@@ -279,4 +279,21 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             len(divergentes), 0.05, detalhe,
         ))
 
+    # 12. Provavel lancamento: varios anuncios iguais de imobiliarias diferentes que o
+    #     Agente 1 juntou como 1 imovel (a regra de repetidos nao muda).
+    lancamentos = [c for c in usados.get("construcao") or [] if c.get("provavel_lancamento")]
+    if lancamentos:
+        alertas.append(_alerta(
+            "provavel_lancamento",
+            " ".join(
+                f"{c['provavel_lancamento']['anuncios']} anúncios iguais (mesmo preço e área, "
+                f"imobiliárias diferentes; provável lançamento) foram contados como 1 imóvel."
+                for c in lancamentos
+            ),
+            sum(c["provavel_lancamento"]["anuncios"] for c in lancamentos), 5,
+            [{**_anuncio(c), "motivo": f"{c['provavel_lancamento']['anuncios']} anúncios de "
+                                       f"{c['provavel_lancamento']['imobiliarias']} imobiliárias"}
+             for c in lancamentos],
+        ))
+
     return alertas

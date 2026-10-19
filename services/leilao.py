@@ -129,6 +129,20 @@ def texto_aviso_zona(contagem: dict, escopo_busca: str | None = None) -> str | N
     return " ".join(partes) or None
 
 
+def texto_aviso_lancamento(resultado_ag5: dict | None) -> str | None:
+    """
+    Aviso para os comparaveis usados que sao provavel lancamento: varios anuncios
+    iguais (mesmo preco e area, imobiliarias diferentes) contados como 1 imovel.
+    """
+    usados = (resultado_ag5 or {}).get("comparaveis_usados") or {}
+    frases = [
+        f"{c['provavel_lancamento']['anuncios']} anúncios iguais (mesmo preço e área, imobiliárias "
+        f"diferentes; provável lançamento) foram contados como 1 imóvel."
+        for c in (usados.get("construcao") or []) if c.get("provavel_lancamento")
+    ]
+    return " ".join(frases) or None
+
+
 def _metros(valor) -> str:
     return f"{int(round(float(valor))):,}".replace(",", ".")
 

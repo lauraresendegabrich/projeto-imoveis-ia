@@ -88,6 +88,19 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Lançamentos: anúncios iguais juntados como 1 imóvel, com aviso** (decisão da
+  usuária, 19/10/2026; branch `tomtom-geocodificacao`). A regra de repetidos
+  (`agents/identidade.py`) não muda. Depois de juntar, o Agente 1 marca como
+  `provavel_lancamento` o grupo de apartamentos com 5 ou mais anúncios
+  (`MIN_ANUNCIOS_LANCAMENTO`) de pelo menos 5 imobiliárias diferentes, todos com o
+  mesmo preço e a mesma área. Alerta `provavel_lancamento` (banco e aba Alertas) e
+  aviso na tela, no laudo e no Excel ("Provável lançamento"): "{n} anúncios iguais
+  (mesmo preço e área, imobiliárias diferentes; provável lançamento) foram contados
+  como 1 imóvel." Log `[Ag1] provavel lancamento`. Grupo da mesma imobiliária
+  (mesmo anúncio em vários portais) não conta. São Paulo/Barra Funda (ID 22, Rua
+  Vitorino Carmilo, 444): 6 grupos com 54 anúncios no total (de 6 a 12 cada, de 6 a
+  10 imobiliárias), contados como 6 imóveis.
+
 - **Google aceitava rua homônima de outro bairro (`partial_match`).** Decisão da
   usuária (19/10/2026): o Google com `partial_match` é recusado quando o bairro
   devolvido (sublocality / sublocality_level_1 / neighborhood) difere do informado

@@ -804,6 +804,8 @@ def executar_agente5(
             # Mesmo imovel com areas diferentes entre portais (Ag1): area de cada
             # portal; o calculo ja usa a area escolhida (menor, para casa/apto).
             "areas_entre_portais": im.get("areas_entre_portais"),
+            # Grupo de anuncios iguais de imobiliarias diferentes (Ag1): conta como 1.
+            "provavel_lancamento": im.get("provavel_lancamento"),
             "area_original": im.get("area_original"),
         }
 

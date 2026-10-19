@@ -144,6 +144,7 @@ import requests
 from dotenv import load_dotenv
 
 from agents.identidade import deduplicar, portal as portal_de
+from agents.identidade import _anunciante, _resumo, area as area_de, grupo as grupo_de, preco as preco_de
 
 load_dotenv()
 
@@ -571,6 +572,44 @@ def _marcar_proximidade(resultado: list[dict], lat_alvo: float, lon_alvo: float,
         im["distancia_alvo_m"] = round(dist)
         mantidos.append(im)
     return mantidos
+
+
+# Provavel lancamento: grupo de apartamentos juntados como o mesmo imovel com
+# MIN_ANUNCIOS_LANCAMENTO ou mais anuncios de imobiliarias diferentes, todos com o
+# mesmo preco e a mesma area. A regra de repetidos (agents/identidade.py) nao muda:
+# continua contando como 1 imovel; so fica marcado para o aviso (decisao da
+# usuaria, 19/10/2026). Pode ser um lancamento com varias unidades iguais.
+MIN_ANUNCIOS_LANCAMENTO = 5
+
+
+def _marcar_provaveis_lancamentos(unicos: list[dict], descartados: list[dict]) -> int:
+    """Marca o representante de cada provavel lancamento. Retorna quantos grupos."""
+    por_representante: dict[tuple, list[dict]] = {}
+    for d in descartados:
+        chave = tuple(sorted((d.get("duplicata_de") or {}).items()))
+        por_representante.setdefault(chave, []).append(d)
+    grupos = 0
+    for rep in unicos:
+        if not rep.get("duplicatas") or grupo_de(rep) != "apto":
+            continue
+        membros = [rep] + por_representante.get(tuple(sorted(_resumo(rep).items())), [])
+        if len(membros) < MIN_ANUNCIOS_LANCAMENTO:
+            continue
+        precos = {round(float(preco_de(m))) for m in membros if _to_float_safe(preco_de(m), None)}
+        areas = {round(float(area_de(m))) for m in membros if _to_float_safe(area_de(m), None)}
+        imobiliarias = {_anunciante(m) for m in membros if _anunciante(m)}
+        if len(precos) != 1 or len(areas) != 1 or len(imobiliarias) < MIN_ANUNCIOS_LANCAMENTO:
+            continue
+        rep["provavel_lancamento"] = {
+            "anuncios": len(membros), "imobiliarias": len(imobiliarias),
+            "preco": next(iter(precos)), "area": next(iter(areas)),
+        }
+        grupos += 1
+        logger.info(
+            f"[Ag1] provavel lancamento: {len(membros)} anuncios juntados | "
+            f"preco={next(iter(precos))} | area={next(iter(areas))} | imobiliarias={len(imobiliarias)}"
+        )
+    return grupos
 
 
 def _eh_leilao(imovel: dict) -> bool:
@@ -1929,6 +1968,7 @@ def coletar_imoveis(
     # por imovel (o mais completo); os descartados vao completos para
     # duplicatas_descartadas_ag1.json, com quem ficou no lugar e o motivo.
     combinados, duplicatas_descartadas = deduplicar(combinados)
+    _marcar_provaveis_lancamentos(combinados, duplicatas_descartadas)
     if duplicatas_descartadas:
         motivos = Counter(d["motivo_duplicata"].split("(")[0] for d in duplicatas_descartadas)
         logger.info(

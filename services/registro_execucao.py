@@ -11,7 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from services.alertas import calcular_alertas
-from services.leilao import texto_aviso_raio
+from services.leilao import texto_aviso_lancamento, texto_aviso_raio
 from services.leilao import FATOR_LUCRO_LEILAO, ORIGEM_CAIXA
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -169,6 +169,7 @@ def montar_registro(
             "aviso_terreno": ag5.get("aviso_terreno"),
             # Sem nota de infraestrutura: tempo de venda com infraestrutura neutra (0,50).
             "aviso_infraestrutura": ag5.get("aviso_infraestrutura"),
+            "aviso_lancamento": texto_aviso_lancamento(ag5),
         },
         "fontes": {
             "athena_coletas": coletas,
@@ -302,6 +303,7 @@ LINHAS_RESUMO = (
     ("Anúncios encontrados na região", "anuncios_encontrados", FORMATO_INTEIRO),
     ("Anúncios trazidos por proximidade (até 1,5 km)", "anuncios_por_proximidade", FORMATO_INTEIRO),
     ("Anúncios repetidos descartados", "repetidos", FORMATO_INTEIRO),
+    ("Provável lançamento", "_aviso_lancamento", None),
     ("Imóveis parecidos com o seu", "parecidos", FORMATO_INTEIRO),
     ("Confirmados na zona homogênea", "confirmados_na_zona", FORMATO_INTEIRO),
     ("Usados de fora da zona confirmada", "usados_por_fallback", FORMATO_INTEIRO),
@@ -332,6 +334,7 @@ ROTULOS_ALERTAS = {
     "terreno_fora_do_padrao": "Terreno fora do padrão",
     "possivel_repetido_no_calculo": "Possível repetido no cálculo",
     "area_diferente_entre_portais": "Área diferente entre portais",
+    "provavel_lancamento": "Provável lançamento",
 }
 
 ROTULOS_STATUS_ZONA = {
@@ -370,6 +373,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     valores["_aviso_raio"] = parametros.get("aviso_raio") or "Não houve ampliação"
     valores["_aviso_terreno"] = parametros.get("aviso_terreno")
     valores["_aviso_infraestrutura"] = parametros.get("aviso_infraestrutura")
+    valores["_aviso_lancamento"] = parametros.get("aviso_lancamento")
     localizacao = execucao.get("localizacao_alvo")
     valores["_localizacao_alvo"] = ROTULOS_LOCALIZACAO.get(localizacao, localizacao)
     escopo = execucao.get("escopo_busca")
@@ -385,7 +389,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
         celula = resumo.cell(row=resumo.max_row, column=2)
         if formato and isinstance(valor, (int, float, date)):
             celula.number_format = formato
-        if chave in ("regras_despesas", "_aviso_raio", "_aviso_terreno", "_aviso_infraestrutura") and valor:
+        if chave in ("regras_despesas", "_aviso_raio", "_aviso_terreno", "_aviso_infraestrutura", "_aviso_lancamento") and valor:
             celula.alignment = Alignment(wrap_text=True, vertical="top")
         if chave == "link" and valor:
             celula.hyperlink, celula.font = valor, link

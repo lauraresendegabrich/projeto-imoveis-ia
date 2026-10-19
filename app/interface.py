@@ -18,7 +18,7 @@ from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
 from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, contar_status_zona,
-    ler_data_br, ler_valor_reais, texto_aviso_raio, texto_aviso_zona,
+    ler_data_br, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
 )
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
@@ -900,6 +900,8 @@ if "resultado" in st.session_state:
             st.info(f"📏 {resultado['aviso_raio']}")
         if (preco or {}).get("aviso_terreno"):
             st.info(f"🏞️ {preco['aviso_terreno']}")
+        if texto_aviso_lancamento(preco):
+            st.info(f"🏗️ {texto_aviso_lancamento(preco)}")
         if resultado.get("aviso_zona"):
             st.warning(f"⚠️ {resultado['aviso_zona']}")
 
@@ -1635,6 +1637,8 @@ if "resultado" in st.session_state:
             bloco_resultado += f"\nAtenção: {resultado['aviso_raio']}"
         if (preco or {}).get("aviso_terreno"):
             bloco_resultado += f"\nAtenção: {preco['aviso_terreno']}"
+        if texto_aviso_lancamento(preco):
+            bloco_resultado += f"\nAtenção: {texto_aviso_lancamento(preco)}"
 
         linhas_leilao = linhas_laudo_leilao(resultado.get("leilao"), _brl_txt)
         bloco_leilao = "\n".join(
