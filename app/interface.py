@@ -1666,7 +1666,11 @@ if "resultado" in st.session_state:
         if texto_aviso_lancamento(preco):
             bloco_resultado += f"\nAtenção: {texto_aviso_lancamento(preco)}"
         for alerta_conc in alertas_amostra_concentrada(resultado):
-            bloco_resultado += f"\nAtenção: {alerta_conc.get('mensagem')}"
+            # No laudo nao ha a lista de anuncios: aponta para a tela e o Excel.
+            texto_conc = str(alerta_conc.get("mensagem") or "").replace(
+                "Confira os anúncios abaixo.", "Confira os anúncios na tela ou no Excel."
+            )
+            bloco_resultado += f"\nAtenção: {texto_conc}"
 
         linhas_leilao = linhas_laudo_leilao(resultado.get("leilao"), _brl_txt)
         bloco_leilao = "\n".join(

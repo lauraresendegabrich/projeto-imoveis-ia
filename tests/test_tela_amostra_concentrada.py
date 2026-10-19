@@ -73,6 +73,28 @@ def test_nenhum_nao_mostra_nada():
     assert avisos == [] and expanders == []
 
 
+
+def _laudo(at):
+    """Conteudo do laudo TXT gerado pelo botao de download (armazenado em memoria)."""
+    import gc
+    from streamlit.runtime.memory_media_file_storage import MemoryMediaFileStorage
+    url = at.get("download_button")[0].proto.url
+    for obj in gc.get_objects():
+        if isinstance(obj, MemoryMediaFileStorage):
+            for f in obj._files_by_id.values():
+                texto = f.content.decode("utf-8", "ignore")
+                if "LAUDO DE AVALIAÇÃO" in texto and url.split("/")[-1].split(".")[0] in str(obj._files_by_id):
+                    return texto
+    return ""
+
+
+def test_laudo_aponta_para_a_tela_e_o_excel():
+    _, _, at = _tela("area")
+    laudo = _laudo(at)
+    linha = [l for l in laudo.splitlines() if "Amostra concentrada:" in l]
+    assert linha and linha[0].endswith("Confira os anúncios na tela ou no Excel."), linha
+    assert "Confira os anúncios abaixo." not in laudo
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
