@@ -78,16 +78,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   inteira traz os anúncios mais recentes, não os mais próximos (Londrina/Aritana: 353
   anúncios, 0 casas no círculo, +114 s). Substituído pela busca por proximidade.
 
-- [ ] **Google aceita rua homônima de outro bairro (`partial_match`).** Itaboraí
-  (19/10/2026), "Rua Nossa Senhora da Conceição, Jardim Itajubá": o Nominatim não
-  achou; o Google devolveu uma rua com o mesmo nome no bairro **Pachecos**
-  (`types=route`, `GEOMETRIC_CENTER`, `partial_match`), a 17,3 km de Porto das Caixas
-  (distrito do CEP 24830-068). A regra atual só recusa `APPROXIMATE` com
-  `partial_match`, então esse ponto é aceito como nível rua e a TomTom (que achou a
-  rua a 136 m de Porto das Caixas) nem é chamada. Proposta: recusar o Google com
-  `partial_match` quando o bairro devolvido for diferente do informado (ou sempre que
-  houver `partial_match`), para cair na TomTom.
-
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
 
 - [ ] **Ordem dos provedores para comparáveis.** Hoje Groq → NVIDIA → Gemini. No
@@ -97,6 +87,16 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Google aceitava rua homônima de outro bairro (`partial_match`).** Decisão da
+  usuária (19/10/2026): o Google com `partial_match` é recusado quando o bairro
+  devolvido (sublocality / sublocality_level_1 / neighborhood) difere do informado
+  (sem acento e sem maiúsculas) ou quando não devolve bairro; a recusa cai na TomTom.
+  Com o mesmo bairro, ou sem `partial_match`, nada muda. A TomTom não passa por essa
+  checagem. Itaboraí ("Rua Nossa Senhora da Conceição, Jardim Itajubá"): antes o
+  Google punha o imóvel numa rua homônima a 17,3 km de Porto das Caixas; agora a
+  TomTom acha a rua a 136 m. Curitiba/Cajuru e Londrina/Aritana: nenhuma recusa nova
+  e nenhuma chamada à TomTom (imóvel e anúncios iguais).
 
 - **TomTom como última tentativa de geocodificação** (decisão da usuária, 17/10/2026;
   branch `tomtom-geocodificacao`). Ordem em cada tentativa: Nominatim → Google →

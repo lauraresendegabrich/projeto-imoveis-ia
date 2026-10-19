@@ -2446,6 +2446,29 @@ def _motivo_impreciso_nominatim(item: dict) -> str | None:
     return None
 
 
+def _bairro_google(item: dict) -> str | None:
+    """Bairro devolvido pelo Google (sublocality / sublocality_level_1 / neighborhood)."""
+    for componente in item.get("address_components") or []:
+        tipos = set(componente.get("types") or [])
+        if tipos & {"sublocality", "sublocality_level_1", "neighborhood"}:
+            return componente.get("long_name") or componente.get("short_name")
+    return None
+
+
+def _motivo_parcial_outro_bairro(item: dict, bairro_esperado: str | None) -> str | None:
+    """
+    Google com partial_match cujo bairro difere do informado (ou sem bairro): costuma
+    ser uma rua com o mesmo nome em outro bairro (Itaborai, 19/10/2026: 17 km do lugar
+    certo). Sem partial_match, ou sem bairro informado para comparar, nao recusa.
+    """
+    if not item.get("partial_match") or not _normalizar_texto(bairro_esperado or ""):
+        return None
+    devolvido = _bairro_google(item)
+    if devolvido and _normalizar_texto(devolvido) == _normalizar_texto(bairro_esperado):
+        return None
+    return f"partial_match com bairro diferente (informado={bairro_esperado!r}, devolvido={devolvido!r})"
+
+
 def _motivo_impreciso_google(item: dict) -> str | None:
     tipos = [str(t) for t in (item.get("types") or [])]
     imprecisos = [t for t in tipos if t in ("locality", "country") or t.startswith("administrative_area_level_")]
@@ -2599,7 +2622,12 @@ def _geocodificar(endereco: str, aceitar_cidade: bool = False) -> tuple:
     return lat, lon
 
 
-def _geocodificar_detalhado(endereco: str, aceitar_cidade: bool = False, cidade_esperada: str | None = None) -> tuple:
+def _geocodificar_detalhado(
+    endereco: str,
+    aceitar_cidade: bool = False,
+    cidade_esperada: str | None = None,
+    bairro_esperado: str | None = None,
+) -> tuple:
     """
     Geocodifica uma tentativa: Nominatim, Google e, por ultimo, TomTom. Retorna
     (lat, lon, nivel_real), onde nivel_real e rua_numero / rua / bairro conforme o
@@ -2641,8 +2669,13 @@ def _geocodificar_detalhado(endereco: str, aceitar_cidade: bool = False, cidade_
             if r.status_code == 200:
                 results = r.json().get("results", [])
                 if results:
-                    motivo = None if aceitar_cidade else _motivo_impreciso_google(results[0])
-                    if motivo:
+                    motivo = None if aceitar_cidade else (
+                        _motivo_impreciso_google(results[0])
+                        or _motivo_parcial_outro_bairro(results[0], bairro_esperado)
+                    )
+                    if motivo and motivo.startswith("partial_match com bairro"):
+                        logger.info(f"[Geo] Google recusado: {motivo} | {endereco!r}")
+                    elif motivo:
                         logger.info(f"[Geo] Google recusado ({motivo}) para {endereco!r}")
                     else:
                         loc = results[0]["geometry"]["location"]
@@ -2765,7 +2798,7 @@ def _geocodificar_com_fallback(
         add("cidade", [cidade, estado, "Brasil"])
 
     for idx, (nivel, endereco) in enumerate(tentativas):
-        lat, lon, nivel_real = _geocodificar_detalhado(endereco, cidade_esperada=cidade)
+        lat, lon, nivel_real = _geocodificar_detalhado(endereco, cidade_esperada=cidade, bairro_esperado=bairro)
         if lat is not None and lon is not None:
             # Grava o nivel do que foi ACHADO (ex.: endereco completo pesquisado mas
             # so o bairro encontrado -> "bairro"); sem essa informacao, o pesquisado.

@@ -25,7 +25,7 @@ class _Resposta:
         return self._dados
 
 
-def _rodar(func, tomtom=None, status=200, nominatim=None, chave="teste"):
+def _rodar(func, tomtom=None, status=200, nominatim=None, chave="teste", google=None):
     """Roda func com Nominatim/Google vazios (ou `nominatim`) e a TomTom respondendo `tomtom`."""
     chamadas = {"tomtom": 0}
 
@@ -33,7 +33,7 @@ def _rodar(func, tomtom=None, status=200, nominatim=None, chave="teste"):
         if "nominatim" in url:
             return _Resposta(nominatim or [])
         if "googleapis" in url:
-            return _Resposta({"results": []})
+            return _Resposta(google or {"results": []})
         chamadas["tomtom"] += 1
         return _Resposta(tomtom if tomtom is not None else {"results": []}, status)
 
@@ -132,6 +132,45 @@ def test_fallback_completo_grava_o_nivel_da_tomtom_e_conta_no_banco():
     assert r[:3] == (-22.70, -42.80, "rua"), r
     assert fontes["tomtom_localizacoes"] == 1 and fontes["tomtom_chamadas"] == 1, fontes
 
+
+
+# ---------------------------------------------------------------- Google parcial x bairro
+def google_rua(bairro=None, parcial=True, lat=-22.84, lon=-42.80):
+    componentes = [{"long_name": "Rua Nossa Senhora da Conceição", "types": ["route"]},
+                   {"long_name": "Itaboraí", "types": ["administrative_area_level_2", "political"]}]
+    if bairro:
+        componentes.insert(1, {"long_name": bairro, "types": ["sublocality_level_1", "sublocality", "political"]})
+    item = {"types": ["route"], "address_components": componentes,
+            "geometry": {"location": {"lat": lat, "lng": lon}, "location_type": "GEOMETRIC_CENTER"}}
+    if parcial:
+        item["partial_match"] = True
+    return {"results": [item]}
+
+
+def detalhado_com_bairro():
+    return ag2._geocodificar_detalhado(END, cidade_esperada="Itaboraí", bairro_esperado="JARDIM ITAJUBA")
+
+
+def test_google_parcial_com_bairro_diferente_cai_na_tomtom():
+    # Itaborai: o Google achou a rua homonima em Pachecos; a TomTom acertou.
+    (r, n) = _rodar(detalhado_com_bairro, tomtom("Cross Street", lat=-22.7018, lon=-42.8767),
+                    google=google_rua("Pachecos"))
+    assert r == (-22.7018, -42.8767, "rua") and n == 1, (r, n)
+
+
+def test_google_parcial_com_o_mesmo_bairro_e_aceito():
+    (r, n) = _rodar(detalhado_com_bairro, tomtom("Point Address"), google=google_rua("Jardim Itajubá"))
+    assert r == (-22.84, -42.80, "rua") and n == 0, (r, n)          # sem acento/maiusculas
+
+
+def test_google_parcial_sem_bairro_e_recusado():
+    (r, n) = _rodar(detalhado_com_bairro, {"results": []}, google=google_rua(None))
+    assert r == (None, None, None) and n == 1, (r, n)
+
+
+def test_google_sem_partial_match_aceito_como_hoje():
+    (r, n) = _rodar(detalhado_com_bairro, tomtom("Point Address"), google=google_rua("Pachecos", parcial=False))
+    assert r == (-22.84, -42.80, "rua") and n == 0, (r, n)
 
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
