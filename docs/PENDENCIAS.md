@@ -16,9 +16,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 - [ ] **Rodar a migração `db/migracoes/002_localizacao_e_dados_do_leilao.sql` no
   Neon ANTES de publicar o código que grava as colunas novas** (sem ela, nenhuma
   avaliação é gravada). Confirmar também que a `001` já foi rodada.
-- [ ] **Rodar a migração `db/migracoes/003_entrada_usuario_e_checagem_do_alvo.sql` no
-  Neon ANTES do merge do branch `entrada-usuario-no-banco`** (sem ela, nenhuma
-  avaliação é gravada).
 - [ ] **`DATABASE_URL` nos Secrets do Streamlit Cloud** (Settings → Secrets). Sem
   ela o app publicado funciona, mas não grava as avaliações no banco.
 - [ ] **Trocar a chave do Qwen e a senha do banco Neon**, que circularam em
@@ -101,7 +98,8 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   casa sem descrição quando preço, área, cômodos e bairro batem não foi feita.
 
 - **Entrada completa do formulário e checagem do próprio anúncio no banco**
-  (decisão da usuária, 20/10/2026; branch `entrada-usuario-no-banco`, migração 003).
+  (decisão da usuária, 20/10/2026; branch `entrada-usuario-no-banco`, migração 003
+  rodada no Neon em 20/10/2026).
   `entrada_usuario`: tudo o que foi digitado e como foi lido. `checagem_anuncio_alvo`:
   testados, confirmados, suspeitos e os 10 anúncios com mais sinais (ex.:
   `casa_preco_area_descricao(area_dif=0.0, desc=0.954)`). Motivo: em Palhoça
