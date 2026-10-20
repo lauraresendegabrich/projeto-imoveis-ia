@@ -37,6 +37,25 @@ def test_checagem_fica_registrada_para_todos_os_anuncios():
     assert outro["checagem_alvo"]["resultado"] == "nao" and "score" in outro["checagem_alvo"]
 
 
+
+def test_resultado_nao_grava_a_maior_pontuacao_do_grupo_inclusive_repetido():
+    # O anuncio que ficou nao se parece com o imovel; o repetido absorvido (outro
+    # portal) tem area, comodos e preco iguais, mas sem bairro: nao e suspeito, e a
+    # auditoria tem de mostrar a pontuacao DELE, com o via_duplicata.
+    alvo = dict(ALVO, description="Casa", descricao_gerada=True)
+    ficou = anuncio("https://cnm/1", 650000.0, 250.0, desc="")
+    ficou["neighborhood"] = None
+    ficou["duplicatas"] = [{"portal": "imovelweb", "listing_id": "3045", "url": "https://iw/3045",
+                            "dados_identidade": {"portal": "imovelweb", "listing_id": "3045", "url": "https://iw/3045",
+                                                 "tipo": "casa", "preco": 1200000.0, "area_construida": 360.0,
+                                                 "quartos": 8, "banheiros": 6, "vagas": 2}}]
+    assert ag2._marcar_anuncio_do_alvo(dict(alvo), [ficou]) == 0
+    chec = ficou["checagem_alvo"]
+    _, _, _, score_ficou = ag2._eh_anuncio_do_alvo(alvo, ficou)
+    assert chec["resultado"] == "nao" and chec["score"] > score_ficou, (chec, score_ficou)
+    assert "via_duplicata(imovelweb:3045)" in chec["sinais"], chec["sinais"]
+    assert "preco_identico" in chec["sinais"] and "area_igual" in chec["sinais"]
+
 def _registro(coletados, entrada):
     return montar_registro(id_execucao="x", imovel_alvo={}, leilao_entrada={}, leilao={},
                            imoveis_coletados=coletados, resultado_ag2={}, zona_resultado={}, resultado_ag3={},

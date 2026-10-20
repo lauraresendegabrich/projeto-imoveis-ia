@@ -13,9 +13,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Infraestrutura e segurança
 
-- [ ] **Rodar a migração `db/migracoes/002_localizacao_e_dados_do_leilao.sql` no
-  Neon ANTES de publicar o código que grava as colunas novas** (sem ela, nenhuma
-  avaliação é gravada). Confirmar também que a `001` já foi rodada.
 - [ ] **`DATABASE_URL` nos Secrets do Streamlit Cloud** (Settings → Secrets). Sem
   ela o app publicado funciona, mas não grava as avaliações no banco.
 - [ ] **Trocar a chave do Qwen e a senha do banco Neon**, que circularam em
@@ -87,6 +84,16 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Migração `db/migracoes/002_localizacao_e_dados_do_leilao.sql` rodada no Neon**
+  (20/10/2026; as 6 colunas conferidas: localizacao_alvo, escopo_busca,
+  anuncios_por_proximidade, data_leilao, formas_pagamento, regras_despesas).
+- **Checagem do próprio anúncio: maior pontuação do grupo no banco** (20/10/2026).
+  Quando nenhum anúncio do grupo é confirmado nem suspeito, `checagem_alvo` grava a
+  maior pontuação entre o anúncio que ficou e os repetidos absorvidos, com os sinais
+  dele e `via_duplicata(portal:listing_id)` quando vem de um repetido. Antes gravava só
+  o anúncio que ficou, e um repetido mais parecido com o imóvel não aparecia entre os 10
+  de maior pontuação. A regra de confirmado/suspeito não mudou.
 
 - **Alerta "possível anúncio do próprio imóvel" com o bairro escrito diferente**
   (decisão da usuária, 20/10/2026). A comparação de bairro da checagem do próprio

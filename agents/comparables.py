@@ -745,17 +745,23 @@ def _marcar_anuncio_do_alvo(imovel_alvo: dict, imoveis: list[dict]) -> int:
             if dup.get("dados_identidade")
         ]
         melhor = None   # (eh_alvo, possivel_alvo, sinais, score, dup)
+        maior = None    # (score, sinais, dup): maior pontuacao do grupo, para a auditoria
         for anuncio, dup in testes:
             eh_alvo, possivel_alvo, sinais, score = _eh_anuncio_do_alvo(imovel_alvo, anuncio)
+            if maior is None or score > maior[0]:
+                maior = (score, sinais, dup)
             if eh_alvo or (possivel_alvo and melhor is None):
                 melhor = (eh_alvo, possivel_alvo, sinais, score, dup)
             if eh_alvo:
                 break
         if melhor is None:
-            # Auditoria (banco): o resultado da checagem fica registrado mesmo quando o
-            # anuncio nao e o alvo nem suspeito (a regra nao muda).
-            _, _, sinais_rep, score_rep = _eh_anuncio_do_alvo(imovel_alvo, im)
-            im["checagem_alvo"] = {"resultado": "nao", "score": score_rep, "sinais": sinais_rep}
+            # Auditoria (banco): nem confirmado nem suspeito. Grava a MAIOR pontuacao do
+            # grupo (o anuncio que ficou ou um repetido absorvido), com os sinais dele;
+            # a regra de confirmado/suspeito nao muda.
+            score_maior, sinais_maior, dup_maior = maior
+            if dup_maior is not None:
+                sinais_maior = sinais_maior + [f"via_duplicata({dup_maior.get('portal')}:{dup_maior.get('listing_id')})"]
+            im["checagem_alvo"] = {"resultado": "nao", "score": score_maior, "sinais": sinais_maior}
             continue
         eh_alvo, possivel_alvo, sinais, score, dup = melhor
         if dup is not None:
