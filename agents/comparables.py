@@ -468,6 +468,12 @@ def _extrair_unidade(imovel: dict) -> str:
     return "-".join(partes)
 
 
+# Continencia de descricoes (checagem do proprio anuncio): o texto mais curto precisa
+# ter pelo menos isto para a proporcao de palavras contidas no mais longo valer.
+CONTINENCIA_MIN_CARACTERES = 120
+CONTINENCIA_MIN_PALAVRAS = 15
+
+
 def _similaridade_descricao(texto_a: str, texto_b: str) -> float:
     """
     Similaridade textual [0..1] entre duas descricoes, sem LLM.
@@ -494,7 +500,18 @@ def _similaridade_descricao(texto_a: str, texto_b: str) -> float:
         jaccard = 0.0
 
     # Media ponderada: a estrutura (ratio) pesa um pouco mais que o vocabulario.
-    return round(0.6 * ratio + 0.4 * jaccard, 3)
+    nota = 0.6 * ratio + 0.4 * jaccard
+
+    # Continencia: um texto que e PARTE do outro (ex.: so o inicio da descricao colado
+    # no formulario) nao pode dar nota baixa so por ser mais curto. E a proporcao das
+    # palavras do texto mais curto que aparecem no mais longo. So vale se o texto curto
+    # for distintivo (CONTINENCIA_MIN_CARACTERES e CONTINENCIA_MIN_PALAVRAS), para nao
+    # casar textos genericos ou so o rodape padrao de uma imobiliaria.
+    curto, tokens_curto, tokens_longo = (a, tokens_a, tokens_b) if len(a) <= len(b) else (b, tokens_b, tokens_a)
+    if len(curto) >= CONTINENCIA_MIN_CARACTERES and len(tokens_curto) >= CONTINENCIA_MIN_PALAVRAS:
+        continencia = len(tokens_curto & tokens_longo) / len(tokens_curto)
+        nota = max(nota, continencia)
+    return round(nota, 3)
 
 
 def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool, list[str], float]:
