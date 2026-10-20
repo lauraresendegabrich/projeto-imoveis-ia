@@ -868,22 +868,32 @@ def executar_agente5(
     # ========================================================
 
     aviso_terreno = None
-    if eh_condominial or eh_terreno:
+    # Motivo para os terrenos da zona que nao entram no calculo quando o terreno nao e
+    # separado (None quando separa ou quando o alvo e um terreno, que usa os terrenos).
+    motivo_terreno_fora = None
+    if eh_terreno:
         separar_terreno = False
+    elif eh_condominial:
+        separar_terreno = False
+        motivo_terreno_fora = "apartamento/sala: o terreno não entra no cálculo"
     elif area_terreno_alvo > 0 and len(valores_m2_terreno) >= MIN_AMOSTRAS_CONFIAVEL:
         separar_terreno = True
     else:
         separar_terreno = False
+        if area_terreno_alvo <= 0:
+            motivo_terreno_fora = "terreno do imóvel não informado: o valor foi calculado pelo m² das casas"
         if area_terreno_alvo > 0 and valores_m2_terreno:
             # Poucos terrenos: nao entram no calculo (ficam como descartados).
             n_terrenos_poucos = len(valores_m2_terreno)
-            usados_terreno = []
             aviso_terreno = AVISO_TERRENO_NAO_SEPARADO.format(n=n_terrenos_poucos)
             import logging as _log_t
             _log_t.getLogger(__name__).info(
                 f"[Ag5] terreno nao separado: {n_terrenos_poucos} terrenos "
                 f"(< {MIN_AMOSTRAS_CONFIAVEL}); calculo pelo m2 das casas"
             )
+
+    if not separar_terreno and not eh_terreno:
+        usados_terreno = []
 
     # ========================================================
     # 3. DUAS SERIES DE M2 DA CONSTRUCAO (fiel a planilha)
@@ -986,13 +996,18 @@ def executar_agente5(
         for resumo, aceitos in registros_construcao if aceitos == 0
     ]
     # Motivo de cada terreno fora do calculo (auditoria e funil da tela).
-    motivo_terreno = (
-        f"terreno não separado: só {len(valores_m2_terreno)} terreno(s) válidos (mínimo de "
-        f"{MIN_AMOSTRAS_CONFIAVEL}); o valor foi calculado pelo m² das casas"
-        if aviso_terreno else
-        f"preço ou área inválidos, ou R$/m² fora da faixa plausível (R$ {M2_TERRENO_MIN:.0f} a "
-        f"R$ {M2_TERRENO_MAX:,.0f})".replace(",", ".")
-    )
+    if aviso_terreno:
+        motivo_terreno = (
+            f"terreno não separado: só {len(valores_m2_terreno)} terreno(s) válidos (mínimo de "
+            f"{MIN_AMOSTRAS_CONFIAVEL}); o valor foi calculado pelo m² das casas"
+        )
+    elif motivo_terreno_fora:
+        motivo_terreno = motivo_terreno_fora
+    else:
+        motivo_terreno = (
+            f"preço ou área inválidos, ou R$/m² fora da faixa plausível (R$ {M2_TERRENO_MIN:.0f} a "
+            f"R$ {M2_TERRENO_MAX:,.0f})".replace(",", ".")
+        )
     descartados_terreno = [
         {**_resumo_imovel(t), "motivo_descarte": motivo_terreno}
         for t in terrenos_zona if not any(t is u for u in usados_terreno)

@@ -121,6 +121,33 @@ def test_banco_e_excel_com_terreno_nao_separado():
     assert resumo["Terrenos no cálculo"] == 0
     assert resumo["Terreno não separado"].startswith("Só 3 terreno(s) à venda na região")
 
+
+def test_casa_sem_area_de_terreno_nao_usa_os_terrenos_da_zona():
+    # Palhoca (20/10/2026): sem area do terreno o calculo e pelo m2 das casas, mas os 11
+    # terrenos da zona apareciam como "usados" (funil, banco e Excel). O valor nao muda.
+    from services.registro_execucao import montar_registro
+    alvo = {"propertyType": "casa", "area": 150}
+    terrenos = [terreno(200000 + i * 10000, 250 + i * 5) for i in range(12)]
+    r = calcular(alvo, CASAS_5, terrenos)
+    assert valor_medio(r) == valor_medio(calcular(alvo, CASAS_5, [])) == 700000.0
+    assert r["comparaveis_usados"]["terreno"] == []
+    descartados = r["comparaveis_descartados"]["terreno"]
+    assert len(descartados) == 12 and {d["motivo_descarte"] for d in descartados} == {
+        "terreno do imóvel não informado: o valor foi calculado pelo m² das casas"}
+    e, linhas = montar_registro(id_execucao="x", imovel_alvo={}, leilao_entrada={}, leilao={},
+                                imoveis_coletados=[], resultado_ag2={}, zona_resultado={}, resultado_ag3={},
+                                resultado_ag4={}, resultado_ag5=r)
+    assert e["qtd_terrenos"] == 0
+    assert [l["entrou_no_calculo"] for l in linhas if l["tipo"] == "terreno"] == [False] * 12
+
+
+def test_apartamento_nao_usa_terrenos():
+    r = calcular({"propertyType": "apartamento", "area": 80},
+                 [apto(400000 + i * 10000, 80) for i in range(5)], [terreno(200000, 250)])
+    assert r["comparaveis_usados"]["terreno"] == []
+    assert r["comparaveis_descartados"]["terreno"][0]["motivo_descarte"].startswith("apartamento/sala")
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
