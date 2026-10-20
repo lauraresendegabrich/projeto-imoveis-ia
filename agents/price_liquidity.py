@@ -921,7 +921,10 @@ def executar_agente5(
         area_construida_comp = extrair_area(imovel)
         # Area minima valida: descarta anuncio com area corrompida (ex.: "1 m2").
         if not preco_comp or not area_construida_comp or area_construida_comp < AREA_MINIMA_VALIDA:
-            descartados_construcao.append(_resumo_imovel(imovel))
+            descartados_construcao.append({
+                **_resumo_imovel(imovel),
+                "motivo_descarte": f"sem preço ou área construída válida (área menor que {AREA_MINIMA_VALIDA:.0f} m²)",
+            })
             continue
 
         # Registra o imovel (uma vez); conta como usado se algum m2 dele entrar.
@@ -975,9 +978,24 @@ def executar_agente5(
             _add_sanidade(valores_m2_construcao_med_terreno, m2_valor)
 
     usados_construcao = [resumo for resumo, aceitos in registros_construcao if aceitos > 0]
-    descartados_construcao += [resumo for resumo, aceitos in registros_construcao if aceitos == 0]
+    descartados_construcao += [
+        {**resumo, "motivo_descarte": (
+            f"R$/m² da construção fora da faixa plausível (R$ {M2_CONSTRUCAO_MIN:,.0f} a "
+            f"R$ {M2_CONSTRUCAO_MAX:,.0f})".replace(",", ".")
+        )}
+        for resumo, aceitos in registros_construcao if aceitos == 0
+    ]
+    # Motivo de cada terreno fora do calculo (auditoria e funil da tela).
+    motivo_terreno = (
+        f"terreno não separado: só {len(valores_m2_terreno)} terreno(s) válidos (mínimo de "
+        f"{MIN_AMOSTRAS_CONFIAVEL}); o valor foi calculado pelo m² das casas"
+        if aviso_terreno else
+        f"preço ou área inválidos, ou R$/m² fora da faixa plausível (R$ {M2_TERRENO_MIN:.0f} a "
+        f"R$ {M2_TERRENO_MAX:,.0f})".replace(",", ".")
+    )
     descartados_terreno = [
-        _resumo_imovel(t) for t in terrenos_zona if not any(t is u for u in usados_terreno)
+        {**_resumo_imovel(t), "motivo_descarte": motivo_terreno}
+        for t in terrenos_zona if not any(t is u for u in usados_terreno)
     ]
 
     if construcao_descartados:

@@ -14,6 +14,7 @@ from pathlib import Path
 # Adiciona raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.funil import funil_ligado, montar_funil, mostrar_funil
 from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
 from services.leilao import (
@@ -1669,6 +1670,11 @@ if "resultado" in st.session_state:
 
         st.divider()
 
+        # ── FUNIL DOS ANUNCIOS (conferencia; MOSTRAR_FUNIL=0 desliga) ─────
+        # Onde cada anuncio saiu (agente) e por que, ou se entrou no calculo.
+        if funil_ligado():
+            mostrar_funil(st, resultado)
+
         # ── BOTÃO EXPORTAR LAUDO (TXT) ─────────────────────────────
         # No TXT usamos "R$" limpo (sem o escape \$ de markdown do fmt_brl).
         def _brl_txt(v):
@@ -1743,7 +1749,10 @@ Gerado automaticamente pelo Sistema Multiagente de Precificação Imobiliária.
             from services.registro_execucao import excel_resultado
             st.download_button(
                 label="📥 Baixar resultado (Excel)",
-                data=excel_resultado(registro_excel["execucao"], registro_excel.get("comparaveis") or []),
+                data=excel_resultado(
+                    registro_excel["execucao"], registro_excel.get("comparaveis") or [],
+                    funil=montar_funil(resultado) if funil_ligado() else None,
+                ),
                 file_name=f"resultado_{cidade}_{bairro}.xlsx".replace(" ", "_"),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,

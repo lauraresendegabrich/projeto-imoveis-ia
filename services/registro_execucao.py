@@ -344,8 +344,11 @@ ROTULOS_STATUS_ZONA = {
 }
 
 
-def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
-    """Arquivo .xlsx com as abas Resumo, Alertas e Comparaveis."""
+def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] | None = None) -> bytes:
+    """
+    Arquivo .xlsx com as abas Resumo, Alertas e Comparaveis (e Funil, quando o funil
+    de conferencia esta ligado: onde cada anuncio saiu e por que).
+    """
     import io
 
     from openpyxl import Workbook
@@ -484,6 +487,30 @@ def excel_resultado(execucao: dict, comparaveis: list[dict]) -> bytes:
     aba.freeze_panes = "A2"
     if aba.max_row > 1:
         aba.auto_filter.ref = aba.dimensions
+
+    # ── Funil (conferencia): onde cada anuncio saiu e por que ─────────────
+    if funil:
+        aba_funil = livro.create_sheet("Funil")
+        colunas_funil = (
+            ("Etapa", 22), ("Motivo", 80), ("Tipo", 12), ("Preço", 16), ("Área (m²)", 11),
+            ("Quartos", 9), ("Bairro", 22), ("Rua", 28), ("Portal", 15), ("Veio por", 20),
+            ("Nota vizinhança (Ag3)", 12), ("Anúncio", 50),
+        )
+        aba_funil.append([nome for nome, _ in colunas_funil])
+        for celula in aba_funil[1]:
+            celula.font, celula.fill = negrito, fundo_cabecalho
+        for linha_funil in funil:
+            aba_funil.append([linha_funil.get(nome) for nome, _ in colunas_funil])
+            atual = aba_funil.max_row
+            aba_funil.cell(row=atual, column=4).number_format = FORMATO_REAIS
+            aba_funil.cell(row=atual, column=2).alignment = Alignment(wrap_text=True, vertical="top")
+            if linha_funil.get("Anúncio"):
+                celula = aba_funil.cell(row=atual, column=12)
+                celula.hyperlink, celula.font = linha_funil["Anúncio"], link
+        for indice, (_, largura) in enumerate(colunas_funil, start=1):
+            aba_funil.column_dimensions[aba_funil.cell(row=1, column=indice).column_letter].width = largura
+        aba_funil.freeze_panes = "A2"
+        aba_funil.auto_filter.ref = aba_funil.dimensions
 
     saida = io.BytesIO()
     livro.save(saida)

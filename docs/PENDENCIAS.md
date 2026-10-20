@@ -88,6 +88,17 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Funil dos anúncios na tela, para conferência** (decisão da usuária, 20/10/2026;
+  branch `funil-conferencia`). Bloco "🔎 Funil dos anúncios (conferência)" no fim do
+  resultado e aba "Funil" no Excel: cada anúncio com a etapa em que saiu (Agente 1 ·
+  busca, Agente 2 · parecidos, Agente 2 · zona, Agente 5 · cálculo) ou "Entrou no
+  cálculo", e o motivo (regra de repetido, motivo da pré-classificação, justificativa da
+  IA, distância e raio, motivo do descarte no Agente 5, próprio anúncio). O Agente 5
+  passou a gravar `motivo_descarte` nos descartados (o cálculo não muda). Desligar:
+  `MOSTRAR_FUNIL=0` no `.env`/Secrets; tirar de vez: apagar `app/funil.py` e a chamada
+  na tela. Palhoça: 408 anúncios (13 no cálculo, 1 próprio anúncio excluído, 67 fora
+  da zona, 195 não parecidos, 132 repetidos).
+
 - **Mais 3 alertas na tela, com explicação** (decisão da usuária, 19/10/2026; branch
   `tomtom-geocodificacao`): `terreno_fora_do_padrao`, `possivel_repetido_no_calculo` e
   `area_diferente_entre_portais` aparecem como o de amostra concentrada (aviso + expander
