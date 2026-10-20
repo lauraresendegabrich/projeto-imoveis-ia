@@ -1232,9 +1232,11 @@ if "resultado" in st.session_state:
                             f"🔁 Anúncios repetidos descartados ({len(dups)} anúncio(s) de {len(grupos_dup)} imóvel(is))"
                         ):
                             st.caption(
-                                "O mesmo imóvel apareceu em mais de um anúncio. Cada imóvel entrou "
-                                "**uma única vez** no cálculo, pelo anúncio da coluna \"Entrou no "
-                                "cálculo\"; os anúncios da coluna \"Descartados\" ficaram de fora."
+                                "O mesmo imóvel apareceu em mais de um anúncio. Ficou só um anúncio de "
+                                "cada imóvel (coluna \"Anúncio que ficou\"); os da coluna \"Descartados\" "
+                                "saíram já na busca. Ficar aqui não quer dizer que o imóvel entrou no "
+                                "cálculo do preço: ele ainda passa pelo filtro de parecidos e pela zona. "
+                                "Os que entraram no preço estão em \"Imóveis usados neste cálculo\"."
                             )
                             linhas_dup = []
                             for grupo in grupos_dup.values():
@@ -1251,7 +1253,7 @@ if "resultado" in st.session_state:
                                 linhas_dup.append({
                                     "Preço": preco_d,
                                     "Área": f"{float(d['Área']):.0f}m²" if d.get("Área") else "-",
-                                    "Entrou no cálculo": f"[{d['Mantido']}]({d['Anúncio mantido']})" if d.get("Anúncio mantido") else d.get("Mantido"),
+                                    "Anúncio que ficou": f"[{d['Mantido']}]({d['Anúncio mantido']})" if d.get("Anúncio mantido") else d.get("Mantido"),
                                     "Descartados": f"{len(grupo)} anúncio(s): " + ", ".join(links_desc),
                                     "Motivo": ", ".join(motivos),
                                 })
