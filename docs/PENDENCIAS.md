@@ -91,6 +91,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Alerta "possível anúncio do próprio imóvel" com o bairro escrito diferente**
+  (decisão da usuária, 20/10/2026). A comparação de bairro da checagem do próprio
+  anúncio passou a aceitar nome parecido (sem acento/maiúsculas, um contido no outro),
+  como o resto do sistema: "Praia Do Sonho Ens Brito" × "Praia do Sonho". Só o alerta
+  muda; a exclusão do cálculo continua exigindo preço + área + descrição parecida (ou
+  rua + número, ou coordenada). Palhoça (anúncio VivaReal 2903862416, sem descrição):
+  antes nada; agora "possível anúncio do próprio imóvel". A proposta de excluir a
+  casa sem descrição quando preço, área, cômodos e bairro batem não foi feita.
+
 - **Entrada completa do formulário e checagem do próprio anúncio no banco**
   (decisão da usuária, 20/10/2026; branch `entrada-usuario-no-banco`, migração 003).
   `entrada_usuario`: tudo o que foi digitado e como foi lido. `checagem_anuncio_alvo`:

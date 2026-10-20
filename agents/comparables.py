@@ -533,7 +533,8 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
 
       Suspeita (nao exclui): mesmo bairro + area <=2% + (preco identico ou
       proximo, ou comodos iguais); ou, no apto, mesmo predio (rua+numero ou
-      coordenada) + area <=2%.
+      coordenada) + area <=2%. "Mesmo bairro" aceita nome parecido, como no resto
+      do sistema ("Praia do Sonho" x "Praia Do Sonho Ens Brito"; 20/10/2026).
     """
     sinais: list[str] = []
     score = 0.0
@@ -556,6 +557,22 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
 
     area_dif = identidade.dif_relativa(identidade.area(imovel_alvo), identidade.area(comparavel))
     area_compativel = area_dif is not None and area_dif <= 0.02
+
+    # Mesmo bairro com nome parecido (sem acento/maiusculas, um contido no outro ou
+    # grafia proxima), como em identidade.local_compativel.
+    bairros_alvo, bairros_comp = identidade._bairros(imovel_alvo), identidade._bairros(comparavel)
+    mesmo_bairro = any(identidade._nomes_parecidos(x, y) for x in bairros_alvo for y in bairros_comp)
+
+    def _int(v):
+        f = _para_float(v)
+        return int(f) if f is not None else None
+    q_a = _int(imovel_alvo.get("bedrooms") or imovel_alvo.get("quartos"))
+    q_c = _int(comparavel.get("bedrooms") or comparavel.get("quartos"))
+    b_a = _int(imovel_alvo.get("bathrooms") or imovel_alvo.get("banheiros"))
+    b_c = _int(comparavel.get("bathrooms") or comparavel.get("banheiros"))
+    v_a = _int(imovel_alvo.get("parkingSpaces") or imovel_alvo.get("vagas"))
+    v_c = _int(comparavel.get("parkingSpaces") or comparavel.get("vagas"))
+    comodos_iguais = (q_a is not None and q_a == q_c) and (b_a is not None and b_a == b_c) and (v_a is not None and v_a == v_c)
 
     # =====================================================================
     # (A) SINAIS IDENTIFICADORES — provam o anuncio especifico
@@ -584,6 +601,7 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
             score += 1.00
             sinais.append(f"casa_preco_area_descricao(area_dif={area_dif}, desc={sim_desc})")
             tem_identificador = True
+
 
     # --- Rua + numero (+ unidade para apartamento) ---
     rua_alvo = identidade.rua(imovel_alvo)
@@ -627,9 +645,7 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     # =====================================================================
     sinais_perfil: list[str] = []
 
-    bairro_alvo_norm = _normalizar_texto(imovel_alvo.get("neighborhood") or imovel_alvo.get("bairro") or "")
-    bairro_comp_norm = _normalizar_texto(comparavel.get("neighborhood") or comparavel.get("bairro") or "")
-    if bairro_alvo_norm and bairro_comp_norm and bairro_alvo_norm == bairro_comp_norm:
+    if mesmo_bairro:
         score += 0.25
         sinais_perfil.append("mesmo_bairro")
 
@@ -637,16 +653,7 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
         score += 0.35
         sinais_perfil.append("area_igual")
 
-    def _int(v):
-        f = _para_float(v)
-        return int(f) if f is not None else None
-    q_a = _int(imovel_alvo.get("bedrooms") or imovel_alvo.get("quartos"))
-    q_c = _int(comparavel.get("bedrooms") or comparavel.get("quartos"))
-    b_a = _int(imovel_alvo.get("bathrooms") or imovel_alvo.get("banheiros"))
-    b_c = _int(comparavel.get("bathrooms") or comparavel.get("banheiros"))
-    v_a = _int(imovel_alvo.get("parkingSpaces") or imovel_alvo.get("vagas"))
-    v_c = _int(comparavel.get("parkingSpaces") or comparavel.get("vagas"))
-    if (q_a is not None and q_a == q_c) and (b_a is not None and b_a == b_c) and (v_a is not None and v_a == v_c):
+    if comodos_iguais:
         score += 0.30
         sinais_perfil.append("comodos_iguais")
 

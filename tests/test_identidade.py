@@ -264,6 +264,27 @@ def test_alvo_casa_preco_identico_sem_descricao_real_fica_suspeito():
     assert not eh and poss, sinais
 
 
+
+def test_alvo_bairro_escrito_diferente_gera_alerta_e_continua_no_calculo():
+    # Palhoca (20/10/2026): o formulario tinha "Praia Do Sonho Ens Brito" e o portal
+    # "Praia do Sonho". Sem descricao e sem rua+numero, nao confirma; mas o perfil bate
+    # (mesmo preco, area e comodos) e agora vira "possivel anuncio do proprio imovel".
+    alvo = alvo_casa(rua="", numero="", bairro="Praia Do Sonho Ens Brito", area=360.0, bedrooms=8,
+                     bathrooms=6, parkingSpaces=2, price=1200000)
+    comp = casa(rua="", bairro="Praia do Sonho", area_construida=360.0, quartos=8, banheiros=6, vagas=2,
+                preco=1200000.0, descricao="Casa com 8 quartos sendo 6 suites, piscina e area gourmet perto da praia.")
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
+    assert not eh and poss and "mesmo_bairro" in sinais, sinais
+
+
+def test_alvo_bairros_diferentes_nao_gera_alerta():
+    alvo = alvo_casa(rua="", numero="", bairro="Pinheira", area=360.0, bedrooms=8, bathrooms=6,
+                     parkingSpaces=2, price=1200000)
+    comp = casa(rua="", bairro="Praia do Sonho", area_construida=360.0, quartos=8, banheiros=6, vagas=2,
+                preco=1200000.0)
+    eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
+    assert not eh and not poss and "mesmo_bairro" not in sinais, sinais
+
 def test_alvo_vagas_zero_do_formulario_nao_veta():
     eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000, parkingSpaces=0), anuncio())
     assert eh, sinais
