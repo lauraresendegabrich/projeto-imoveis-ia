@@ -85,6 +85,21 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Checagem do próprio anúncio: descrição parcial não confirmava** (20/10/2026). Em
+  Palhoça, o início da descrição (até "a 570m da praia") contra a completa dava 0,60
+  (casa exige 0,75) e o próprio anúncio entrou no cálculo. `_similaridade_descricao`
+  passou a calcular também a continência (proporção das palavras do texto mais curto
+  que aparecem no mais longo) e retorna a maior das duas; só vale com o texto curto de
+  pelo menos 120 caracteres e 15 palavras distintas (rodapé padrão e textos genéricos
+  não casam). O trecho de Palhoça passou a dar 1,00. A regra de identidade não mudou.
+- **Agente 5: terrenos apareciam como "Entrou no cálculo" sem terem sido usados**
+  (20/10/2026). Sem o terreno do imóvel informado, o cálculo é pelo m² das casas, mas
+  os terrenos da zona saíam em `comparaveis_usados` (funil, banco e Excel; Palhoça: 11
+  terrenos). Agora, sempre que o terreno não é separado (sem área, poucos terrenos,
+  apartamento), nenhum terreno é usado e todos vão para os descartados com o motivo
+  ("terreno do imóvel não informado: o valor foi calculado pelo m² das casas"). O valor
+  não mudou.
+
 - **Migração `db/migracoes/002_localizacao_e_dados_do_leilao.sql` rodada no Neon**
   (20/10/2026; as 6 colunas conferidas: localizacao_alvo, escopo_busca,
   anuncios_por_proximidade, data_leilao, formas_pagamento, regras_despesas).
