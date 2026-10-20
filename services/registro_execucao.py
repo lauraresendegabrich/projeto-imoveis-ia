@@ -94,6 +94,35 @@ def _linhas_comparaveis(id_execucao: str, resultado_ag5: dict) -> list[dict]:
     return linhas
 
 
+LIMITE_CHECAGEM_ANUNCIO_ALVO = 10
+
+
+def _checagem_anuncio_alvo(coletados: list) -> dict | None:
+    """Os LIMITE_CHECAGEM_ANUNCIO_ALVO anuncios com maior pontuacao na checagem do alvo."""
+    checados = [im for im in coletados or [] if im.get("checagem_alvo")]
+    if not checados:
+        return None
+    melhores = sorted(checados, key=lambda im: -(im["checagem_alvo"].get("score") or 0))
+    return {
+        "testados": len(checados),
+        "confirmados": sum(1 for im in checados if im["checagem_alvo"].get("resultado") == "confirmado"),
+        "suspeitos": sum(1 for im in checados if im["checagem_alvo"].get("resultado") == "suspeito"),
+        "maiores_pontuacoes": [
+            {
+                "resultado": im["checagem_alvo"].get("resultado"),
+                "score": im["checagem_alvo"].get("score"),
+                "sinais": im["checagem_alvo"].get("sinais"),
+                "portal": im.get("source") or im.get("portal"),
+                "preco": _num(im.get("price") or im.get("preco")),
+                "area": _num(im.get("area") or im.get("area_construida")),
+                "bairro": im.get("neighborhood") or im.get("bairro"),
+                "link": im.get("url"),
+            }
+            for im in melhores[:LIMITE_CHECAGEM_ANUNCIO_ALVO]
+        ],
+    }
+
+
 def _fontes_tomtom() -> dict:
     try:
         from agents.comparables import contagem_tomtom
@@ -119,6 +148,7 @@ def montar_registro(
     tempos: dict | None = None,
     falhas: list | None = None,
     localizacao_alvo: str | None = None,
+    entrada_usuario: dict | None = None,
 ) -> tuple[dict, list[dict]]:
     """
     Retorna (linha de execucoes, linhas de comparaveis).
@@ -236,6 +266,11 @@ def montar_registro(
         "tempo_venda": (ag5.get("liquidez_experimental") or {}).get("tempo_estimado") if confiavel else None,
     }
     execucao["alertas"] = calcular_alertas(execucao, ag5, falhas)
+    # Tudo o que o formulario mandou (textos digitados e valores lidos).
+    execucao["entrada_usuario"] = entrada_usuario or None
+    # Checagem "e o anuncio do proprio imovel?" (Agente 2): os anuncios com mais sinais,
+    # para explicar depois por que um anuncio entrou ou saiu do calculo.
+    execucao["checagem_anuncio_alvo"] = _checagem_anuncio_alvo(coletados)
     return execucao, _linhas_comparaveis(id_execucao, ag5)
 
 

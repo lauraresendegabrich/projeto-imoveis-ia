@@ -154,3 +154,26 @@ Apagar a execução apaga os comparáveis dela junto.
 ```sql
 DELETE FROM execucoes WHERE id_execucao = 'COLE_O_ID_AQUI';
 ```
+
+## Entrada do usuário e checagem do próprio anúncio (migração 003)
+
+`entrada_usuario` guarda tudo o que o formulário mandou, como foi digitado e como foi
+lido (endereço, área, quartos, banheiros, vagas, preço, descrição completa, fotos e os
+dados do leilão). `checagem_anuncio_alvo` guarda a checagem "é o anúncio do próprio
+imóvel?" do Agente 2: quantos anúncios foram testados, confirmados (saem do cálculo) e
+suspeitos (ficam, com alerta), e os 10 com mais sinais.
+
+```sql
+-- O que foi digitado e o que a checagem do próprio anúncio encontrou
+SELECT data_hora, cidade, bairro,
+       entrada_usuario->>'preco_digitado'        AS preco_digitado,
+       entrada_usuario->>'preco_lido'            AS preco_lido,
+       entrada_usuario->>'descricao_caracteres'  AS caracteres_descricao,
+       checagem_anuncio_alvo->>'confirmados'     AS confirmados,
+       checagem_anuncio_alvo->>'suspeitos'       AS suspeitos,
+       checagem_anuncio_alvo->'maiores_pontuacoes'->0 AS mais_parecido
+FROM execucoes
+ORDER BY data_hora DESC
+LIMIT 20;
+```
+

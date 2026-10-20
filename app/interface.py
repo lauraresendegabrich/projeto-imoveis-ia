@@ -244,7 +244,8 @@ with st.sidebar:
                 "Terreno (m²)", value="", placeholder="Ex.: 300" if tipo == "Casa" else "Apartamento: deixe vazio",
             )
             banheiros = st.number_input("Banheiros", min_value=0, value=preset.get("banheiros", 0))
-            preco_anunciado = st.number_input("Preço (R$, opcional)", min_value=0, value=0, step=1000)
+            # Texto (e nao number_input) para aceitar "1.200.000" e "1.200.000,00".
+            texto_preco_anunciado = st.text_input("Preço (R$, opcional)", value="", placeholder="Ex.: 1.200.000")
 
         st.markdown("**📝 Descrição** (opcional)")
         descricao = st.text_area("Descrição do imóvel", value="", height=80)
@@ -342,6 +343,13 @@ elif submitted:
         erros_validacao.append(f"Terreno inválido: \"{texto_area_terreno}\" (use, por exemplo, 300 ou 312,50)")
     if area == 0:
         erros_validacao.append("Área construída deve ser maior que zero")
+    preco_anunciado = 0.0
+    try:
+        preco_anunciado = ler_numero_br(texto_preco_anunciado) or 0.0
+    except ValueError:
+        erros_validacao.append(
+            f"Preço inválido: \"{texto_preco_anunciado}\" (use, por exemplo, 1.200.000 ou 1.200.000,00)"
+        )
     if quartos <= 0:
         erros_validacao.append("Número de quartos deve ser maior que zero")
 
@@ -373,6 +381,31 @@ elif submitted:
         for erro in erros_validacao:
             st.warning(f"• {erro}")
         st.stop()
+
+    # Tudo o que o formulario mandou, como foi digitado e como foi lido, para o banco
+    # (coluna entrada_usuario): explica depois casos como "o anuncio do proprio imovel
+    # entrou no calculo" sem depender do que ficou na tela.
+    entrada_usuario = {
+        "cep": cep_input or None,
+        "rua": rua, "numero": numero, "bairro": bairro, "cidade": cidade, "estado": estado,
+        "tipo": tipo,
+        "area_digitada": texto_area, "area_lida": area,
+        "terreno_digitado": texto_area_terreno, "terreno_lido": area_terreno,
+        "quartos": int(quartos), "banheiros": int(banheiros), "vagas": int(vagas),
+        "preco_digitado": texto_preco_anunciado, "preco_lido": preco_anunciado or None,
+        "descricao": descricao or None, "descricao_caracteres": len(descricao or ""),
+        "fotos": [l.strip() for l in (fotos_texto or "").splitlines() if l.strip()],
+        "leilao": {
+            "valor_minimo_digitado": texto_valor_minimo_caixa,
+            "valor_avaliacao_digitado": texto_valor_avaliacao_caixa,
+            "modalidade": modalidade_caixa or None,
+            "codigo": codigo_caixa or None,
+            "link": link_caixa or None,
+            "data_digitada": texto_data_leilao,
+            "formas_pagamento": list(formas_pagamento_caixa or []),
+            "regras_despesas": regras_despesas_caixa or None,
+        },
+    }
 
     # Monta o dict do imóvel alvo
     tipo_map = {"Casa": "house", "Apartamento": "apartment"}
@@ -881,6 +914,7 @@ elif submitted:
             },
             falhas=falhas_execucao,
             localizacao_alvo=localizacao_alvo,
+            entrada_usuario=entrada_usuario,
         )
         # Guardado no resultado (sessao) para o botao de exportar Excel: mesmo
         # conteudo gravado no banco.

@@ -70,7 +70,11 @@ CREATE TABLE IF NOT EXISTS execucoes (
     sobra                       NUMERIC(14, 2),            -- lance máximo − valor mínimo (negativa = falta)
     decisao                     TEXT,                      -- Não descartar / Descartar / Sem estimativa
     tempo_venda                 TEXT,
-    alertas                     JSONB                      -- sinais automáticos de atenção (services/alertas.py)
+    alertas                     JSONB,                     -- sinais automáticos de atenção (services/alertas.py)
+
+    -- Entrada do usuário e checagem do próprio anúncio (migração 003) ---------
+    entrada_usuario             JSONB,                     -- tudo o que o formulário mandou (digitado e lido)
+    checagem_anuncio_alvo       JSONB                      -- anúncios com mais sinais de serem o próprio imóvel
 );
 
 CREATE INDEX IF NOT EXISTS idx_execucoes_data_hora ON execucoes (data_hora DESC);

@@ -16,6 +16,9 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 - [ ] **Rodar a migração `db/migracoes/002_localizacao_e_dados_do_leilao.sql` no
   Neon ANTES de publicar o código que grava as colunas novas** (sem ela, nenhuma
   avaliação é gravada). Confirmar também que a `001` já foi rodada.
+- [ ] **Rodar a migração `db/migracoes/003_entrada_usuario_e_checagem_do_alvo.sql` no
+  Neon ANTES do merge do branch `entrada-usuario-no-banco`** (sem ela, nenhuma
+  avaliação é gravada).
 - [ ] **`DATABASE_URL` nos Secrets do Streamlit Cloud** (Settings → Secrets). Sem
   ela o app publicado funciona, mas não grava as avaliações no banco.
 - [ ] **Trocar a chave do Qwen e a senha do banco Neon**, que circularam em
@@ -87,6 +90,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Entrada completa do formulário e checagem do próprio anúncio no banco**
+  (decisão da usuária, 20/10/2026; branch `entrada-usuario-no-banco`, migração 003).
+  `entrada_usuario`: tudo o que foi digitado e como foi lido. `checagem_anuncio_alvo`:
+  testados, confirmados, suspeitos e os 10 anúncios com mais sinais (ex.:
+  `casa_preco_area_descricao(area_dif=0.0, desc=0.954)`). Motivo: em Palhoça
+  (20/10/2026) o anúncio do próprio imóvel entrou no cálculo e não dava para saber,
+  pelo banco, o que o formulário tinha mandado. O campo **Preço** passou a aceitar o
+  formato brasileiro ("1.200.000", "1.200.000,00"), como a área e os valores do leilão.
 
 - **Funil dos anúncios na tela, para conferência** (decisão da usuária, 20/10/2026;
   branch `funil-conferencia`). Bloco "🔎 Funil dos anúncios (conferência)" no fim do

@@ -34,8 +34,12 @@ COLUNAS_EXECUCOES = (
     "valor_m2_construcao", "valor_m2_terreno", "valor_mercado", "liquidez",
     "status_agente5", "qtd_comparaveis_construcao", "qtd_terrenos",
     "lance_maximo", "sobra", "decisao", "tempo_venda", "alertas",
+    "entrada_usuario", "checagem_anuncio_alvo",
 )
-COLUNAS_JSON = {"parametros", "fontes", "modelos_ia", "falhas", "campos_presumidos", "alertas", "formas_pagamento"}
+COLUNAS_JSON = {
+    "parametros", "fontes", "modelos_ia", "falhas", "campos_presumidos", "alertas", "formas_pagamento",
+    "entrada_usuario", "checagem_anuncio_alvo",
+}
 COLUNAS_COMPARAVEIS = (
     "id_execucao", "tipo", "preco", "area", "valor_m2", "endereco", "bairro",
     "portal", "link", "status_zona", "entrou_no_calculo",

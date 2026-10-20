@@ -745,10 +745,17 @@ def _marcar_anuncio_do_alvo(imovel_alvo: dict, imoveis: list[dict]) -> int:
             if eh_alvo:
                 break
         if melhor is None:
+            # Auditoria (banco): o resultado da checagem fica registrado mesmo quando o
+            # anuncio nao e o alvo nem suspeito (a regra nao muda).
+            _, _, sinais_rep, score_rep = _eh_anuncio_do_alvo(imovel_alvo, im)
+            im["checagem_alvo"] = {"resultado": "nao", "score": score_rep, "sinais": sinais_rep}
             continue
         eh_alvo, possivel_alvo, sinais, score, dup = melhor
         if dup is not None:
             sinais = sinais + [f"via_duplicata({dup.get('portal')}:{dup.get('listing_id')})"]
+        im["checagem_alvo"] = {
+            "resultado": "confirmado" if eh_alvo else "suspeito", "score": score, "sinais": sinais,
+        }
         if eh_alvo:
             im["eh_anuncio_do_alvo"] = True
             im["possivel_anuncio_do_alvo"] = False
