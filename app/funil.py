@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import os
 
-ENTROU = "✅ Entrou no cálculo"
-SAIU_AG1 = "Agente 1 · busca"
-SAIU_AG2_PARECIDOS = "Agente 2 · parecidos"
-SAIU_AG2_ZONA = "Agente 2 · zona"
-SAIU_AG5 = "Agente 5 · cálculo"
+from agents.price_liquidity import MIN_AMOSTRAS_CONFIAVEL
+
+# "Chegou ao calculo" (e nao "entrou"): chegou ao Agente 5; o Motivo diz o que
+# aconteceu na conta (usado na media ou cortado pela media aparada).
+ENTROU = "✅ Chegou ao cálculo"
+SAIU_AG1 = "Saiu no Agente 1 (busca)"
+SAIU_AG2_PARECIDOS = "Saiu no Agente 2 (parecidos)"
+SAIU_AG2_ZONA = "Saiu no Agente 2 (zona)"
+SAIU_AG5 = "Saiu no Agente 5 (cálculo)"
 ETAPAS = (ENTROU, SAIU_AG5, SAIU_AG2_ZONA, SAIU_AG2_PARECIDOS, SAIU_AG1)
 
 ROTULOS_ORIGEM = {"proximidade": "proximidade", "cidade": "resto da cidade"}
@@ -74,6 +78,46 @@ def _motivo_zona(c: dict, raio, nao_verificado: bool) -> str:
     return "fora da zona"
 
 
+def _reais_m2(v) -> str:
+    return f"R$ {float(v):,.0f}/m²".replace(",", ".")
+
+
+def _valores_m2(lista) -> str:
+    return " e ".join(_reais_m2(v) for v in dict.fromkeys(lista))
+
+
+def motivo_na_conta(usado: dict, preco: dict) -> str:
+    """
+    O que aconteceu na conta do Agente 5 com um anuncio que chegou ao calculo:
+    "R$ X/m², usado na média", "R$ X/m², cortado pela média aparada" ou
+    "não houve cálculo: N comparáveis < mínimo de 5". Usa a conta que o Agente 5
+    grava em cada comparavel usado (conta_m2: R$/m2 e se ficou na media aparada).
+    """
+    status = (preco or {}).get("status_avaliacao", "ok")
+    if status == "amostra_insuficiente":
+        n = len(((preco or {}).get("comparaveis_usados") or {}).get("construcao") or [])
+        return (f"não houve cálculo: {n} {'comparável' if n == 1 else 'comparáveis'} < mínimo de "
+                f"{MIN_AMOSTRAS_CONFIAVEL}")
+    if status == "valor_nao_estimado":
+        return "não houve cálculo: o valor deu zero"
+    if status != "ok":
+        return "não houve cálculo"
+    conta = usado.get("conta_m2") or []
+    if not conta:
+        return "usado no cálculo"
+    na_media = [c["valor_m2"] for c in conta if c.get("na_media")]
+    cortados = [c["valor_m2"] for c in conta if not c.get("na_media")]
+    if not cortados:
+        return f"{_valores_m2(na_media)}, usado na média"
+    if not na_media:
+        return f"{_valores_m2(cortados)}, cortado pela média aparada"
+    if set(na_media) == set(cortados):
+        # Casa: o mesmo R$/m2 entra nas duas series; uma copia ficou e a outra foi cortada.
+        return (f"{_valores_m2(na_media)}, usado na média uma vez (a outra cópia foi cortada "
+                f"pela média aparada)")
+    return f"{_valores_m2(na_media)}, usado na média; {_valores_m2(cortados)}, cortado pela média aparada"
+
+
 def montar_funil(resultado: dict) -> list[dict]:
     """Uma linha por anuncio: onde saiu (ou se entrou) e o motivo."""
     resultado = resultado or {}
@@ -107,13 +151,22 @@ def montar_funil(resultado: dict) -> list[dict]:
     for c in candidatos:
         url = c.get("url")
         eh_terreno = c.get("cluster") == "terreno" or "terreno" in str(c.get("propertyType") or c.get("tipo") or "").lower()
+        # Situacao na zona (coluna propria): confirmado, distancia nao verificada,
+        # ampliacao do raio.
+        situacao_zona = None
         if url in usados:
             status = (usados[url].get("status_zona") or "confirmado")
-            etapa, motivo = ENTROU, ROTULOS_STATUS_ZONA.get(status, status)
+            situacao_zona = ROTULOS_STATUS_ZONA.get(status, status)
+            if c.get("incluido_por_ampliacao_raio"):
+                situacao_zona += " · entrou pela ampliação do raio"
+        elif url in na_zona:
+            situacao_zona = ROTULOS_STATUS_ZONA["confirmado"]
+        elif url in nao_verificados:
+            situacao_zona = "distância não verificada"
+        if url in usados:
+            etapa, motivo = ENTROU, motivo_na_conta(usados[url], preco)
             if c.get("possivel_anuncio_do_alvo"):
                 motivo += " · alerta: possível anúncio do próprio imóvel"
-            if c.get("incluido_por_ampliacao_raio"):
-                motivo += " · entrou pela ampliação do raio"
         elif c.get("eh_anuncio_do_alvo"):
             etapa, motivo = SAIU_AG5, "excluído: é o anúncio do próprio imóvel (identidade confirmada)"
         elif url in descartados:
@@ -133,6 +186,7 @@ def montar_funil(resultado: dict) -> list[dict]:
         linhas.append({
             "Etapa": etapa,
             "Motivo": motivo,
+            "Zona": situacao_zona,
             "Tipo": "Terreno" if eh_terreno else "Construção",
             "Preço": _num(c.get("price") or c.get("preco")),
             "Área (m²)": _num(c.get("area") or c.get("area_construida")),
@@ -151,7 +205,7 @@ def montar_funil(resultado: dict) -> list[dict]:
             "Etapa": SAIU_AG1,
             "Motivo": (f"repetido: é o mesmo imóvel do anúncio que ficou ({d.get('Mantido')}); "
                        f"regra: {d.get('Motivo') or '-'}"),
-            "Tipo": None, "Preço": _num(d.get("Preço")), "Área (m²)": _num(d.get("Área")),
+            "Zona": None, "Tipo": None, "Preço": _num(d.get("Preço")), "Área (m²)": _num(d.get("Área")),
             "Quartos": None, "Bairro": None, "Rua": None, "Portal": d.get("Descartado"),
             "Veio por": None, "Nota vizinhança (Ag3)": None, "Anúncio": d.get("Anúncio descartado") or None,
         })
@@ -210,7 +264,8 @@ def mostrar_funil(st, resultado: dict) -> None:
     resumo = resumo_funil(linhas)
     with st.expander(f"🔎 Funil dos anúncios (conferência) — {len(linhas)} anúncios", expanded=False):
         st.caption(
-            "Para cada anúncio: em que agente saiu e por quê, ou se entrou no cálculo. "
+            "Para cada anúncio: em que agente saiu e por quê, ou, se chegou ao cálculo, o que "
+            "aconteceu na conta do Agente 5 (usado na média ou cortado pela média aparada). "
             "Só para conferência; não muda nenhum cálculo."
         )
         st.markdown(" · ".join(f"**{etapa}**: {n}" for etapa, n in resumo.items() if n))

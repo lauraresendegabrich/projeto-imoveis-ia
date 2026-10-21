@@ -247,6 +247,35 @@ def normalizar_padrao(padrao: str) -> str:
     return "medio"
 
 
+def _remover_cada_lado(n: int, proporcao: float = 0.5) -> int:
+    """Quantos valores o TRIMMEAN corta em cada ponta (mesma regra do Excel)."""
+    quantidade_remover = int(n * proporcao)
+    # Arredonda para baixo ate multiplo de 2
+    if quantidade_remover % 2 != 0:
+        quantidade_remover -= 1
+    # Se quantidade a remover >= n, reduz ate sobrar pelo menos 1 valor
+    while quantidade_remover >= n:
+        quantidade_remover -= 2
+    if quantidade_remover < 0:
+        quantidade_remover = 0
+    return quantidade_remover // 2
+
+
+def marcar_media_aparada(valores: List[float], proporcao: float = 0.5) -> List[bool]:
+    """
+    Para cada valor (na ordem da lista), True se ficou dentro da media aparada e False
+    se foi cortado. Mesmo corte de calcular_media_aparada (ordena e tira as pontas);
+    so para mostrar a conta de cada anuncio, nao muda o calculo.
+    """
+    n = len(valores)
+    if n == 0:
+        return []
+    ordem = sorted(range(n), key=lambda i: valores[i])
+    r = _remover_cada_lado(n, proporcao)
+    mantidos = set(ordem[r:n - r])
+    return [i in mantidos for i in range(n)]
+
+
 def calcular_media_aparada(valores: List[float], proporcao: float = 0.5) -> float:
     """
     Media aparada (TRIMMEAN): reproduz exatamente o TRIMMEAN(range, 0.5) do Excel.
@@ -266,16 +295,7 @@ def calcular_media_aparada(valores: List[float], proporcao: float = 0.5) -> floa
     if not valores:
         raise ValueError("Lista de valores vazia.")
     n = len(valores)
-    quantidade_remover = int(n * proporcao)
-    # Arredonda para baixo ate multiplo de 2
-    if quantidade_remover % 2 != 0:
-        quantidade_remover -= 1
-    # Se quantidade a remover >= n, reduz ate sobrar pelo menos 1 valor
-    while quantidade_remover >= n:
-        quantidade_remover -= 2
-    if quantidade_remover < 0:
-        quantidade_remover = 0
-    remover_cada_lado = quantidade_remover // 2
+    remover_cada_lado = _remover_cada_lado(n, proporcao)
     if remover_cada_lado > 0:
         valores_filtrados = valores[remover_cada_lado: n - remover_cada_lado]
     else:
@@ -919,11 +939,17 @@ def executar_agente5(
     registros_construcao = []
     descartados_construcao = []    # na zona, mas sem preco/area validos ou com m2 implausivel
 
+    # De qual imovel (indice em registros_construcao) veio cada valor das duas series:
+    # para mostrar a conta de cada anuncio (funil), sem mudar o calculo.
+    donos_min_terreno, donos_med_terreno = [], []
+
     def _add_sanidade(lista, valor):
         """Adiciona so se o m2 de construcao for fisicamente plausivel."""
         nonlocal construcao_descartados
         if M2_CONSTRUCAO_MIN <= valor <= M2_CONSTRUCAO_MAX:
             lista.append(valor)
+            donos = donos_min_terreno if lista is valores_m2_construcao_min_terreno else donos_med_terreno
+            donos.append(len(registros_construcao) - 1)
             if registros_construcao:
                 registros_construcao[-1][1] += 1
             return True
@@ -1037,8 +1063,20 @@ def executar_agente5(
     # planilha (confirmado em 17/10/2026): para condominial usa uma serie so.
     if eh_condominial:
         todos_valores_construcao = list(valores_m2_construcao_min_terreno)
+        donos_construcao = list(donos_min_terreno)
     else:
         todos_valores_construcao = valores_m2_construcao_min_terreno + valores_m2_construcao_med_terreno
+        donos_construcao = donos_min_terreno + donos_med_terreno
+
+    # Conta de cada anuncio (funil e auditoria): seus R$/m2 e se cada um ficou dentro
+    # da media aparada ou foi cortado. Nao muda o calculo.
+    for valor, dono, ficou in zip(
+        todos_valores_construcao, donos_construcao, marcar_media_aparada(todos_valores_construcao)
+    ):
+        if 0 <= dono < len(registros_construcao):
+            registros_construcao[dono][0].setdefault("conta_m2", []).append(
+                {"valor_m2": round(valor, 2), "na_media": ficou}
+            )
 
     if todos_valores_construcao:
         menor_m2_construcao = min(todos_valores_construcao)
@@ -1284,7 +1322,11 @@ def executar_agente5(
         },
         "comparaveis_usados": {
             "construcao": usados_construcao,
-            "terreno": [_resumo_imovel(t) for t in usados_terreno],
+            # Terrenos usados, na mesma ordem de valores_m2_terreno: com a conta de cada um.
+            "terreno": [
+                {**_resumo_imovel(t), "conta_m2": [{"valor_m2": round(v, 2), "na_media": ficou}]}
+                for t, v, ficou in zip(usados_terreno, valores_m2_terreno, marcar_media_aparada(valores_m2_terreno))
+            ] if len(usados_terreno) == len(valores_m2_terreno) else [_resumo_imovel(t) for t in usados_terreno],
         },
         # Na zona, mas fora do calculo (area < minima, sem preco/area ou m2 fora da
         # faixa de sanidade). Para auditoria e para o registro no banco.

@@ -37,8 +37,10 @@ RESULTADO = {
                        "comparaveis_confirmados": [ad(1), ad(2), ad(3), ad(8)],
                        "comparaveis_nao_verificados": [ad(5)], "terrenos": [ad(9)]},
     "preco_estimado": {
-        "comparaveis_usados": {"construcao": [{"url": "https://x/1", "status_zona": "confirmado"},
-                                              {"url": "https://x/8", "status_zona": "confirmado"}], "terreno": []},
+        "comparaveis_usados": {"construcao": [
+            {"url": "https://x/1", "status_zona": "confirmado", "conta_m2": [{"valor_m2": 5000.0, "na_media": True}]},
+            {"url": "https://x/8", "status_zona": "confirmado", "conta_m2": [{"valor_m2": 9100.4, "na_media": False}]},
+        ], "terreno": []},
         "comparaveis_descartados": {
             "construcao": [{"url": "https://x/3", "motivo_descarte": "R$/m² da construção fora da faixa plausível"}],
             "terreno": [{"url": "https://x/9", "motivo_descarte": "terreno não separado: só 1 terreno(s) válidos"}]},
@@ -54,7 +56,10 @@ def _por_url(linhas):
 
 def test_cada_anuncio_tem_etapa_e_motivo():
     l = _por_url(montar_funil(RESULTADO))
-    assert l["https://x/1"]["Etapa"] == ENTROU and "confirmado na zona" in l["https://x/1"]["Motivo"]
+    assert l["https://x/1"]["Etapa"] == ENTROU == "✅ Chegou ao cálculo"
+    assert l["https://x/1"]["Motivo"] == "R$ 5.000/m², usado na média"
+    assert l["https://x/1"]["Zona"] == "confirmado na zona"
+    assert l["https://x/8"]["Motivo"] == "R$ 9.100/m², cortado pela média aparada"
     assert l["https://x/2"]["Etapa"] == SAIU_AG5 and "é o anúncio do próprio imóvel" in l["https://x/2"]["Motivo"]
     assert l["https://x/3"]["Etapa"] == SAIU_AG5 and "fora da faixa plausível" in l["https://x/3"]["Motivo"]
     assert l["https://x/4"]["Etapa"] == SAIU_AG2_ZONA and "está a 900 m" in l["https://x/4"]["Motivo"]
@@ -65,6 +70,38 @@ def test_cada_anuncio_tem_etapa_e_motivo():
     assert l["https://x/8"]["Etapa"] == ENTROU and l["https://x/8"]["Veio por"] == "proximidade (700 m)"
     assert l["https://x/9"]["Etapa"] == SAIU_AG5 and l["https://x/9"]["Tipo"] == "Terreno"
     assert l["https://iw/1"]["Etapa"] == SAIU_AG1 and "repetido" in l["https://iw/1"]["Motivo"]
+
+
+def test_nomes_das_etapas():
+    assert (SAIU_AG1, SAIU_AG2_PARECIDOS, SAIU_AG2_ZONA, SAIU_AG5) == (
+        "Saiu no Agente 1 (busca)", "Saiu no Agente 2 (parecidos)", "Saiu no Agente 2 (zona)",
+        "Saiu no Agente 5 (cálculo)")
+
+
+def test_motivo_na_conta():
+    from app.funil import motivo_na_conta
+    ok = {"status_avaliacao": "ok"}
+    copia = {"conta_m2": [{"valor_m2": 5238.1, "na_media": True}, {"valor_m2": 5238.1, "na_media": False}]}
+    assert motivo_na_conta(copia, ok) == ("R$ 5.238/m², usado na média uma vez (a outra cópia foi cortada "
+                                          "pela média aparada)")
+    duas = {"conta_m2": [{"valor_m2": 4100, "na_media": True}, {"valor_m2": 4800, "na_media": False}]}
+    assert motivo_na_conta(duas, ok) == "R$ 4.100/m², usado na média; R$ 4.800/m², cortado pela média aparada"
+    sem = {"status_avaliacao": "amostra_insuficiente", "comparaveis_usados": {"construcao": [{}, {}, {}, {}]}}
+    assert motivo_na_conta(duas, sem) == "não houve cálculo: 4 comparáveis < mínimo de 5"
+    assert motivo_na_conta({}, ok) == "usado no cálculo"
+
+
+def test_conta_vem_do_agente5():
+    # Os R$/m2 de cada anuncio e o corte da media aparada batem com o valor do Agente 5.
+    from agents.price_liquidity import executar_agente5
+    comps = [{"propertyType": "apartamento", "price": p, "area": a, "url": f"https://a/{p}"}
+             for p, a in ((300000, 93), (499900, 120), (630000, 110), (648000, 117), (650000, 77), (790000, 106))]
+    r = executar_agente5({"propertyType": "apartamento", "area": 109}, [], comps, {}, {})
+    usados = r["comparaveis_usados"]["construcao"]
+    na_media = [c["valor_m2"] for u in usados for c in u["conta_m2"] if c["na_media"]]
+    assert round(sum(na_media) / len(na_media), 2) == r["calculo_construcao"]["valor_m2_referencia"] == 5721.1
+    cortados = {u["url"] for u in usados if not u["conta_m2"][0]["na_media"]}
+    assert cortados == {"https://a/300000", "https://a/650000"}, cortados   # o mais barato e o mais caro
 
 
 def test_resumo_e_ordem():
@@ -100,7 +137,8 @@ def test_excel_tem_a_aba_funil():
     from services.registro_execucao import excel_resultado
     livro = load_workbook(io.BytesIO(excel_resultado({"alertas": []}, [], funil=montar_funil(RESULTADO))))
     linhas = list(livro["Funil"].iter_rows(values_only=True))
-    assert linhas[0][:2] == ("Etapa", "Motivo") and len(linhas) == 1 + 10
+    assert linhas[0][:3] == ("Etapa", "Motivo", "Zona") and len(linhas) == 1 + 10
+    assert "R$ 5.000/m², usado na média" in [l[1] for l in linhas]
     assert "Funil" not in load_workbook(io.BytesIO(excel_resultado({"alertas": []}, []))).sheetnames
 
 
@@ -115,7 +153,7 @@ def test_tela_mostra_o_funil():
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert any(e.label.startswith("🔎 Funil dos anúncios (conferência) — 10 anúncios") for e in at.expander)
-    resumo = [m.value for m in at.markdown if "Entrou no cálculo" in m.value and "Agente 1" in m.value]
+    resumo = [m.value for m in at.markdown if "Chegou ao cálculo" in m.value and "Saiu no Agente 1" in m.value]
     assert resumo, [m.value for m in at.markdown][-5:]
     tabela = at.dataframe[-1].value
     assert list(tabela.columns[:2]) == ["Etapa", "Motivo"] and len(tabela) == 10

@@ -527,7 +527,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
     if funil:
         aba_funil = livro.create_sheet("Funil")
         colunas_funil = (
-            ("Etapa", 22), ("Motivo", 80), ("Tipo", 12), ("Preço", 16), ("Área (m²)", 11),
+            ("Etapa", 26), ("Motivo", 70), ("Zona", 34), ("Tipo", 12), ("Preço", 16), ("Área (m²)", 11),
             ("Quartos", 9), ("Bairro", 22), ("Rua", 28), ("Portal", 15), ("Veio por", 20),
             ("Nota vizinhança (Ag3)", 12), ("Anúncio", 50),
         )
@@ -537,10 +537,10 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
         for linha_funil in funil:
             aba_funil.append([linha_funil.get(nome) for nome, _ in colunas_funil])
             atual = aba_funil.max_row
-            aba_funil.cell(row=atual, column=4).number_format = FORMATO_REAIS
+            aba_funil.cell(row=atual, column=5).number_format = FORMATO_REAIS
             aba_funil.cell(row=atual, column=2).alignment = Alignment(wrap_text=True, vertical="top")
             if linha_funil.get("Anúncio"):
-                celula = aba_funil.cell(row=atual, column=12)
+                celula = aba_funil.cell(row=atual, column=13)
                 celula.hyperlink, celula.font = linha_funil["Anúncio"], link
         for indice, (_, largura) in enumerate(colunas_funil, start=1):
             aba_funil.column_dimensions[aba_funil.cell(row=1, column=indice).column_letter].width = largura
