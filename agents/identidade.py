@@ -172,8 +172,26 @@ def _pode_ser_condominio(d: dict) -> bool:
     """
     if _em_condominio(d):
         return True
-    texto = _norm(" ".join(str(_campo(d, c) or "") for c in ("rua", "street", "titulo", "title", "descricao", "description")))
-    return bool(re.search(r"\bcondomini|\bcasa \d|\bunidade\b|\bbloco\b|\blote \d", texto))
+    original = " ".join(str(_campo(d, c) or "") for c in ("rua", "street", "titulo", "title", "descricao", "description"))
+    texto = _norm(original)
+    # Negacoes e o aviso padrao dos portais nao indicam condominio (21/10/2026: "sem
+    # condominio" e "valores de condominio e IPTU podem sofrer alteracoes" desligavam
+    # a regra rua + numero).
+    texto = re.sub(
+        r"\b(?:sem|nao (?:tem|paga|possui|ha|cobra)|isent[oa] de|livre de|nao e de)\s+(?:taxa de\s+)?condomini\w*"
+        r"|\bcondomini\w*\s+(?:isento|zero|gratis)\b"
+        r"|\bvalores? de condomini\w* e iptu",
+        " ", texto,
+    )
+    if re.search(r"\bcondomini|\bunidade\b|\bbloco\b|\blote \d", texto):
+        return True
+    # "casa N" so quando for a unidade: "casa 3 do condominio", "casa 03", "casa n 3",
+    # "casa A". Nao: "Casa 3 dormitorios", "casa 601361091" (codigo do anuncio).
+    if re.search(r"\bcasa (?:n[o.]? ?)?(?:0\d|\d{1,3} (?:do|no|da|na) (?:condominio|conjunto|residencial|vila))\b"
+                 r"|\bcasa n[o.]? ?\d{1,3}\b", texto):
+        return True
+    sem_acento = unicodedata.normalize("NFKD", original).encode("ascii", "ignore").decode()
+    return bool(re.search(r"\b[Cc]asa ([A-H])\b(?!\s*[-–]?\s*[Vv]enda)", sem_acento))
 
 
 def regra_do_par(a: dict, b: dict) -> tuple[str | None, str]:
@@ -283,7 +301,7 @@ def motivo_veto(a: dict, b: dict, g: str, ignorar: tuple = ()) -> str | None:
     do formulario do alvo).
     """
     area_dif = dif_relativa(area(a), area(b))
-    if area_dif is not None and area_dif > VETO_AREA[g]:
+    if "area" not in ignorar and area_dif is not None and area_dif > VETO_AREA[g]:
         return "veto_area"
     if _diferentes(_campo(a, "quartos", "bedrooms"), _campo(b, "quartos", "bedrooms")):
         return "veto_quartos"
@@ -321,8 +339,19 @@ def mesmo_imovel(a: dict, b: dict) -> tuple[bool, str]:
     if not local_compativel(a, b):
         return False, "veto_local"
 
+    # Casa com a mesma rua e o mesmo numero, sem indicio de condominio (varias casas no
+    # mesmo numero): a area diferente nao veta, porque um portal costuma mostrar a area
+    # total no lugar da construida (Av. Joao Peixoto Viegas, 888: 135 x 203 m2). Junta
+    # com preco identico; o grupo usa a menor area e ganha o alerta "area diferente
+    # entre portais" (_ajustar_area_do_grupo). Decisao da usuaria, 21/10/2026.
+    num = numero(a)
+    mesmo_endereco_casa = bool(
+        g == "casa" and num and num == numero(b) and rua(a) and rua(a) == rua(b)
+        and not _pode_ser_condominio(a) and not _pode_ser_condominio(b)
+    )
+
     # 2) Vetos: basta um para nao ser o mesmo imovel
-    veto = motivo_veto(a, b, g)
+    veto = motivo_veto(a, b, g, ignorar=("area",) if mesmo_endereco_casa else ())
     if veto:
         return False, veto
 
@@ -340,11 +369,10 @@ def mesmo_imovel(a: dict, b: dict) -> tuple[bool, str]:
     else:
         if area_ok and area_dif <= CASA_AREA and desc >= CASA_DESC:
             return True, f"casa_preco_area_descricao(area_dif={_fmt(area_dif)}, desc={desc})"
-        num = numero(a)
-        if (area_ok and area_dif <= CASA_AREA_COM_NUMERO and num and num == numero(b)
-                and rua(a) and rua(a) == rua(b)
-                and not _pode_ser_condominio(a) and not _pode_ser_condominio(b)):
+        if mesmo_endereco_casa and area_ok and area_dif <= CASA_AREA_COM_NUMERO:
             return True, f"casa_preco_area_rua_numero(area_dif={_fmt(area_dif)}, numero={num})"
+        if mesmo_endereco_casa and area_ok:
+            return True, f"casa_preco_rua_numero_area_diferente(area_dif={_fmt(area_dif)}, numero={num})"
     return False, f"sem_prova(area_dif={_fmt(area_dif)}, desc={desc})"
 
 

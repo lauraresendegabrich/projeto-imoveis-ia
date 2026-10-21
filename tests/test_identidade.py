@@ -343,6 +343,55 @@ def test_alvo_testado_contra_duplicatas_absorvidas():
     assert any(s.startswith("via_duplicata(imovelweb:9)") for s in rep["match_alvo_sinais"])
 
 
+# ---------------------------------------------------------------- condominio e area diferente (21/10/2026)
+def test_pode_ser_condominio_so_com_indicio_real():
+    from agents.identidade import _pode_ser_condominio as cond
+    nao = ["Casa 3 dormitórios à venda", "Casa à venda no Jardim", "Sem condomínio, IPTU baixo",
+           "Não paga condomínio", "Isento de condomínio", "Livre de condomínio",
+           "Valores de condomínio e IPTU podem sofrer alterações", "jcjpv-888-casa-601361091-16"]
+    sim = ["Casa 3 do condomínio Jardim", "Casa 03 em vila", "casa nº 3", "Casa A, com quintal",
+           "Casa em condomínio fechado", "Condomínio R$ 300", "Bloco B", "Lote 3"]
+    assert [t for t in nao if cond({"descricao": t})] == []
+    assert [t for t in sim if not cond({"descricao": t})] == []
+    assert cond({"descricao": "", "property_sub_type": "Casa / Sobrado em Condomínio"})
+
+
+def _peixoto(**campos):
+    """Av. Joao Peixoto Viegas, 888 (Sao Paulo, 21/10/2026): o mesmo imovel, cada
+    imobiliaria com o proprio texto; uns portais com 135 m2, outros com 203 m2."""
+    base = {"rua": "Avenida João Peixoto Viegas, 888", "bairro": "Jardim Consórcio", "preco": 830000.0,
+            "codigo_imovel_anunciante": None}
+    return casa(**{**base, **campos})
+
+
+def test_casa_mesmo_endereco_e_preco_com_area_diferente_e_o_mesmo_imovel():
+    a = _peixoto(area_construida=135.0, descricao="Casa 3 dormitórios à venda. Valores de condomínio e IPTU "
+                 "podem sofrer alterações.", anunciante_nome="Remax", listing_id="1")
+    b = _peixoto(area_construida=203.0, descricao="Sobrado reformado, sem condomínio.", portal="chavesnamao",
+                 source="Chaves na Mão", anunciante_nome="B&G", listing_id="2", url="https://cnm/2")
+    junta, motivo = mesmo_imovel(a, b)
+    assert junta and motivo.startswith("casa_preco_rua_numero_area_diferente(area_dif=0.335"), motivo
+    unicos, descartados = deduplicar([a, b])
+    assert len(unicos) == 1 and len(descartados) == 1
+    rep = unicos[0]
+    from agents.identidade import area
+    assert area(rep) == 135.0 and {x["area"] for x in rep["areas_entre_portais"]} == {135.0, 203.0}, rep
+
+
+def test_area_diferente_ainda_veta_sem_o_endereco_completo_ou_com_condominio():
+    a = _peixoto(area_construida=135.0)
+    # Preco diferente: nao junta (preco identico e obrigatorio).
+    assert mesmo_imovel(a, _peixoto(area_construida=203.0, preco=860000.0, listing_id="2"))[1] == "preco_diferente"
+    # Outro numero: o veto de area continua.
+    assert mesmo_imovel(a, _peixoto(area_construida=203.0, rua="Avenida João Peixoto Viegas, 800",
+                                    listing_id="2"))[1] == "veto_area"
+    # Pode ser condominio (varias casas no mesmo numero): o veto de area continua.
+    assert mesmo_imovel(a, _peixoto(area_construida=203.0, descricao="Casa em condomínio fechado",
+                                    listing_id="2"))[1] == "veto_area"
+    # Quartos diferentes continuam vetando.
+    assert mesmo_imovel(a, _peixoto(area_construida=203.0, quartos=4, listing_id="2"))[1] == "veto_quartos"
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
