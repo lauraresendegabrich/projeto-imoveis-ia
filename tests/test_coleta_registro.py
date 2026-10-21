@@ -94,6 +94,62 @@ def test_dados_de_outra_rodada_falham():
     assert v["ok"] is False and "0 de 12" in v["encontrado"] and "rodada-anterior" in v["encontrado"], v
 
 
+# ---------------------------------------------------------------- fontes
+def test_athena_respondeu_e_apify_nao_foi_preciso():
+    coletados = coletar([linha(i) for i in range(12)], id_execucao="exec-1")
+    fontes = coletados[0]["resumo_coleta"]["fontes"]
+    assert fontes["athena"]["respondeu"] and fontes["athena"]["consultas_ok"] == 2 and not fontes["athena"]["falhas"]
+    assert fontes["apify"]["consultada"] is False and "não consultado" in fontes["apify"]["motivo"]
+    v = _v(resultado_da_coleta(coletados), "Cada fonte consultada respondeu")
+    assert v["ok"] is True and v["encontrado"].startswith("Athena: respondeu (12 anúncios) | Apify: não consultado"), v
+
+
+def test_falha_de_um_subtipo_do_athena_fica_registrada():
+    coletados = coletar([linha(i) for i in range(12)], falhar={"terreno"}, id_execucao="exec-1")
+    falhas = coletados[0]["resumo_coleta"]["fontes"]["athena"]["falhas"]
+    assert falhas == ["terreno: Athena falhou em terreno"], falhas
+    v = _v(resultado_da_coleta(coletados), "Cada fonte consultada respondeu")
+    assert v["ok"] is True and "falhas registradas: terreno: Athena falhou em terreno" in v["encontrado"], v
+
+
+def test_falha_do_apify_fica_registrada_sem_o_token():
+    def apify_quebrado(*a, **k):
+        raise RuntimeError("500 Server Error for url https://api.apify.com/v2/acts/x/runs?token=segredo123")
+    original = ag1.APIFY_TOKEN
+    ag1.APIFY_TOKEN = "segredo123"
+    try:
+        coletados = coletar([linha(i) for i in range(5)], apify=apify_quebrado, id_execucao="exec-1")
+    finally:
+        ag1.APIFY_TOKEN = original
+    apify = coletados[0]["resumo_coleta"]["fontes"]["apify"]
+    assert apify["consultada"] and apify["respondeu"] is False and "menos de 10" in apify["motivo"], apify
+    assert "token=***" in apify["erro"] and "segredo123" not in apify["erro"], apify
+    v = _v(resultado_da_coleta(coletados), "Cada fonte consultada respondeu")
+    assert v["ok"] is True and "Apify: falhou, registrado" in v["encontrado"], v
+
+
+def test_erro_interno_do_apify_volta_na_situacao():
+    import requests
+    original_post, original_token = ag1.requests.post, ag1.APIFY_TOKEN
+
+    def post_quebrado(url, **_):
+        raise requests.ConnectionError(f"falhou {url}")
+    ag1.requests.post, ag1.APIFY_TOKEN = post_quebrado, "segredo123"
+    situacao = {}
+    try:   # a funcao real (sem ambiente(), que troca o Apify por um falso); falha antes de gravar
+        assert ag1._coletar_ocrad("Curitiba, PR", "house", "Centro", situacao=situacao) == []
+    finally:
+        ag1.requests.post, ag1.APIFY_TOKEN = original_post, original_token
+    assert situacao["erro"].startswith("erro ao iniciar: falhou") and "segredo123" not in situacao["erro"], situacao
+
+
+def test_fonte_sem_resposta_e_sem_falha_registrada_falha():
+    r = resultado_da_coleta([])
+    r["resumo_coleta"] = {"fontes": {"athena": {"consultada": True, "respondeu": False, "falhas": []}}}
+    v = _v(r, "Cada fonte consultada respondeu")
+    assert v["ok"] is False and "nenhuma falha foi registrada" in v["encontrado"], v
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

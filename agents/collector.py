@@ -1293,10 +1293,17 @@ def _normalizar_ocrad(imovel: dict) -> dict:
     }
 
 
+def _sem_token(texto) -> str:
+    """Mensagem de erro sem o token do Apify (as URLs das chamadas levam ?token=...)."""
+    texto = str(texto)
+    return texto.replace(APIFY_TOKEN, "***") if APIFY_TOKEN else texto
+
+
 def _coletar_ocrad(
     localizacao: str,
     tipo_imovel: str,
     bairro: str,
+    situacao: dict | None = None,
 ) -> list[dict]:
     """
     Coleta imoveis via Apify (ocrad/brazil-real-estate-scraper).
@@ -1307,10 +1314,19 @@ def _coletar_ocrad(
       3. Actor raspa cada portal (com JS) e retorna os anuncios
       4. Normaliza para o schema padrao
       5. Extrai publishedAt via requests.get + regex (VivaReal/ZAP)
+
+    situacao : dict (opcional)
+        Recebe "erro" quando a coleta falha (para registrar a falha da fonte; a
+        mensagem sai sem o token).
     """
+    def _falhou(mensagem):
+        if situacao is not None:
+            situacao["erro"] = _sem_token(mensagem)
+        return []
+
     if not APIFY_TOKEN:
         logger.warning("[Ag1][Apify] APIFY_TOKEN nao configurado - pulando coleta")
-        return []
+        return _falhou("APIFY_TOKEN não configurado")
 
     token_ocrad = APIFY_TOKEN
 
@@ -1322,7 +1338,7 @@ def _coletar_ocrad(
     urls = _montar_urls_listagem(tipo_imovel, bairro, cidade, estado)
     if not urls:
         logger.warning("[Ag1][Apify] Nenhuma URL de listagem montada")
-        return []
+        return _falhou("nenhuma URL de listagem montada")
 
     logger.info(f"[Ag1][Apify] {len(urls)} URLs de listagem para raspar")
     for url, limite in urls:
@@ -1355,7 +1371,7 @@ def _coletar_ocrad(
         logger.info(f"[Ag1][Apify] run iniciado: {run_id}")
     except Exception as e:
         logger.error(f"[Ag1][Apify] Erro ao iniciar run: {e}")
-        return []
+        return _falhou(f"erro ao iniciar: {e}")
 
     # Polling ate concluir. Nao baixa dataset se a execucao ainda estiver RUNNING.
     url_status = f"{APIFY_BASE_URL}/actor-runs/{run_id}?token={token_ocrad}"
@@ -1373,7 +1389,7 @@ def _coletar_ocrad(
                 break
             if ultimo_status in ("FAILED", "ABORTED", "TIMED-OUT"):
                 logger.error(f"[Ag1][Apify] run falhou: {ultimo_status}")
-                return []
+                return _falhou(f"execução terminou com {ultimo_status}")
         except Exception as exc:
             logger.warning(f"[Ag1][Apify] Falha temporaria consultando status: {exc}")
         time.sleep(10)
@@ -1382,7 +1398,7 @@ def _coletar_ocrad(
         logger.error(
             f"[Ag1][Apify] timeout aguardando run {run_id}; ultimo_status={ultimo_status or 'desconhecido'}"
         )
-        return []
+        return _falhou(f"tempo esgotado esperando a execução (último status: {ultimo_status or 'desconhecido'})")
 
     # Baixa resultados somente depois de SUCCEEDED.
     try:
@@ -1394,7 +1410,7 @@ def _coletar_ocrad(
             raise RuntimeError("Dataset do Apify nao retornou uma lista")
     except Exception as e:
         logger.error(f"[Ag1][Apify] Erro ao baixar resultados: {e}")
-        return []
+        return _falhou(f"erro ao baixar os resultados: {e}")
 
     logger.info(f"[Ag1][Apify] {len(brutos)} brutos coletados")
     salvar_dados(brutos, "imoveis_brutos_ocrad_ag1.json")
@@ -1687,6 +1703,13 @@ def coletar_imoveis(
     # Athena (cobra pelo que le, nao pelo que devolve).
     FATOR_BUSCA = 2
 
+    # Situacao de cada fonte (verificacoes automaticas: cada fonte consultada
+    # respondeu ou a falha esta registrada). Antes as falhas so iam para o log.
+    fontes = {
+        "athena": {"consultada": True, "respondeu": False, "consultas_ok": 0, "falhas": [], "anuncios": 0},
+        "apify": {"consultada": False, "respondeu": None, "motivo": None, "erro": None, "anuncios": 0},
+    }
+
     # ── FONTE PRINCIPAL: Amazon Athena ────────────────────────────────
     athena_imoveis: list[dict] = []
     try:
@@ -1724,8 +1747,10 @@ def coletar_imoveis(
                         limit=limite_tipo * FATOR_BUSCA,
                     )
                 queries_executadas += 1
+                fontes["athena"]["consultas_ok"] += 1
             except Exception as exc:
                 logger.warning(f"[Ag1][Athena] Falha no subtipo {tipo_sql}: {exc}")
+                fontes["athena"]["falhas"].append(f"{tipo_sql}: {exc}")
                 continue
 
             mesma_rua = sum(
@@ -1755,12 +1780,14 @@ def coletar_imoveis(
                         limit=limite_tipo * FATOR_BUSCA,
                     )
                     queries_executadas += 1
+                    fontes["athena"]["consultas_ok"] += 1
                     athena_imoveis.extend(resultado_cidade)
                     logger.info(
                         f"[Ag1][Athena][Cidade] {tipo_sql}: {len(resultado_cidade)} retornados"
                     )
                 except Exception as exc:
                     logger.warning(f"[Ag1][Athena][Cidade] Falha no subtipo {tipo_sql}: {exc}")
+                    fontes["athena"]["falhas"].append(f"{tipo_sql} (cidade): {exc}")
 
         # Normalizacao registro a registro: um dado ruim nao derruba toda a fonte.
         normalizados_athena: list[dict] = []
@@ -1852,7 +1879,10 @@ def coletar_imoveis(
     except Exception as exc:
         # Inclui ausencia de boto3/credenciais/role/servico. O fallback continua funcionando.
         logger.warning(f"[Ag1][Athena] Indisponivel: {exc}")
+        fontes["athena"]["falhas"].append(f"indisponível: {exc}")
         athena_imoveis = []
+    fontes["athena"]["respondeu"] = fontes["athena"]["consultas_ok"] > 0
+    fontes["athena"]["anuncios"] = len(athena_imoveis)
 
     # Diagnostico seguro; nunca deve derrubar a coleta.
     if athena_imoveis:
@@ -1899,17 +1929,22 @@ def coletar_imoveis(
         )
         logger.info("=" * 55)
         t0 = time.time()
+        fontes["apify"].update(consultada=True, motivo=f"Athena com {qtd_util_fallback} anúncios úteis/locais (menos de 10)")
         try:
-            ocrad = _coletar_ocrad(localizacao, tipo_imovel, bairro)
+            ocrad = _coletar_ocrad(localizacao, tipo_imovel, bairro, situacao=fontes["apify"])
         except Exception as exc:
             logger.warning(f"[Ag1][Apify] Fallback falhou sem interromper o agente: {exc}")
+            fontes["apify"]["erro"] = _sem_token(exc)
             ocrad = []
+        fontes["apify"]["respondeu"] = not fontes["apify"]["erro"]
+        fontes["apify"]["anuncios"] = len(ocrad)
         t_ocrad = time.time() - t0
         logger.info(f"[Ag1][Apify] {len(ocrad)} imoveis | tempo: {t_ocrad:.1f}s")
     else:
         logger.info(
             f"[Ag1][Athena] Suficiente: {qtd_util_fallback} imoveis uteis/locais; Apify nao necessario"
         )
+        fontes["apify"]["motivo"] = f"não consultado: Athena com {qtd_util_fallback} anúncios úteis/locais"
 
     # ── COMBINA + FILTRA + DEDUP ──────────────────────────────────────
     todos = athena_imoveis + ocrad
@@ -2031,10 +2066,13 @@ def coletar_imoveis(
     # id_execucao e horario desta coleta em cada anuncio (verificacoes automaticas:
     # os dados sao desta execucao, nao de uma rodada anterior).
     coletado_em = datetime.now().isoformat(timespec="seconds")
+    # Resumo da coleta (o mesmo para todos os anuncios): situacao de cada fonte.
+    resumo_coleta = {"id_execucao": id_execucao, "coletado_em": coletado_em, "fontes": fontes}
     for im in combinados:
         im["escopo_busca"] = escopo
         im["id_execucao"] = id_execucao
         im["coletado_em"] = coletado_em
+        im["resumo_coleta"] = resumo_coleta
 
     # JSONs continuam como snapshots/debug. O pipeline deve usar o retorno em memoria.
     # Sempre sobrescreve, inclusive com [], para nunca servir dados de outra coleta:

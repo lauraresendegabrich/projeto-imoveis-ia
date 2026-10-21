@@ -149,11 +149,7 @@ def _agente1(resultado: dict) -> list[dict]:
            f"; coletados entre {horarios[0]} e {horarios[-1]}" if horarios else ""),
         bool(id_exec) and not de_outra and not sem_horario,
     ))
-    saida.append(_v(
-        "Agente 1", "Cada fonte consultada respondeu, ou a falha está registrada",
-        "situação de cada fonte (Athena, Apify)",
-        "não verificável: o Agente 1 só escreve as falhas de fonte no log", None,
-    ))
+    saida.append(_fontes(resultado))
     saida.append(_v(
         "Agente 1", "encontrados = mantidos + repetidos",
         "total antes de juntar os repetidos = mantidos + repetidos",
@@ -161,6 +157,31 @@ def _agente1(resultado: dict) -> list[dict]:
         f"(mantidos {len(anuncios)}, repetidos {len(resultado.get('duplicatas_descartadas') or [])})", None,
     ))
     return saida
+
+
+def _fontes(resultado: dict) -> dict:
+    """Cada fonte consultada respondeu, ou a falha esta registrada."""
+    fontes = (resultado.get("resumo_coleta") or {}).get("fontes")
+    nome = "Cada fonte consultada respondeu, ou a falha está registrada"
+    esperado = "cada fonte consultada: respondeu, ou falhou com o erro registrado"
+    if not fontes:
+        return _v("Agente 1", nome, esperado, "não verificável: coleta sem o registro das fontes", None)
+    partes, ok = [], True
+    for fonte, s in fontes.items():
+        rotulo = {"athena": "Athena", "apify": "Apify"}.get(fonte, fonte)
+        erros = list(s.get("falhas") or []) + ([s["erro"]] if s.get("erro") else [])
+        if not s.get("consultada"):
+            partes.append(f"{rotulo}: {s.get('motivo') or 'não consultado'}")
+            continue
+        if s.get("respondeu"):
+            partes.append(f"{rotulo}: respondeu ({s.get('anuncios', 0)} anúncios)"
+                          + (f"; falhas registradas: {'; '.join(erros)}" if erros else ""))
+        elif erros:
+            partes.append(f"{rotulo}: falhou, registrado ({'; '.join(erros)})")
+        else:
+            ok = False
+            partes.append(f"{rotulo}: não respondeu e nenhuma falha foi registrada")
+    return _v("Agente 1", nome, esperado, " | ".join(partes), ok)
 
 
 # =============================================================================

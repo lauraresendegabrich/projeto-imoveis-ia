@@ -48,6 +48,8 @@ def montar(area_terreno=None, n_casas=6, n_terrenos=2):
         "imovel_alvo": {"cidade": "Curitiba", "estado": "PR", "tipo": "house", "area": 120,
                         "geocodificacao_nivel": "rua"},
         "localizacao_alvo": "rua",
+        "resumo_coleta": {"fontes": {"athena": {"consultada": True, "respondeu": True, "anuncios": 9, "falhas": []},
+                                     "apify": {"consultada": False, "motivo": "não consultado"}}},
         "falhas": [],
         "comparaveis": casas + [reprovada],
         "terrenos": terrenos,
@@ -89,7 +91,6 @@ def test_base_tudo_passa_menos_o_nao_verificavel():
     falhas = [v for v in vs if v["ok"] is False]
     assert not falhas, falhas
     assert [v["verificacao"] for v in vs if v["ok"] is None] == [
-        "Cada fonte consultada respondeu, ou a falha está registrada",
         "encontrados = mantidos + repetidos",
     ]
     assert all(set(v) == {"agente", "verificacao", "esperado", "encontrado", "ok"} for v in vs)
@@ -245,7 +246,7 @@ def test_tela_mostra_a_lista_com_falhas_primeiro():
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     rotulo = next(e.label for e in at.expander if e.label.startswith("🧪 Verificações automáticas"))
-    assert "1 ❌ · 2 ⚪" in rotulo, rotulo
+    assert "1 ❌ · 1 ⚪" in rotulo, rotulo
     lista = next(m.value for m in at.markdown if m.value.startswith("- ❌"))
     itens = [l for l in lista.splitlines() if l.startswith("- ")]
     assert itens[0].startswith("- ❌ **Geral** · Os resultados dos Agentes 2 a 5") and itens[1].startswith("- ⚪"), itens[:2]

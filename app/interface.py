@@ -938,6 +938,8 @@ with area_principal.container():
             "resumo": resumo,
             # Para as verificacoes automaticas (services/verificacoes.py).
             "imovel_alvo": imovel_alvo,
+            # Situacao de cada fonte e contagens da coleta (Agente 1).
+            "resumo_coleta": imoveis_coletados[0].get("resumo_coleta") if imoveis_coletados else None,
             "falhas": falhas_execucao,
             "localizacao_alvo": localizacao_alvo,
         }
