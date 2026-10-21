@@ -644,8 +644,8 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
       terreno/comercial nunca), bairro E rua incompativeis.
       Vetos de atributo (impedem so a CONFIRMACAO; ainda pode ser suspeito, pois
       anuncios tem erros de digitacao): quartos diferentes, area > 10% (casa) /
-      > 3% (apto); no apto tambem vagas/suites diferentes. Vagas=0 do alvo e o
-      padrao do formulario e conta como "nao informado".
+      > 3% (apto); no apto tambem vagas/suites diferentes. Vagas vazias no
+      formulario (None) contam como "nao informado"; 0 e "sem vaga".
 
       Identidade confirmada (sem veto), qualquer um:
         - preco informado pelo usuario identico (<=0,5%) e
@@ -680,9 +680,9 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
         return (False, False, [motivo], 0.0)
     if not identidade.local_compativel(imovel_alvo, comparavel):
         return (False, False, ["veto_local"], 0.0)
-    # O formulario tem vagas=0 como padrao: nao da para distinguir "sem vaga" de
-    # "nao informado", entao vagas=0 do alvo nao veta.
-    ignorar = () if _para_float(imovel_alvo.get("parkingSpaces") or imovel_alvo.get("vagas")) else ("vagas",)
+    # Vagas do formulario: vazio (None) = nao informado e nao veta; 0 = sem vaga e vale
+    # como valor (antes o formulario comecava em 0 e 0 tambem era "nao informado").
+    ignorar = () if identidade._campo(imovel_alvo, "parkingSpaces", "vagas") is not None else ("vagas",)
     # Vetos de atributo (area, quartos, vagas, suites) so impedem a CONFIRMACAO:
     # anuncios com erro de digitacao (ex.: 1 vaga em vez de 3, mesmo texto, mesmo
     # preco) ainda podem ser o alvo e precisam ao menos aparecer como suspeitos.
@@ -705,8 +705,9 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     q_c = _int(comparavel.get("bedrooms") or comparavel.get("quartos"))
     b_a = _int(imovel_alvo.get("bathrooms") or imovel_alvo.get("banheiros"))
     b_c = _int(comparavel.get("bathrooms") or comparavel.get("banheiros"))
-    v_a = _int(imovel_alvo.get("parkingSpaces") or imovel_alvo.get("vagas"))
-    v_c = _int(comparavel.get("parkingSpaces") or comparavel.get("vagas"))
+    # _campo (e nao `or`): 0 vagas e um valor, nao "vazio".
+    v_a = _int(identidade._campo(imovel_alvo, "parkingSpaces", "vagas"))
+    v_c = _int(identidade._campo(comparavel, "parkingSpaces", "vagas"))
     comodos_iguais = (q_a is not None and q_a == q_c) and (b_a is not None and b_a == b_c) and (v_a is not None and v_a == v_c)
 
     # =====================================================================

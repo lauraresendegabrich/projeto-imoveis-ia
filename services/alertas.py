@@ -165,8 +165,10 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
     if possiveis:
         alertas.append(_alerta(
             "possivel_alvo_no_calculo",
-            f"{len(possiveis)} anúncio(s) com perfil do próprio imóvel (mesmo bairro e área, preço "
-            f"ou cômodos parecidos, ou mesmo prédio) entraram no cálculo.",
+            (f"1 anúncio com perfil do próprio imóvel (mesmo bairro e área, preço ou cômodos "
+             f"parecidos, ou mesmo prédio) entrou no cálculo." if len(possiveis) == 1 else
+             f"{len(possiveis)} anúncios com perfil do próprio imóvel (mesmo bairro e área, preço "
+             f"ou cômodos parecidos, ou mesmo prédio) entraram no cálculo."),
             len(possiveis), 0, [_anuncio(c) for c in possiveis],
         ))
 
@@ -253,7 +255,8 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
         n_anuncios = sum(len(g) for g in repetidos)
         alertas.append(_alerta(
             "possivel_repetido_no_calculo",
-            f"Possível repetido no cálculo: {n_anuncios} anúncios, em {len(repetidos)} grupo(s), têm o "
+            f"Possível repetido no cálculo: {n_anuncios} anúncios, em "
+            f"{'1 grupo' if len(repetidos) == 1 else f'{len(repetidos)} grupos'}, têm o "
             f"mesmo preço, a mesma área e o mesmo número de endereço e continuam no cálculo. Podem "
             f"ser o mesmo imóvel anunciado mais de uma vez (sem prova suficiente para juntar) ou "
             f"casas iguais de um mesmo condomínio ou loteamento. Se forem o mesmo imóvel, ele está "
@@ -277,8 +280,10 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
                             "areas_entre_portais": c["areas_entre_portais"]})
         alertas.append(_alerta(
             "area_diferente_entre_portais",
-            f"Área diferente entre portais: {len(divergentes)} imóvel(is) usados no cálculo aparecem "
-            f"em mais de um portal com áreas diferentes (mais de 5%). Foi usada a menor área, porque "
+            (f"Área diferente entre portais: 1 imóvel usado no cálculo aparece "
+             if len(divergentes) == 1 else
+             f"Área diferente entre portais: {len(divergentes)} imóveis usados no cálculo aparecem ")
+            + f"em mais de um portal com áreas diferentes (mais de 5%). Foi usada a menor área, porque "
             f"o erro mais comum é um portal mostrar a área do terreno no lugar da área construída. "
             f"Se a área certa for a maior, o valor do m² desse imóvel está mais alto do que deveria. "
             f"Confira os anúncios.",

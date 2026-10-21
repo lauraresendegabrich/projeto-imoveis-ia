@@ -225,14 +225,12 @@ with st.sidebar:
         rua = st.text_input("Rua", value=preset.get("rua", ""))
         numero = st.text_input("Número", value=preset.get("numero", ""))
         bairro = st.text_input("Bairro", value=preset.get("bairro", ""))
-        col_cidade, col_estado = st.columns([3, 1])
-        with col_cidade:
-            cidade = st.text_input("Cidade", value=preset.get("cidade", ""))
-        with col_estado:
-            estados_br = ["", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
-            estado_default = preset.get("estado", "")
-            estado_idx = estados_br.index(estado_default) if estado_default in estados_br else 0
-            estado = st.selectbox("UF", estados_br, index=estado_idx)
+        cidade = st.text_input("Cidade", value=preset.get("cidade", ""))
+        # UF em linha propria (antes ao lado da cidade): legivel com a barra lateral estreita.
+        estados_br = ["", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
+        estado_default = preset.get("estado", "")
+        estado_idx = estados_br.index(estado_default) if estado_default in estados_br else 0
+        estado = st.selectbox("UF", estados_br, index=estado_idx)
 
         st.markdown("**🏗️ Características**")
         tipo = st.selectbox("Tipo", ["Casa", "Apartamento"], index=["Casa", "Apartamento"].index(preset.get("tipo", "Casa")))
@@ -242,7 +240,9 @@ with st.sidebar:
             # "179", "179,5", "1.250,75". Lido depois do envio por ler_numero_br.
             texto_area = st.text_input("Área construída (m²)", value="", placeholder="Ex.: 179,50")
             quartos = st.number_input("Quartos", min_value=0, value=preset.get("quartos", 0))
-            vagas = st.number_input("Vagas", min_value=0, value=preset.get("vagas", 0))
+            # Comeca vazio: vazio = nao informado, 0 = sem vaga (a checagem do proprio
+            # anuncio so compara vagas quando foram informadas).
+            vagas = st.number_input("Vagas", min_value=0, value=preset.get("vagas"), placeholder="Não informado")
         with col_b:
             texto_area_terreno = st.text_input(
                 "Terreno (m²)", value="", placeholder="Ex.: 300" if tipo == "Casa" else "Apartamento: deixe vazio",
@@ -250,6 +250,7 @@ with st.sidebar:
             banheiros = st.number_input("Banheiros", min_value=0, value=preset.get("banheiros", 0))
             # Texto (e nao number_input) para aceitar "1.200.000" e "1.200.000,00".
             texto_preco_anunciado = st.text_input("Preço (R$, opcional)", value="", placeholder="Ex.: 1.200.000")
+        st.caption("Casa: sem a área do terreno, o cálculo usa só o m² total das casas e fica menos preciso.")
 
         st.markdown("**📝 Descrição** (opcional)")
         descricao = st.text_area("Descrição do imóvel", value="", height=80)
@@ -411,7 +412,7 @@ with area_principal.container():
             "tipo": tipo,
             "area_digitada": texto_area, "area_lida": area,
             "terreno_digitado": texto_area_terreno, "terreno_lido": area_terreno,
-            "quartos": int(quartos), "banheiros": int(banheiros), "vagas": int(vagas),
+            "quartos": int(quartos), "banheiros": int(banheiros), "vagas": int(vagas) if vagas is not None else None,
             "preco_digitado": texto_preco_anunciado, "preco_lido": preco_anunciado or None,
             "descricao": descricao or None, "descricao_caracteres": len(descricao or ""),
             "fotos": [l.strip() for l in (fotos_texto or "").splitlines() if l.strip()],
@@ -448,7 +449,10 @@ with area_principal.container():
             "parkingSpaces": vagas,
             "neighborhood": bairro,
             "street": rua,
-            "description": descricao or f"{tipo} com {area}m², {quartos} quartos, {banheiros} banheiros, {vagas} vagas - {bairro}, {cidade}/{estado}",
+            "description": descricao or (
+                f"{tipo} com {area}m², {quartos} quartos, {banheiros} banheiros"
+                + (f", {vagas} vagas" if vagas is not None else "") + f" - {bairro}, {cidade}/{estado}"
+            ),
             # Texto generico gerado acima: nao serve de prova de identidade no Ag2.
             "descricao_gerada": not descricao,
             "images": [],
@@ -541,6 +545,9 @@ with area_principal.container():
         progress = st.progress(0)
         status_box = st.empty()
         log_area = st.container()
+        if tipo == "Casa" and not area_terreno:
+            with log_area:
+                st.info("ℹ️ Sem a área do terreno, o cálculo usa só o m² total das casas e fica menos preciso.")
         if alvo_sem_localizacao:
             with log_area:
                 st.warning(
@@ -622,11 +629,12 @@ with area_principal.container():
             for dup in (im.get("duplicatas") or [])
         ]
         with log_area:
-            st.success(f"✅ {len(imoveis_coletados)} imóveis à venda encontrados na região")
+            st.success(f"✅ {contagem(len(imoveis_coletados), 'imóvel à venda encontrado', 'imóveis à venda encontrados')} na região")
             if duplicatas_descartadas:
                 st.caption(
-                    f"ℹ️ {len(duplicatas_descartadas)} anúncio(s) repetido(s) do mesmo imóvel "
-                    f"(em outro portal ou por outra imobiliária) foram descartados."
+                    f"ℹ️ {contagem(len(duplicatas_descartadas), 'anúncio repetido', 'anúncios repetidos')} do mesmo imóvel "
+                    f"(em outro portal ou por outra imobiliária) "
+                    f"{'foi descartado' if len(duplicatas_descartadas) == 1 else 'foram descartados'}."
                 )
             # Mostra o que a busca (Agente 1) realmente fez: o escopo vem dela, e a
             # contagem na rua usa a mesma comparacao da busca (sem acento/maiusculas).
@@ -636,8 +644,8 @@ with area_principal.container():
             n_proximidade = sum(1 for im in imoveis_coletados if im.get("origem_busca") == "proximidade")
             if n_proximidade:
                 st.caption(
-                    f"ℹ️ {n_proximidade} anúncio(s) vieram por proximidade (até 1,5 km do imóvel, fora da "
-                    f"rua e do bairro). Só entram no cálculo se estiverem dentro da zona do imóvel."
+                    f"ℹ️ {contagem(n_proximidade, 'anúncio veio', 'anúncios vieram')} por proximidade (até 1,5 km do "
+                    f"imóvel, fora da rua e do bairro). Só entram no cálculo se estiverem dentro da zona do imóvel."
                 )
             if (rua or bairro) and escopo_busca == "cidade":
                 local = " / ".join(x for x in (rua, bairro) if x)
@@ -645,7 +653,7 @@ with area_principal.container():
             elif rua and escopo_busca in ("rua+bairro", "rua+bairro+proximidade"):
                 na_rua = sum(1 for im in imoveis_coletados if _mesma_rua(im.get("street") or im.get("rua"), rua))
                 if na_rua > 0:
-                    st.caption(f"ℹ️ {na_rua} imóveis encontrados na mesma rua ({rua})")
+                    st.caption(f"ℹ️ {contagem(na_rua, 'imóvel encontrado', 'imóveis encontrados')} na mesma rua ({rua})")
                 elif bairro:
                     st.caption(f"ℹ️ Nenhum imóvel encontrado na mesma rua ({rua}). Usando imóveis do bairro {bairro}.")
 
@@ -671,7 +679,7 @@ with area_principal.container():
         resumo = resultado_ag2.get("resumo", {})
 
         with log_area:
-            st.success(f"✅ {resumo.get('cluster_a', 0)} imóveis parecidos com o seu (mesma faixa de área, quartos e preço)")
+            st.success(f"✅ {contagem(resumo.get('cluster_a', 0), 'imóvel parecido', 'imóveis parecidos')} com o seu (mesma faixa de área, quartos e preço)")
 
         if not comparaveis:
             status_box.error("❌ Nenhum imóvel comparável encontrado. O bairro pode ter poucos anúncios.")
@@ -804,7 +812,7 @@ with area_principal.container():
                 score_qual = resultado_ag3.get("resumo", {}).get("score_qualitativo_medio", 0)
                 total_analisados = resultado_ag3.get("resumo", {}).get("total_analisados", 0)
                 with log_area:
-                    st.success(f"✅ Avaliou fotos e descrição de **{total_analisados} imóveis** (estado de conservação, padrão de acabamento)")
+                    st.success(f"✅ Avaliou fotos e descrição de **{contagem(total_analisados, 'imóvel', 'imóveis')}** (estado de conservação, padrão de acabamento)")
                     if total_analisados <= 3:
                         st.caption("ℹ️ Poucos imóveis avaliados — o bairro tem poucos anúncios próximos ao seu endereço. O valor estimado pode ser menos preciso.")
             except Exception as e:
@@ -1095,7 +1103,7 @@ with area_principal.container():
             _resumo_ag2 = resultado.get("resumo", {})
             terrenos_sep = _resumo_ag2.get("terrenos_separados", _resumo_ag2.get("terrenos_excluidos", 0))
             with st.expander("🔍 Agente Coletor de Dados"):
-                st.write(f"Encontramos **{total_encontrados}** imóveis à venda no bairro {bairro}, {cidade}/{estado}.")
+                st.write(f"Encontramos **{contagem(total_encontrados, 'imóvel', 'imóveis')}** à venda no bairro {bairro}, {cidade}/{estado}.")
                 col_c1, col_c2, col_c3 = st.columns(3)
                 with col_c1:
                     st.metric("Total", total_encontrados, f"{len(portais)} fontes")
@@ -1110,15 +1118,19 @@ with area_principal.container():
             terrenos_sep = _resumo_ag2.get("terrenos_separados", _resumo_ag2.get("terrenos_excluidos", 0))
             with st.expander("📊 Agente Identificador de Comparáveis"):
                 # Monta texto compacto em um único bloco markdown
-                linhas = [f"Dos {total_encontrados} imóveis encontrados:"]
+                linhas = [f"Dos {contagem(total_encontrados, 'imóvel encontrado', 'imóveis encontrados')}:"]
                 if terrenos_sep > 0:
-                    linhas.append(f"- {terrenos_sep} são terrenos (não entram na comparação direta)")
-                    linhas.append(f"- {total_encontrados - terrenos_sep} foram analisados pela IA para identificar os mais parecidos com o seu")
+                    analisados = total_encontrados - terrenos_sep
+                    linhas.append(f"- {contagem(terrenos_sep, 'é terreno', 'são terrenos')} (não entram na comparação direta)")
+                    linhas.append(f"- {contagem(analisados, 'foi analisado', 'foram analisados')} pela IA para identificar os mais parecidos com o seu")
                 else:
                     linhas.append(f"- Todos foram analisados pela IA para identificar os mais parecidos com o seu")
-                linhas.append(f"- **{cluster_a}** classificados como comparáveis (perfil similar ao seu)")
+                linhas.append(
+                    f"- **{cluster_a}** {'classificado como comparável' if cluster_a == 1 else 'classificados como comparáveis'} "
+                    f"(perfil similar ao seu)"
+                )
                 if cluster_b > 0:
-                    linhas.append(f"- {cluster_b} descartados (perfil muito diferente: área, quartos ou padrão incompatível)")
+                    linhas.append(f"- {contagem(cluster_b, 'descartado', 'descartados')} (perfil muito diferente: área, quartos ou padrão incompatível)")
                 st.markdown("\n".join(linhas))
 
                 # Zona: mostra comparaveis e terrenos na zona
@@ -1137,10 +1149,16 @@ with area_principal.container():
                         f"{'está' if n_zona == 1 else 'estão'} na zona homogênea (raio de {raio} m){nota_alvo}"
                     )
                 if terrenos_sep > 0:
-                    if len(terrenos_zona_list) == terrenos_sep:
-                        zona_linhas.append(f"- Todos os **{terrenos_sep}** terrenos estão na zona homogênea (serão usados no cálculo do m² do terreno)")
-                    elif len(terrenos_zona_list) > 0:
-                        zona_linhas.append(f"- Dos {terrenos_sep} terrenos, **{len(terrenos_zona_list)}** estão na zona homogênea (serão usados no cálculo do m² do terreno)")
+                    n_ter_zona = len(terrenos_zona_list)
+                    if n_ter_zona == terrenos_sep == 1:
+                        zona_linhas.append("- O único terreno está na zona homogênea (pode entrar no cálculo do m² do terreno)")
+                    elif n_ter_zona == terrenos_sep:
+                        zona_linhas.append(f"- Todos os **{terrenos_sep}** terrenos estão na zona homogênea (podem entrar no cálculo do m² do terreno)")
+                    elif n_ter_zona > 0:
+                        zona_linhas.append(
+                            f"- Dos {contagem(terrenos_sep, 'terreno', 'terrenos')}, **{n_ter_zona}** "
+                            f"{'está' if n_ter_zona == 1 else 'estão'} na zona homogênea (podem entrar no cálculo do m² do terreno)"
+                        )
                     else:
                         zona_linhas.append(f"- Nenhum terreno na zona — cálculo do m² do terreno não será aplicado")
                 st.markdown("\n".join(zona_linhas))
@@ -1331,7 +1349,8 @@ with area_principal.container():
                                 chave = d.get("Anúncio mantido") or (d.get("Mantido"), d.get("Preço"), d.get("Área"))
                                 grupos_dup.setdefault(chave, []).append(d)
                             with st.expander(
-                                f"🔁 Anúncios repetidos descartados ({len(dups)} anúncio(s) de {len(grupos_dup)} imóvel(is))"
+                                f"🔁 Anúncios repetidos descartados ({contagem(len(dups), 'anúncio', 'anúncios')} de "
+                                f"{contagem(len(grupos_dup), 'imóvel', 'imóveis')})"
                             ):
                                 st.caption(
                                     "O mesmo imóvel apareceu em mais de um anúncio. Ficou só um anúncio de "
@@ -1356,7 +1375,7 @@ with area_principal.container():
                                         "Preço": preco_d,
                                         "Área": f"{float(d['Área']):.0f}m²" if d.get("Área") else "-",
                                         "Anúncio que ficou": f"[{d['Mantido']}]({d['Anúncio mantido']})" if d.get("Anúncio mantido") else d.get("Mantido"),
-                                        "Descartados": f"{len(grupo)} anúncio(s): " + ", ".join(links_desc),
+                                        "Descartados": f"{contagem(len(grupo), 'anúncio', 'anúncios')}: " + ", ".join(links_desc),
                                         "Motivo": ", ".join(motivos),
                                     })
                                 st.markdown(pd.DataFrame(linhas_dup).to_markdown(index=False), unsafe_allow_html=True)
@@ -1536,33 +1555,6 @@ with area_principal.container():
                             total_all = total_pois_faixa + total_transporte
                             st.caption(f"Total: {total_all} pontos de interesse mapeados até 1500m")
 
-                        # Imobiliária mais próxima
-                        imob = infra_full.get("imobiliaria_proxima", {})
-                        if imob and imob.get("encontrada"):
-                            st.markdown("---")
-                            st.markdown("**📞 Imobiliária mais próxima**")
-                            nome_imob = imob.get("nome", "?")
-                            tel_imob = imob.get("telefone", "")
-                            end_imob = imob.get("endereco", "")
-                            dist_imob = imob.get("distancia_metros", "?")
-                            email_imob = imob.get("email", "")
-                            site_imob = imob.get("website", "")
-                            horario_imob = imob.get("opening_hours", "")
-
-                            st.write(f"**{nome_imob}**")
-                            infos_imob = []
-                            if tel_imob:
-                                infos_imob.append(f"📱 {tel_imob}")
-                            if email_imob:
-                                infos_imob.append(f"✉️ {email_imob}")
-                            if site_imob:
-                                infos_imob.append(f"🌐 [{site_imob}]({site_imob})")
-                            if infos_imob:
-                                st.markdown(" | ".join(infos_imob))
-                            if end_imob:
-                                st.caption(f"📍 {end_imob} ({dist_imob}m)")
-                            if horario_imob:
-                                st.caption(f"🕐 {horario_imob}")
 
             # Ag.5
             m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
@@ -1609,8 +1601,8 @@ with area_principal.container():
                 st.markdown(
                     f"**1. Imóveis usados como referência**  \n"
                     f"O valor vem dos anúncios comparáveis na sua zona homogênea. "
-                    f"Construção: **{n_constr} imóvel(is)**. "
-                    + (f"Terreno: **{n_terreno} imóvel(is)**." if terreno_aplicado else
+                    f"Construção: **{contagem(n_constr, 'imóvel', 'imóveis')}**. "
+                    + (f"Terreno: **{contagem(n_terreno, 'terreno', 'terrenos')}**." if terreno_aplicado else
                        "Terreno não entrou (imóvel condominial ou sem terreno/comparáveis de terreno).")
                 )
 
@@ -1670,8 +1662,11 @@ with area_principal.container():
                 n_alvo_calc = resultado.get("resumo", {}).get("anuncios_do_alvo_marcados", 0)
                 if n_alvo_calc:
                     st.caption(
-                        f"🎯 {n_alvo_calc} anúncio(s) identificado(s) como o do seu próprio imóvel "
-                        f"foram **excluídos deste cálculo** para não ancorar o valor no preço pedido."
+                        (f"🎯 1 anúncio identificado como o do seu próprio imóvel foi **excluído deste cálculo**"
+                         if n_alvo_calc == 1 else
+                         f"🎯 {n_alvo_calc} anúncios identificados como o do seu próprio imóvel foram "
+                         f"**excluídos deste cálculo**")
+                        + " para não ancorar o valor no preço pedido."
                     )
 
                 # ── COMPARÁVEIS USADOS NO CÁLCULO (com link) ──────────────
@@ -1723,8 +1718,9 @@ with area_principal.container():
                         df_usados = _pd.DataFrame(linhas_all)
                         st.markdown(df_usados.to_markdown(index=False), unsafe_allow_html=True)
                         st.caption(
-                            f"{len(usados_constr)} imóvel(is) usado(s) no m² da construção e "
-                            f"{len(usados_terr)} no m² do terreno. São exatamente os anúncios que entraram na média."
+                            f"{contagem(len(usados_constr), 'imóvel usado', 'imóveis usados')} no m² da construção e "
+                            f"{contagem(len(usados_terr), 'terreno', 'terrenos')} no m² do terreno. "
+                            f"São exatamente os anúncios que entraram na média."
                         )
                         usados_todos = usados_constr + usados_terr
                         n_alvo_usado = sum(1 for u in usados_todos if u.get("eh_anuncio_do_alvo"))
@@ -1735,13 +1731,19 @@ with area_principal.container():
                         n_leilao = sum(1 for u in usados_todos if u.get("suspeita_leilao"))
                         if n_alvo_usado or n_leilao:
                             st.warning(
-                                f"⚠️ No cálculo: {n_alvo_usado} anúncio(s) do seu próprio imóvel (🎯) e "
-                                f"{n_leilao} possível(is) leilão(ões) (⚠️ leilão?). Confira pelo link — "
-                                f"imóveis assim distorcem o valor e idealmente não deveriam entrar na média."
+                                "⚠️ No cálculo: " + " e ".join(
+                                    p for p in (
+                                        contagem(n_alvo_usado, "anúncio do seu próprio imóvel (🎯)",
+                                                 "anúncios do seu próprio imóvel (🎯)") if n_alvo_usado else "",
+                                        contagem(n_leilao, "possível leilão (⚠️ leilão?)",
+                                                 "possíveis leilões (⚠️ leilão?)") if n_leilao else "",
+                                    ) if p
+                                ) + ". Confira pelo link — imóveis assim distorcem o valor e idealmente "
+                                "não deveriam entrar na média."
                             )
                         if n_possivel:
                             st.caption(
-                                f"⚠️ {n_possivel} imóvel(is) com perfil muito parecido com o seu "
+                                f"⚠️ {contagem(n_possivel, 'imóvel', 'imóveis')} com perfil muito parecido com o seu "
                                 f"(\"possível alvo\": mesma área e bairro, preço ou cômodos parecidos, ou o "
                                 f"mesmo prédio). Sem prova de que sejam o seu anúncio, continuam no cálculo."
                             )
@@ -1823,7 +1825,7 @@ with area_principal.container():
 
 Imóvel: {rua}, {numero} - {bairro}, {cidade}/{estado}
 Tipo: {tipo} | Área: {imovel_alvo_export.get('area') or 0}m² | Terreno: {imovel_alvo_export.get('area_terreno') or 0}m²
-Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas}
+Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas if vagas is not None else 'não informado'}
 
 RESULTADO DA AVALIAÇÃO
 {'-'*50}

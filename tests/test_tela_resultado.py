@@ -78,7 +78,7 @@ def test_c_aviso_do_agente5_diz_que_o_anuncio_saiu():
     r = executar_agente5({"propertyType": "casa", "area": 104, "anuncios_do_alvo_excluidos": 1}, [], comps, {}, {})
     assert r["status_avaliacao"] == "amostra_insuficiente" and r["anuncios_do_alvo_excluidos"] == 1
     aviso = next(a for a in r["avisos"] if a.startswith("Amostra insuficiente"))
-    assert "saiu do c" in aviso and "do proprio imovel" in aviso.replace("ó", "o").replace("í", "i"), aviso
+    assert "apenas 4 comparáveis de construção (o anúncio do próprio imóvel saiu do cálculo)" in aviso, aviso
 
 
 # ---------------------------------------------------------------- (d) motivo exato
@@ -154,6 +154,51 @@ def test_f_com_valor_nao_mostra_a_referencia():
     r["preco_estimado"].update(status_avaliacao="ok", avaliacao_confiavel=True)
     at = _tela(r)
     assert not any("Não é uma estimativa" in c.value for c in at.caption)
+
+
+# ---------------------------------------------------------------- (g) acentos no Agente 5
+def test_g_avisos_do_agente5_com_acento():
+    casas = [{"propertyType": "casa", "price": 500_000 + i * 10_000, "area": 100 + i} for i in range(5)]
+    r = executar_agente5({"propertyType": "casa", "area": 104}, [], casas, {}, {})
+    assert ("Área do terreno do imóvel não informada. O cálculo usou só o m² total dos comparáveis "
+            "(preço ÷ área construída).") in r["avisos"], r["avisos"]
+    r = executar_agente5({"propertyType": "casa", "area": 104}, [], casas[:1], {}, {})
+    aviso = next(a for a in r["avisos"] if a.startswith("Amostra insuficiente"))
+    assert aviso == ("Amostra insuficiente para uma estimativa confiável (apenas 1 comparável de construção; "
+                     "mínimo desejado: 5). O valor calculado é uma referência fraca, baseada em poucos anúncios."), aviso
+    assert "desconto de 10%)" in r["justificativa"] and "%%" not in r["justificativa"]
+
+
+# ---------------------------------------------------------------- (h) plural
+def test_h_um_comparavel_no_singular():
+    r = resultado_sem_valor()
+    r["comparaveis"] = r["zona_homogenea"]["comparaveis_confirmados"] = NA_ZONA[1:2]
+    r["resumo"] = {"cluster_a": 1, "total_coletados": 1}
+    at = _tela(r)
+    textos = " ".join(m.value for m in at.markdown)
+    assert "O único comparável está na zona homogênea" in textos and "Todos os 1" not in textos
+    assert "Dos 1 imóveis" not in textos and "Dos 1 imóvel encontrado:" in textos
+    assert "(is)" not in textos
+
+
+# ---------------------------------------------------------------- (j) formulario
+def test_j_formulario_vagas_vazias_uf_e_aviso_do_terreno():
+    at = AppTest.from_file("app/interface.py", default_timeout=60).run()
+    vagas = next(n for n in at.number_input if n.label == "Vagas")
+    assert vagas.value is None
+    assert any(s.label == "UF" for s in at.selectbox)
+    assert any("sem a área do terreno, o cálculo usa só o m² total das casas" in c.value for c in at.sidebar.caption)
+
+
+# ---------------------------------------------------------------- (k) imobiliaria
+def test_k_sem_imobiliaria_mais_proxima():
+    r = resultado_sem_valor()
+    r["infraestrutura"] = {"scores": {"score_final": 0.7, "classificacao_infraestrutura": "boa"},
+                           "imobiliaria_proxima": {"encontrada": True, "nome": "Imob X", "telefone": "1"}}
+    at = _tela(r)
+    textos = " ".join(m.value for m in at.markdown)
+    assert "Imobiliária mais próxima" not in textos and "Imob X" not in textos
+    assert "Imob X" not in _laudo(at)
 
 
 if __name__ == "__main__":

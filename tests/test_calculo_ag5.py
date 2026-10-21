@@ -61,7 +61,7 @@ def test_casa_curitiba_com_4_terrenos_nao_separa_o_terreno():
     assert r["calculo_terreno"]["aplicado"] is False
     assert valor_medio(r) == 920256.98, valor_medio(r)
     assert r["comparaveis_usados"]["terreno"] == [] and len(r["comparaveis_descartados"]["terreno"]) == 4
-    assert r["aviso_terreno"].startswith("Só 4 terreno(s) à venda na região (mínimo de 5).")
+    assert r["aviso_terreno"].startswith("Só 4 terrenos à venda na região (mínimo de 5).")
 
 
 def test_minimo_de_5_comparaveis():
@@ -92,7 +92,7 @@ def test_casa_com_3_terrenos_calcula_sem_separar_com_aviso():
     assert valor_medio(r) == valor_medio(sem_terreno)
     assert r["comparaveis_usados"]["terreno"] == [] and len(r["comparaveis_descartados"]["terreno"]) == 3
     assert r["aviso_terreno"] == (
-        "Só 3 terreno(s) à venda na região (mínimo de 5). O valor foi calculado pelo m² das casas "
+        "Só 3 terrenos à venda na região (mínimo de 5). O valor foi calculado pelo m² das casas "
         "parecidas, sem separar o terreno; se o lote do imóvel for bem maior ou menor que o das "
         "casas comparadas, o valor fica menos preciso."), r["aviso_terreno"]
 
@@ -119,7 +119,7 @@ def test_banco_e_excel_com_terreno_nao_separado():
     assert sum(1 for c in comps if c["tipo"] == "terreno" and not c["entrou_no_calculo"]) == 3
     resumo = {l[0]: l[1] for l in load_workbook(io.BytesIO(excel_resultado(e, comps)))["Resumo"].iter_rows(values_only=True)}
     assert resumo["Terrenos no cálculo"] == 0
-    assert resumo["Terreno não separado"].startswith("Só 3 terreno(s) à venda na região")
+    assert resumo["Terreno não separado"].startswith("Só 3 terrenos à venda na região")
 
 
 def test_casa_sem_area_de_terreno_nao_usa_os_terrenos_da_zona():

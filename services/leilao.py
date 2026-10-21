@@ -110,16 +110,22 @@ def texto_aviso_zona(contagem: dict, escopo_busca: str | None = None) -> str | N
     if contagem.get("sem_validacao"):
         partes.append(
             f"Nenhum comparável foi confirmado perto do imóvel. O valor usa "
-            f"{contagem['sem_validacao']} imóveis parecidos encontrados na busca, sem verificar "
-            f"a distância. Confira esses anúncios antes de decidir."
+            + (f"1 imóvel parecido encontrado na busca" if contagem["sem_validacao"] == 1 else
+               f"{contagem['sem_validacao']} imóveis parecidos encontrados na busca")
+            + ", sem verificar a distância. Confira esses anúncios antes de decidir."
         )
     elif contagem.get("fallback"):
         partes.append(
-            f"Só {contagem.get('confirmado', 0)} dos {total} comparáveis foram confirmados perto "
-            f"do imóvel (dentro da zona homogênea). Os outros {contagem['fallback']} não têm "
-            f"localização exata no anúncio, então não foi possível medir a distância: podem "
-            f"estar perto ou longe. Eles contam para o mínimo de 5. Confira esses anúncios "
-            f"antes de decidir."
+            (f"Nenhum dos {total} comparáveis foi confirmado" if not contagem.get("confirmado") else
+             f"Só 1 dos {total} comparáveis foi confirmado" if contagem.get("confirmado") == 1 else
+             f"Só {contagem['confirmado']} dos {total} comparáveis foram confirmados")
+            + " perto do imóvel (dentro da zona homogênea). "
+            + ("O outro não tem localização exata no anúncio, então não foi possível medir a "
+               "distância: pode estar perto ou longe. Ele conta para o mínimo de 5. Confira esse "
+               "anúncio antes de decidir." if contagem["fallback"] == 1 else
+               f"Os outros {contagem['fallback']} não têm localização exata no anúncio, então não foi "
+               f"possível medir a distância: podem estar perto ou longe. Eles contam para o mínimo "
+               f"de 5. Confira esses anúncios antes de decidir.")
         )
     if escopo_busca == "cidade":
         partes.append(
@@ -173,7 +179,9 @@ def texto_aviso_raio(zona: dict | None) -> str | None:
         else:
             partes.append(
                 f"Havia menos de {minimo} {nome} no raio de {_metros(raio_ia)} m; o raio foi "
-                f"ampliado até {_metros(limite)} m e ainda assim só {n} foram confirmados."
+                f"ampliado até {_metros(limite)} m e ainda assim "
+                + ("nenhum foi confirmado." if n == 0 else "só 1 foi confirmado." if n == 1 else
+                   f"só {n} foram confirmados.")
             )
     return " ".join(partes) or None
 

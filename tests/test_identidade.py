@@ -285,9 +285,13 @@ def test_alvo_bairros_diferentes_nao_gera_alerta():
     eh, poss, sinais, _ = comparables._eh_anuncio_do_alvo(alvo, comp)
     assert not eh and not poss and "mesmo_bairro" not in sinais, sinais
 
-def test_alvo_vagas_zero_do_formulario_nao_veta():
-    eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000, parkingSpaces=0), anuncio())
+def test_alvo_vagas_nao_informadas_nao_veta():
+    # Vagas vazias no formulario (None) = nao informado. Desde 20/10/2026, 0 = sem vaga
+    # e veta o anuncio com 2 vagas (tests/test_provas_anuncio_alvo.py).
+    eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000, parkingSpaces=None), anuncio())
     assert eh, sinais
+    eh, _, sinais, _ = comparables._eh_anuncio_do_alvo(alvo_apto(price=500000, parkingSpaces=0), anuncio())
+    assert not eh and "veto_vagas" in sinais, sinais
 
 
 def test_alvo_quartos_diferentes_sem_outro_sinal_nao_marca():

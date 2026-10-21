@@ -71,7 +71,7 @@ def test_terreno_fora_do_padrao():
 
 def test_possivel_repetido_no_calculo():
     at = _tela("repetido")
-    aviso = _aviso(at, "Possível repetido no cálculo: 2 anúncios, em 1 grupo(s)")
+    aviso = _aviso(at, "Possível repetido no cálculo: 2 anúncios, em 1 grupo,")
     assert aviso and "pesando mais de uma vez na média. Confira os anúncios." in aviso[0], aviso
     tabela = _tabela_com(at, "Rua Projetada, 314")
     assert tabela and "Grupo: nº 314" in tabela[0] and "[ver](https://x/Rua Elvio, 314)" in tabela[0], tabela
@@ -81,7 +81,7 @@ def test_possivel_repetido_no_calculo():
 
 def test_area_diferente_entre_portais():
     at = _tela("area")
-    aviso = _aviso(at, "Área diferente entre portais: 1 imóvel(is) usados no cálculo")
+    aviso = _aviso(at, "Área diferente entre portais: 1 imóvel usado no cálculo aparece")
     assert aviso and "Foi usada a menor área" in aviso[0], aviso
     tabela = _tabela_com(at, "Rua C, 1")
     assert tabela and "VivaReal 80 m² · Chaves na Mão 110 m²; usada 80 m²" in tabela[0], tabela

@@ -142,6 +142,28 @@ def test_d2_mesma_imobiliaria_so_com_rodape_em_comum_nao_confirma():
     assert not eh
 
 
+# ---------------------------------------------------------------- vagas: None x 0
+APTO_ALVO = dict(ALVO, tipo="apartment", propertyType="Apartamentos", bedrooms=2, bathrooms=1, area=60.0,
+                 rua="Rua A", street="Rua A", numero="100", price=400000.0, descricao_gerada=True)
+
+
+def apto_anuncio(vagas):
+    return anuncio(propertyType="Apartamentos", tipo="apartamento", bedrooms=2, bathrooms=1, area=60.0,
+                   price=400000.0, street="Rua A", numero="100", parkingSpaces=vagas)
+
+
+def test_e1_vagas_vazias_no_formulario_nao_vetam():
+    _, _, sinais, _ = ag2._eh_anuncio_do_alvo(dict(APTO_ALVO, parkingSpaces=None), apto_anuncio(1))
+    assert "veto_vagas" not in sinais, sinais
+
+
+def test_e2_zero_vagas_e_sem_vaga_e_veta_quem_tem_vaga():
+    _, _, sinais, _ = ag2._eh_anuncio_do_alvo(dict(APTO_ALVO, parkingSpaces=0), apto_anuncio(1))
+    assert "veto_vagas" in sinais, sinais
+    _, _, sinais, _ = ag2._eh_anuncio_do_alvo(dict(APTO_ALVO, parkingSpaces=0), apto_anuncio(0))
+    assert "veto_vagas" not in sinais, sinais
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

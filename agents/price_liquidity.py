@@ -162,7 +162,7 @@ M2_CONSTRUCAO_MAX = 50000.0       # R$/m2 de construcao plausivel (maximo)
 # com 1 a 4 terrenos o terreno era separado e a avaliacao dava amostra_insuficiente,
 # enquanto com 0 terrenos calculava normalmente.
 AVISO_TERRENO_NAO_SEPARADO = (
-    "Só {n} terreno(s) à venda na região (mínimo de 5). O valor foi calculado pelo m² das "
+    "Só {n} {terrenos} à venda na região (mínimo de 5). O valor foi calculado pelo m² das "
     "casas parecidas, sem separar o terreno; se o lote do imóvel for bem maior ou menor "
     "que o das casas comparadas, o valor fica menos preciso."
 )
@@ -852,14 +852,16 @@ def executar_agente5(
                 # valor de m2 fora do plausivel (ex.: regiao muito barata ou dado
                 # inconsistente do anuncio). Foi descartado para nao distorcer o calculo.
                 avisos.append(
-                    f"{terrenos_descartados_sanidade} terreno(s) estava(m) na zona, mas foi(ram) "
-                    f"descartado(s) por ter preco/area que resulta em valor de m2 fora da faixa "
-                    f"plausivel (R$ {M2_TERRENO_MIN:.0f} a R$ {M2_TERRENO_MAX:.0f}/m2). "
-                    f"Pode ser regiao muito barata ou dado inconsistente do anuncio."
+                    (f"{terrenos_descartados_sanidade} terreno estava na zona, mas foi descartado"
+                     if terrenos_descartados_sanidade == 1 else
+                     f"{terrenos_descartados_sanidade} terrenos estavam na zona, mas foram descartados")
+                    + f" por ter preço/área que resulta em valor de m² fora da faixa plausível "
+                    f"(R$ {M2_TERRENO_MIN:.0f} a R$ {M2_TERRENO_MAX:,.0f}/m²). ".replace(",", ".")
+                    + "Pode ser região muito barata ou dado inconsistente do anúncio."
                 )
             else:
                 avisos.append(
-                    "Nao foram encontrados terrenos comparaveis para calcular o valor m2 do terreno."
+                    "Não foram encontrados terrenos comparáveis para calcular o valor do m² do terreno."
                 )
 
     # ========================================================
@@ -889,7 +891,9 @@ def executar_agente5(
         if area_terreno_alvo > 0 and valores_m2_terreno:
             # Poucos terrenos: nao entram no calculo (ficam como descartados).
             n_terrenos_poucos = len(valores_m2_terreno)
-            aviso_terreno = AVISO_TERRENO_NAO_SEPARADO.format(n=n_terrenos_poucos)
+            aviso_terreno = AVISO_TERRENO_NAO_SEPARADO.format(
+                n=n_terrenos_poucos, terrenos="terreno" if n_terrenos_poucos == 1 else "terrenos"
+            )
             import logging as _log_t
             _log_t.getLogger(__name__).info(
                 f"[Ag5] terreno nao separado: {n_terrenos_poucos} terrenos "
@@ -1002,7 +1006,8 @@ def executar_agente5(
     # Motivo de cada terreno fora do calculo (auditoria e funil da tela).
     if aviso_terreno:
         motivo_terreno = (
-            f"terreno não separado: só {len(valores_m2_terreno)} terreno(s) válidos (mínimo de "
+            f"terreno não separado: só {len(valores_m2_terreno)} "
+            f"{'terreno válido' if len(valores_m2_terreno) == 1 else 'terrenos válidos'} (mínimo de "
             f"{MIN_AMOSTRAS_CONFIAVEL}); o valor foi calculado pelo m² das casas"
         )
     elif motivo_terreno_fora:
@@ -1043,14 +1048,17 @@ def executar_agente5(
         medio_m2_construcao = 0.0
         if not eh_terreno and area_construida_alvo > 0:
             avisos.append(
-                "Nao foram encontrados imoveis comparaveis para calcular o valor m2 da construcao."
+                "Não foram encontrados imóveis comparáveis para calcular o valor do m² da construção."
             )
 
     if comparaveis_terreno_maior > 0:
         avisos.append(
-            f"{comparaveis_terreno_maior} comparavel(is) tinham o terreno estimado valendo mais "
-            f"que o proprio anuncio; para esses foi usado o preco/m2 total (evita superestimar o "
-            f"valor da construcao). Reveja se o m2 de terreno da zona esta coerente."
+            ("1 comparável tinha o terreno estimado valendo mais que o próprio anúncio; para ele"
+             if comparaveis_terreno_maior == 1 else
+             f"{comparaveis_terreno_maior} comparáveis tinham o terreno estimado valendo mais que o "
+             f"próprio anúncio; para esses")
+            + " foi usado o preço/m² total (evita superestimar o valor da construção). "
+            "Reveja se o m² de terreno da zona está coerente."
         )
 
     # ========================================================
@@ -1070,11 +1078,11 @@ def executar_agente5(
             terreno_aplicado = False
             if not valores_m2_terreno:
                 avisos.append(
-                    "Alvo e terreno, mas nao ha terrenos comparaveis na zona para "
-                    "estimar o valor do m2."
+                    "O imóvel é um terreno, mas não há terrenos comparáveis na zona para "
+                    "estimar o valor do m²."
                 )
             elif area_terreno_alvo <= 0:
-                avisos.append("Area do terreno alvo nao informada.")
+                avisos.append("Área do terreno do imóvel não informada.")
     elif separar_terreno:
         valor_terreno_minimo = menor_m2_terreno * area_terreno_alvo
         valor_terreno_medio = medio_m2_terreno * area_terreno_alvo
@@ -1085,8 +1093,8 @@ def executar_agente5(
         terreno_aplicado = False
         if not eh_condominial and not eh_terreno and area_terreno_alvo <= 0:
             avisos.append(
-                "Area do terreno do imovel alvo nao informada. "
-                "O calculo usou apenas o valor da construcao (preco/m2 total dos comparaveis)."
+                "Área do terreno do imóvel não informada. "
+                "O cálculo usou só o m² total dos comparáveis (preço ÷ área construída)."
             )
 
     # ========================================================
@@ -1138,15 +1146,15 @@ def executar_agente5(
         avaliacao_confiavel = False
         status_avaliacao = "sem_amostra"
         avisos.append(
-            "Nenhum comparavel valido (terreno ou construcao) foi encontrado na zona. "
-            "Nao foi possivel estimar o valor do imovel."
+            "Nenhum comparável válido (terreno ou construção) foi encontrado na zona. "
+            "Não foi possível estimar o valor do imóvel."
         )
     elif valor_medio_imovel <= 0:
         avaliacao_confiavel = False
         status_avaliacao = "valor_nao_estimado"
         avisos.append(
-            "O calculo resultou em valor zero ou negativo. A avaliacao nao e confiavel "
-            "(verifique area do alvo e os comparaveis da zona)."
+            "O cálculo resultou em valor zero ou negativo. A avaliação não é confiável "
+            "(verifique a área do imóvel e os comparáveis da zona)."
         )
     else:
         # Amostra pequena: o valor sai, mas nao e estatisticamente solido. Com poucos
@@ -1154,24 +1162,25 @@ def executar_agente5(
         motivos_baixa = []
         if not eh_terreno and n_construcao < MIN_AMOSTRAS_CONFIAVEL:
             motivos_baixa.append(
-                f"apenas {n_construcao} comparavel(is) de construcao"
+                ("apenas 1 comparável de construção" if n_construcao == 1 else
+                 f"apenas {n_construcao} comparáveis de construção")
                 # Explica a diferenca para a contagem da zona (texto apenas).
-                + (" (o anuncio do proprio imovel saiu do calculo)" if excluidos_anuncio_alvo == 1 else
-                   f" ({excluidos_anuncio_alvo} anuncios do proprio imovel sairam do calculo)"
+                + (" (o anúncio do próprio imóvel saiu do cálculo)" if excluidos_anuncio_alvo == 1 else
+                   f" ({excluidos_anuncio_alvo} anúncios do próprio imóvel saíram do cálculo)"
                    if excluidos_anuncio_alvo > 1 else "")
             )
         if separar_terreno and n_terreno < MIN_AMOSTRAS_CONFIAVEL:
-            motivos_baixa.append(f"apenas {n_terreno} terreno(s) comparavel(is)")
+            motivos_baixa.append(f"apenas {n_terreno} {'terreno comparável' if n_terreno == 1 else 'terrenos comparáveis'}")
         if eh_terreno and n_terreno < MIN_AMOSTRAS_CONFIAVEL:
-            motivos_baixa.append(f"apenas {n_terreno} terreno(s) comparavel(is)")
+            motivos_baixa.append(f"apenas {n_terreno} {'terreno comparável' if n_terreno == 1 else 'terrenos comparáveis'}")
         if motivos_baixa:
             avaliacao_confiavel = False
             status_avaliacao = "amostra_insuficiente"
             avisos.append(
-                "Amostra insuficiente para uma estimativa confiavel ("
+                "Amostra insuficiente para uma estimativa confiável ("
                 + "; ".join(motivos_baixa)
-                + f"; minimo desejado={MIN_AMOSTRAS_CONFIAVEL}). "
-                "O valor exibido e uma referencia fraca, baseada em poucos anuncios."
+                + f"; mínimo desejado: {MIN_AMOSTRAS_CONFIAVEL}). "
+                "O valor calculado é uma referência fraca, baseada em poucos anúncios."
             )
 
     # ========================================================
@@ -1303,13 +1312,13 @@ def executar_agente5(
         # Sem nota de infraestrutura: tempo de venda com infraestrutura neutra (0,50).
         "aviso_infraestrutura": aviso_infraestrutura,
         "justificativa": (
-            f"O valor do imovel foi estimado a partir do m2 da zona homogenea. "
-            f"Terreno: {len(valores_m2_terreno)} amostras, m2 referencia R$ {medio_m2_terreno:.2f}. "
-            f"Construcao: {len(todos_valores_construcao)} amostras"
-            f"{'' if eh_condominial else ' (2 series combinadas)'}, "
-            f"m2 referencia R$ {medio_m2_construcao:.2f}. "
-            f"Valor medio estimado: R$ {valor_medio_imovel:,.2f}. "
-            f"Valor de liquidez (desconto 10%%): R$ {valor_liquidez:,.2f}."
+            f"O valor do imóvel foi estimado a partir do m² da zona homogênea. "
+            f"Terreno: {len(valores_m2_terreno)} amostras, m² de referência R$ {medio_m2_terreno:.2f}. "
+            f"Construção: {len(todos_valores_construcao)} amostras"
+            f"{'' if eh_condominial else ' (2 séries combinadas)'}, "
+            f"m² de referência R$ {medio_m2_construcao:.2f}. "
+            f"Valor médio estimado: R$ {valor_medio_imovel:,.2f}. "
+            f"Valor de liquidez (desconto de 10%): R$ {valor_liquidez:,.2f}."
         ),
     }
 

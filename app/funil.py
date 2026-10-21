@@ -164,6 +164,42 @@ def resumo_funil(linhas: list[dict]) -> dict:
     return {etapa: sum(1 for l in linhas if l["Etapa"] == etapa) for etapa in ETAPAS}
 
 
+VAZIO = "–"
+
+
+def _reais(v) -> str:
+    return f"R$ {v:,.0f}".replace(",", ".")
+
+
+def _numero_br(v) -> str:
+    """360 -> '360'; 179.5 -> '179,5'."""
+    texto = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return texto[:-3] if texto.endswith(",00") else texto.rstrip("0")
+
+
+def linhas_para_tela(linhas: list[dict]) -> list[dict]:
+    """
+    Linhas do funil como a tela mostra: "–" no lugar de vazio e preco com ponto de
+    milhar (R$ 1.200.000). O Excel continua com os numeros (formatados la).
+    """
+    saida = []
+    for linha in linhas:
+        nova = {}
+        for coluna, valor in linha.items():
+            if coluna == "Anúncio":
+                nova[coluna] = valor or None          # coluna de link: vazio fica em branco
+            elif valor is None or valor == "":
+                nova[coluna] = VAZIO
+            elif coluna == "Preço":
+                nova[coluna] = _reais(valor)
+            elif isinstance(valor, float):
+                nova[coluna] = _numero_br(valor)
+            else:
+                nova[coluna] = str(valor)
+        saida.append(nova)
+    return saida
+
+
 def mostrar_funil(st, resultado: dict) -> None:
     """Bloco da tela com o resumo, o filtro por etapa e a tabela com o motivo de cada anuncio."""
     linhas = montar_funil(resultado)
@@ -180,12 +216,11 @@ def mostrar_funil(st, resultado: dict) -> None:
         st.markdown(" · ".join(f"**{etapa}**: {n}" for etapa, n in resumo.items() if n))
         opcoes = ["Todos"] + [e for e in ETAPAS if resumo.get(e)]
         escolha = st.selectbox("Mostrar", opcoes, key="funil_filtro")
-        tabela = pd.DataFrame([l for l in linhas if escolha == "Todos" or l["Etapa"] == escolha])
+        tabela = pd.DataFrame(linhas_para_tela([l for l in linhas if escolha == "Todos" or l["Etapa"] == escolha]))
         st.dataframe(
             tabela, hide_index=True, use_container_width=True,
             column_config={
                 "Anúncio": st.column_config.LinkColumn("Anúncio", display_text="ver"),
-                "Preço": st.column_config.NumberColumn("Preço", format="R$ %d"),
                 "Motivo": st.column_config.TextColumn("Motivo", width="large"),
             },
         )

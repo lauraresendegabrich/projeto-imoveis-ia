@@ -119,6 +119,18 @@ def test_tela_mostra_o_funil():
     assert resumo, [m.value for m in at.markdown][-5:]
     tabela = at.dataframe[-1].value
     assert list(tabela.columns[:2]) == ["Etapa", "Motivo"] and len(tabela) == 10
+    # "–" no lugar de None e preco com ponto de milhar.
+    assert "None" not in tabela.drop(columns=["Anúncio"]).astype(str).to_string()
+    assert "R$ 500.001" in set(tabela["Preço"]) and "–" in set(tabela["Quartos"])
+
+
+def test_tela_formata_vazio_e_preco():
+    from app.funil import linhas_para_tela
+    linha = linhas_para_tela([{"Etapa": "x", "Preço": 1200000.0, "Área (m²)": 179.5, "Quartos": None,
+                               "Nota vizinhança (Ag3)": 0.71, "Anúncio": None}])[0]
+    assert linha == {"Etapa": "x", "Preço": "R$ 1.200.000", "Área (m²)": "179,5", "Quartos": "–",
+                     "Nota vizinhança (Ag3)": "0,71", "Anúncio": None}, linha
+    assert linhas_para_tela([{"Área (m²)": 360.0}])[0]["Área (m²)"] == "360"
 
 
 if __name__ == "__main__":
