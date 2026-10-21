@@ -85,6 +85,20 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Revisão dos commits de 20 e 21/10** (21/10/2026).
+  - `717c04b`: a verificação que refaz a conta do Agente 5 calcula o R$/m² de cada
+    terreno pela mesma regra de `calcular_valores_m2_terreno`: fator 0,80 para
+    topografia "acentuado" e o preço/m² do anúncio quando a área é inválida. Antes,
+    dividia preço por área e daria ❌ falso nesses casos. O Agente 5 passou a gravar
+    `topografia` e `preco_m2_anuncio` no resumo de cada terreno usado (só registro).
+  - `665f3b7`: o código da imobiliária (ex.: "CA0406") só confirma o anúncio do
+    próprio imóvel com preço igual (≤0,5%) ou área igual (≤2%), e sem veto. Sem isso,
+    vira suspeita (sinal `codigo_imobiliaria(X, sem preço ou área iguais)`), porque os
+    códigos são sequenciais em cada imobiliária e se repetem entre imobiliárias.
+  - `3d07780`: saiu o gráfico de dispersão Área × Preço do bloco do Agente 3. Ele
+    mostrava o anúncio excluído como comparável, mostrava "Valor estimado" sem
+    estimativa confiável, e a tendência não tem relação com o método.
+
 - **Agente 1: dados para as verificações automáticas** (21/10/2026; aprovado pela
   usuária). As três verificações do Agente 1 que apareciam como ⚪ passaram a ser
   verificadas numa coleta nova:
