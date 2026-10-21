@@ -85,6 +85,27 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Checagem do próprio anúncio: provas mais fortes que a descrição** (20/10/2026).
+  Novos sinais em `_eh_anuncio_do_alvo`, do mais forte ao mais fraco:
+  - **Link do anúncio**: campo novo no formulário, "Link do anúncio deste imóvel (se
+    tiver)", gravado em `entrada_usuario.link_anuncio`. Extrai o portal e o id
+    (VivaReal e ZAP compartilham o id; também ImovelWeb, Chaves na Mão e Lugar Certo).
+    Se bater, confirma mesmo com veto de atributo. Sinal `link_do_anuncio(grupozap:2903862416)`.
+  - **Foto em comum**: compara o código da foto, sem o tamanho e sem os parâmetros (hash
+    de 32 caracteres do VivaReal/ZAP e do Lugar Certo, número da foto no ImovelWeb,
+    código no Chaves na Mão). Casa: confirma, desde que não haja veto. Apartamento: só
+    suspeita. Sinal `foto_em_comum(<código>)`. Só casa fotos do mesmo serviço de
+    imagens: uma foto do VivaReal não casa com a mesma foto no ImovelWeb.
+  - **Código da imobiliária** ("CÓDIGO DO IMÓVEL : CA0406", "Cód.", "Ref.",
+    "Referência"; letras e números, 4 caracteres ou mais) nas duas descrições: confirma,
+    desde que não haja veto. Sinal `codigo_imobiliaria(CA0406)`.
+  - **Descrição**: o rodapé da imobiliária ("Agende sua visita", "Atendemos…", CRECI,
+    telefone, nome da imobiliária) sai antes da comparação, e anúncios diferentes da
+    mesma imobiliária deixam de parecer iguais.
+  - Os repetidos absorvidos agora guardam fotos e banheiros (`CAMPOS_IDENTIDADE`), e
+    todos os sinais valem também contra eles (`via_duplicata`). Os sinais aparecem em
+    `checagem_alvo` e em `checagem_anuncio_alvo`, no banco.
+  - Testes: `tests/test_provas_anuncio_alvo.py` (15).
 - **Checagem do próprio anúncio: descrição parcial não confirmava** (20/10/2026). Em
   Palhoça, o início da descrição (até "a 570m da praia") contra a completa dava 0,60
   (casa exige 0,75) e o próprio anúncio entrou no cálculo. `_similaridade_descricao`
