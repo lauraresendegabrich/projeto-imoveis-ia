@@ -443,6 +443,9 @@ def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, Li
     imovel_alvo = dados_ag3.get("imovel_alvo", {})
     if not imovel_alvo:
         imovel_alvo = _ler(caminho_ag2).get("imovel_alvo", {})
+    # Quantos anuncios do proprio imovel sairam do calculo: so para os textos (o
+    # aviso de amostra explica a diferenca para a contagem da zona).
+    imovel_alvo = {**imovel_alvo, "anuncios_do_alvo_excluidos": excluidos_anuncio_alvo}
 
     return imovel_alvo, terrenos_zona, comparaveis_zona, dados_ag3, dados_ag4
 
@@ -758,6 +761,7 @@ def executar_agente5(
     """
     avisos = []
     metodo_media = "media_aparada"
+    excluidos_anuncio_alvo = int(imovel_alvo.get("anuncios_do_alvo_excluidos") or 0)
 
     def _cheira_leilao(im: Dict[str, Any]) -> bool:
         """Heuristica leve de auditoria: o texto do imovel tem cara de leilao?"""
@@ -1149,7 +1153,13 @@ def executar_agente5(
         # comparaveis o TRIMMEAN nao filtra outliers e um unico anuncio domina a media.
         motivos_baixa = []
         if not eh_terreno and n_construcao < MIN_AMOSTRAS_CONFIAVEL:
-            motivos_baixa.append(f"apenas {n_construcao} comparavel(is) de construcao")
+            motivos_baixa.append(
+                f"apenas {n_construcao} comparavel(is) de construcao"
+                # Explica a diferenca para a contagem da zona (texto apenas).
+                + (" (o anuncio do proprio imovel saiu do calculo)" if excluidos_anuncio_alvo == 1 else
+                   f" ({excluidos_anuncio_alvo} anuncios do proprio imovel sairam do calculo)"
+                   if excluidos_anuncio_alvo > 1 else "")
+            )
         if separar_terreno and n_terreno < MIN_AMOSTRAS_CONFIAVEL:
             motivos_baixa.append(f"apenas {n_terreno} terreno(s) comparavel(is)")
         if eh_terreno and n_terreno < MIN_AMOSTRAS_CONFIAVEL:
@@ -1192,6 +1202,7 @@ def executar_agente5(
         "metodo": "Valor m2 da zona homogenea (terreno + construcao por padrao)",
         "avaliacao_confiavel": avaliacao_confiavel,
         "status_avaliacao": status_avaliacao,
+        "anuncios_do_alvo_excluidos": excluidos_anuncio_alvo,
         "excluir_extremos": True,
         "metodo_estatistico": "TRIMMEAN(0.5) — remove 25% menores e 25% maiores",
         "imovel_alvo": {
