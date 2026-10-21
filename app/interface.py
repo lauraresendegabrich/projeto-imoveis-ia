@@ -988,10 +988,6 @@ with area_principal.container():
             _log_banco.getLogger("pipeline").warning(f"[Banco] registro nao montado: {type(e).__name__}: {e}")
 
     # Recupera resultado salvo (pra quando faz download sem perder)
-    if "resultado" in st.session_state and not submitted:
-        resultado = st.session_state["resultado"]
-        imovel_alvo = st.session_state.get("imovel_alvo_dados", {})
-
     if "resultado" in st.session_state:
         resultado = st.session_state["resultado"]
         imovel_alvo_export = st.session_state.get("imovel_alvo_dados", {})
@@ -1410,65 +1406,6 @@ with area_principal.container():
                                         "Motivo": ", ".join(motivos),
                                     })
                                 st.markdown(pd.DataFrame(linhas_dup).to_markdown(index=False), unsafe_allow_html=True)
-
-                        # Gráfico scatter: Preço × Área
-                        precos_scatter = []
-                        areas_scatter = []
-                        nomes_scatter = []
-                        for c in comparaveis_tabela:
-                            p = c.get("price") or c.get("preco") or 0
-                            a = c.get("area") or c.get("area_construida") or 0
-                            try:
-                                p = float(p)
-                                a = float(a)
-                                if p > 0 and a > 0:
-                                    precos_scatter.append(p)
-                                    areas_scatter.append(a)
-                                    rua_c = c.get("street") or c.get("rua") or c.get("neighborhood") or "?"
-                                    nomes_scatter.append(rua_c[:25])
-                            except (ValueError, TypeError):
-                                pass
-                        if precos_scatter:
-                            import plotly.graph_objects as go
-                            fig = go.Figure()
-                            fig.add_trace(go.Scatter(
-                                x=areas_scatter, y=precos_scatter,
-                                mode="markers",
-                                marker=dict(size=10, color="#636EFA"),
-                                text=nomes_scatter,
-                                hovertemplate="<b>%{text}</b><br>Área: %{x}m²<br>Preço: R$ %{y:,.0f}<extra></extra>",
-                                name="Comparáveis",
-                            ))
-                            area_alvo = imovel_alvo.get("area", 0) or 0
-                            valor_est = (resultado.get("preco_estimado", {}).get("avaliacao_planilha") or {}).get("valor_medio_imovel", 0)
-                            if area_alvo and valor_est:
-                                fig.add_trace(go.Scatter(
-                                    x=[float(area_alvo)], y=[float(valor_est)],
-                                    mode="markers",
-                                    marker=dict(size=14, color="#EF553B", symbol="diamond"),
-                                    hovertemplate="<b>Seu imóvel</b><br>Área: %{x}m²<br>Valor estimado: R$ %{y:,.0f}<extra></extra>",
-                                    name="Valor estimado",
-                                ))
-                            if len(precos_scatter) >= 3:
-                                import numpy as np
-                                z = np.polyfit(areas_scatter, precos_scatter, 1)
-                                x_line = [min(areas_scatter) * 0.9, max(areas_scatter) * 1.1]
-                                y_line = [z[0] * x + z[1] for x in x_line]
-                                fig.add_trace(go.Scatter(
-                                    x=x_line, y=y_line,
-                                    mode="lines",
-                                    line=dict(dash="dash", color="gray", width=1),
-                                    name="Tendência",
-                                    hoverinfo="skip",
-                                ))
-                            fig.update_layout(
-                                xaxis_title="Área (m²)",
-                                yaxis_title="Preço (R$)",
-                                height=300,
-                                margin=dict(l=20, r=20, t=30, b=20),
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
 
             # Ag.4
             score_final_infra = scores_infra.get("score_final", 0) or 0

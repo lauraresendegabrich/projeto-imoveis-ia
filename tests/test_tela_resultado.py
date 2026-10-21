@@ -201,6 +201,20 @@ def test_k_sem_imobiliaria_mais_proxima():
     assert "Imob X" not in _laudo(at)
 
 
+# ---------------------------------------------------------------- sem dispersao Area x Preco
+def test_sem_grafico_de_dispersao_area_x_preco():
+    r = resultado_sem_valor()
+    r["preco_estimado"].update(status_avaliacao="ok", avaliacao_confiavel=True)
+    r["analise_qualitativa"] = {
+        "resumo": {"total_analisados": 4, "score_qualitativo_medio": 0.6},
+        "imovel_alvo": {"analise_qualitativa": {"scores": {"score_qualitativo": 0.5}}},
+        "comparaveis": [dict(c, analise_qualitativa={"scores": {"score_qualitativo": 0.6}}) for c in NA_ZONA],
+    }
+    at = _tela(r)
+    assert any("| Preço" in m.value and "[ver](https://x/1)" in m.value for m in at.markdown)  # a tabela continua
+    assert not at.get("plotly_chart"), "o gráfico de dispersão ainda aparece"
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
