@@ -35,6 +35,21 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
     anúncios) têm números diferentes na mesma rua (Pedro Rendon 08, 1, 101, 36): podem
     ser casas iguais de loteamento ou números inventados ("9999").
   - Decidir se o Agente 1 deve juntar esses casos e com qual regra.
+- [ ] **O que ainda impede juntar os repetidos da Av. João Peixoto Viegas, 888 (21/10/2026).**
+  Depois de `f0dbc29`, os 31 anúncios a R$ 830.000 nessa avenida passaram de 12 para 11
+  imóveis distintos; nos 9 usados da rodada, de 9 para 6. O que sobra:
+  - ImovelWeb sem número na rua: o 888 só aparece no link ("jcjpv-888-casa-…"). Ideia:
+    ler o número do link ou da descrição.
+  - Os dois anúncios da Rankim no ImovelWeb caem em `veto_codigos_diferentes`, mas os
+    códigos ("MI-1787983209690-…") são gerados pelo portal, não pela imobiliária. Ideia:
+    não usar códigos "MI-…" no veto.
+  - VivaReal "B E G Imoveis" × Chaves na Mão "B&G IMÓVEIS", com o mesmo código CA13241:
+    o nome normalizado fica diferente ("b e g" × "b g"), e a regra "mesmo código e
+    anunciante" não pega. Ideia: comparar o anunciante sem espaços.
+  - Chaves na Mão 46815748 tem número 800 (os outros, 888), e no link a área está
+    trocada (203 no link, 135 no anúncio).
+  - Efeito da regra nova: com o mesmo endereço e preço, áreas entre 2% e 10% também
+    juntam (ex.: Av. João Batista Di Vitoriano, 268: 3,8%), e antes ficavam sem prova.
 - [ ] **Mesmo imóvel com fotos de imobiliárias diferentes (Jardim Consórcio, 21/10/2026).**
   - O anúncio da Scheid (R$ 750.000, VivaReal 2915942556) e o da Monte Alegre
     (R$ 700.000, VivaReal 2904140532) são a mesma casa, mas cada imobiliária fez as
@@ -104,6 +119,14 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Repetidos da Av. João Peixoto Viegas, 888** (`f0dbc29`, 21/10/2026).
+  `_pode_ser_condominio` deixou de disparar com "Casa 3 dormitórios", "sem condomínio"
+  e o aviso "valores de condomínio e IPTU podem sofrer alterações". Casa com mesma rua,
+  mesmo número e preço idêntico, sem indício de condomínio, junta mesmo com área
+  diferente: usa a menor área e marca o alerta "área diferente entre portais". Na
+  coleta do Jardim Consórcio, a regra nova juntou 25 anúncios (888: 17 em 1; Antônio
+  Zouro, 82: 4; Francisco Ramos, 79: 4).
 
 - **Verificação de repetidos prováveis e texto do terreno** (21/10/2026).
   - `eef9c57`: verificação "Repetidos prováveis entre os usados", com o novo estado
