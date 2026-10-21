@@ -25,6 +25,22 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   avaliação e pular o Qwen se ele demorar; fazer o notebook cancelar pedidos
   abandonados; GPU mais forte.
 
+## Agente 1 — Dados que as verificações automáticas precisam (aguardando aprovação)
+
+Três verificações de `services/verificacoes.py` aparecem como ⚪ "não verificável",
+porque o Agente 1 (`agents/collector.py`) não grava o dado que elas usam:
+
+- [ ] **Dados desta execução:** o Agente 1 não recebe o `id_execucao` nem grava o
+  horário da coleta nos anúncios (os Agentes 2 a 5 já gravam, e isso já é verificado).
+  Proposta: `coletar_imoveis(..., id_execucao=)` grava `id_execucao` e `coletado_em`
+  em cada anúncio.
+- [ ] **Fontes:** as falhas do Athena (por subtipo ou indisponível) e do Apify só vão
+  para o log. Proposta: devolver a situação de cada fonte (consultada / respondeu /
+  falhou e o erro), por exemplo em `escopo_busca` ou num campo `fontes_consultadas`.
+- [ ] **encontrados = mantidos + repetidos:** o Agente 1 não grava o total antes de
+  juntar os repetidos, nem quantos saíram como leilão ou pelo limite por tipo.
+  Proposta: gravar `total_antes_repetidos`, `removidos_leilao` e `cortados_pelo_limite`.
+
 ## Agente 1 — Repetidos entre portais (`agents/identidade.py`)
 
 - [x] **Resolvido em 17/10/2026: menor área + alerta `area_diferente_entre_portais`.** Área do par juntado dependia do anúncio que fica. Ao
@@ -84,6 +100,41 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Verificações automáticas ao final de cada execução** (20/10/2026).
+  - `services/verificacoes.verificar_execucao(resultado)` devolve uma lista de
+    `{agente, verificacao, esperado, encontrado, ok}`. Não muda nenhum cálculo: só lê o
+    resultado de cada agente.
+  - Onde aparece:
+    - no modo conferência, no topo do resultado, como lista ❌ / ⚪ / ✅, com as falhas
+      primeiro;
+    - no banco, na coluna `execucoes.verificacoes` (migração 004, **rodar no Neon
+      antes do merge**);
+    - no Excel, na aba "Verificações".
+  - O que é conferido:
+    - Geral: cada anúncio aparece em uma só etapa do funil; os resultados dos Agentes
+      2 a 5 têm o `id_execucao` desta execução.
+    - Agente 1: cidade/UF dos anúncios. Mais três verificações sem dado ainda (ver
+      "Agente 1 — Dados que as verificações automáticas precisam").
+    - Agente 2: decisão de cada imóvel (quantos pela pré-classificação, pela IA, com o
+      modelo, e pela reserva); distância dos confirmados menor ou igual ao raio;
+      checagem do próprio anúncio em todos.
+    - Agente 3: avaliados = os que chegaram, até o limite de 10; notas entre 0 e 1.
+    - Agente 4: nota entre 0 e 1 com localização precisa, ou o aviso de nota neutra.
+    - Agente 5:
+      - conta refeita de forma independente (média aparada 0,5, terreno e desconto;
+        tolerância de R$ 1);
+      - usados na zona;
+      - nenhum anúncio do próprio imóvel nos usados;
+      - terrenos usados coerentes com a decisão de separar o terreno;
+      - sem valor ⇔ menos de 5 válidos (ou outro motivo registrado).
+  - A verificação de terrenos foi confirmada com o código anterior ao `0b47594`: casa
+    sem área do terreno com 6 terrenos dava "6 terrenos usados" e falha; com o código
+    atual dá 0 e passa.
+  - Nos arquivos reais de `data/`, a conta refeita bateu com a do Agente 5 (diferença
+    de R$ 0,00).
+  - Testes: `tests/test_verificacoes.py` (20; um caso que passa e um que falha para
+    cada verificação, mais tela, Excel e banco).
 
 - **Funil: nomes das etapas e a conta de cada anúncio** (20/10/2026).
   - As etapas de saída começam com "Saiu no": "Saiu no Agente 1 (busca)", "Saiu no

@@ -177,3 +177,34 @@ ORDER BY data_hora DESC
 LIMIT 20;
 ```
 
+
+## Verificações automáticas (migração 004)
+
+Rodar `db/migracoes/004_verificacoes.sql` no SQL Editor do Neon **antes** de colocar
+no ar o código que grava a coluna (sem ela, a gravação falha e as avaliações deixam de
+ser registradas; o app continua funcionando).
+
+`verificacoes` guarda a lista das verificações feitas ao final de cada execução
+(`services/verificacoes.py`), uma por regra: `{agente, verificacao, esperado,
+encontrado, ok}`. `ok` é `true` (passou), `false` (falhou) ou `null` (não verificável:
+o agente não grava o dado). Não mudam nenhum cálculo.
+
+```sql
+-- Execuções com alguma verificação que falhou, e quais
+SELECT e.data_hora, e.cidade, e.bairro,
+       v->>'agente'      AS agente,
+       v->>'verificacao' AS verificacao,
+       v->>'esperado'    AS esperado,
+       v->>'encontrado'  AS encontrado
+FROM execucoes e, jsonb_array_elements(e.verificacoes) AS v
+WHERE v->>'ok' = 'false'
+ORDER BY e.data_hora DESC
+LIMIT 50;
+
+-- Quantas vezes cada verificação falhou
+SELECT v->>'agente' AS agente, v->>'verificacao' AS verificacao, COUNT(*) AS falhas
+FROM execucoes e, jsonb_array_elements(e.verificacoes) AS v
+WHERE v->>'ok' = 'false'
+GROUP BY 1, 2
+ORDER BY falhas DESC;
+```
