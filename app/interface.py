@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.funil import funil_ligado, montar_funil, mostrar_funil
 from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
-from services.verificacoes import icone, ordenar_para_tela, verificar_execucao
+from services.verificacoes import resumo_conferencia, verificar_execucao
 from services.textos_tela import (
     anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, linhas_referencia, motivo_sem_valor,
     motivo_terreno_fora, suspeitos_do_proprio_imovel,
@@ -1031,25 +1031,6 @@ with area_principal.container():
         st.divider()
         st.subheader("📊 Resultado da Avaliação")
 
-        # ── VERIFICACOES AUTOMATICAS (modo conferencia; MOSTRAR_FUNIL=0 desliga) ──
-        if funil_ligado():
-            verificacoes = resultado.get("verificacoes") or verificar_execucao(resultado)
-            n_falhas = sum(1 for v in verificacoes if v.get("ok") is False)
-            n_alerta = sum(1 for v in verificacoes if v.get("ok") == "alerta")
-            n_nao = sum(1 for v in verificacoes if v.get("ok") is None)
-            n_ok = sum(1 for v in verificacoes if v.get("ok") is True)
-            with st.expander(
-                f"🧪 Verificações automáticas (conferência): {n_falhas} ❌ · {n_alerta} ⚠️ · {n_nao} ⚪ · {n_ok} ✅",
-                expanded=bool(n_falhas),
-            ):
-                st.caption("Conferem se cada agente funcionou como esperado; não mudam nenhum cálculo. "
-                           "⚠️ = conferir (pode não ser erro); ⚪ = não verificável (o agente não grava o dado).")
-                st.markdown("\n".join(
-                    f"- {icone(v['ok'])} **{v['agente']}** · {v['verificacao']}  \n"
-                    f"  esperado: {v['esperado']} · encontrado: {v['encontrado']}".replace("$", "\\$")
-                    for v in ordenar_para_tela(verificacoes)
-                ))
-
         # Preço estimado
         preco = resultado.get("preco_estimado", {})
         if preco and isinstance(preco, dict):
@@ -1778,6 +1759,14 @@ with area_principal.container():
                             st.info(f"O preço anunciado ({fmt_brl(preco_anunc)}) está alinhado com o valor médio da região ({fmt_brl(valor_med)}) — diferença de {abs(diferenca_pct):.1f}%")
 
             st.divider()
+
+            # ── CONFERENCIA (modo conferencia; MOSTRAR_FUNIL=0 desliga) ─────────
+            # Verificacoes automaticas em frases simples, uma por agente, fechada por
+            # padrao. O detalhe tecnico fica no Excel (aba Verificacoes) e no banco.
+            if funil_ligado():
+                conferencia = resumo_conferencia(resultado, resultado.get("verificacoes"))
+                with st.expander(conferencia["titulo"], expanded=False):
+                    st.markdown("\n".join(f"- {frase}" for frase in conferencia["frases"]).replace("$", "\\$"))
 
             # ── FUNIL DOS ANUNCIOS (conferencia; MOSTRAR_FUNIL=0 desliga) ─────
             # Onde cada anuncio saiu (agente) e por que, ou se entrou no calculo.

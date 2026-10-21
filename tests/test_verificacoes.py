@@ -92,7 +92,8 @@ def _falha(resultado, inicio):
 def test_base_tudo_passa():
     vs = verificar_execucao(montar())
     assert all(v["ok"] is True for v in vs), [v for v in vs if v["ok"] is not True]
-    assert all(set(v) == {"agente", "verificacao", "esperado", "encontrado", "ok"} for v in vs)
+    assert all(set(v) == {"agente", "verificacao", "esperado", "encontrado", "ok", "problema"} for v in vs)
+    assert all(v["problema"] is None for v in vs)
 
 
 def test_falhas_primeiro_na_tela():
@@ -275,19 +276,44 @@ def _com_uma_falha():
     return r
 
 
-def test_tela_mostra_a_lista_com_falhas_primeiro():
+def test_conferencia_tudo_certo_em_frases_simples():
+    from services.verificacoes import resumo_conferencia
+    c = resumo_conferencia(montar())
+    assert c["titulo"] == "Conferência: tudo certo, os 5 agentes funcionaram como esperado"
+    assert c["frases"][0] == ("Agente 1: buscou 10 anúncios de Curitiba/PR, todos desta avaliação. "
+                              "Juntou 1 anúncio repetido."), c["frases"]
+    assert [f.split(":")[0] for f in c["frases"]] == ["Agente 1", "Agente 2", "Agente 3", "Agente 4", "Agente 5"]
+    texto = " ".join(c["frases"])
+    assert "esperado" not in texto and "encontrado" not in texto and "exec-1" not in texto
+
+
+def test_conferencia_com_problema_diz_o_problema_em_uma_frase():
+    from services.verificacoes import resumo_conferencia
+    r = montar()
+    r["comparaveis"][0]["city"] = "Colombo"
+    r["preco_estimado"]["avaliacao_planilha"]["valor_medio_imovel"] += 5000
+    c = resumo_conferencia(r)
+    assert c["titulo"] == "Conferência: ⚠️ 2 problemas (Agente 1, Agente 5)", c["titulo"]
+    assert "⚠️ Agente 1: 1 anúncio é de outra cidade (Colombo/PR)." in c["frases"]
+    assert any(f.startswith("⚠️ Agente 5: a conta refeita dá R$") for f in c["frases"]), c["frases"]
+    assert any(f.startswith("Agente 2: separou") for f in c["frases"])
+
+
+def test_tela_mostra_a_conferencia_no_fim_fechada():
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("app/interface.py", default_timeout=60)
     at.session_state["resultado"] = _com_uma_falha()
     at.session_state["imovel_alvo_dados"] = {"area": 120, "tipo": "house"}
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    rotulo = next(e.label for e in at.expander if e.label.startswith("🧪 Verificações automáticas"))
-    assert "1 ❌ · 0 ⚠️ · 0 ⚪" in rotulo, rotulo
-    lista = next(m.value for m in at.markdown if m.value.startswith("- ❌"))
-    itens = [l for l in lista.splitlines() if l.startswith("- ")]
-    assert itens[0].startswith("- ❌ **Geral** · Os resultados dos Agentes 2 a 5") and itens[1].startswith("- ✅"), itens[:2]
-    assert itens[-1].startswith("- ✅")
+    assert not [e for e in at.expander if e.label.startswith("🧪")]      # o bloco de cima saiu
+    conf = next(e for e in at.expander if e.label.startswith("Conferência:"))
+    assert conf.label == "Conferência: ⚠️ 1 problema (Geral)" and conf.proto.expanded is False, conf.label
+    frases = next(m.value for m in conf.markdown if m.value.startswith("- "))
+    assert frases.startswith("- ⚠️ Conferência geral: usou dados de outra avaliação (Agente 4).") and "esperado" not in frases
+    # No fim: depois de "Como chegamos neste valor".
+    rotulos = [e.label for e in at.expander]
+    assert rotulos.index(conf.label) > rotulos.index("💰 Agente Estimador de Preço")
 
 
 def test_excel_tem_a_aba_verificacoes():
@@ -297,7 +323,7 @@ def test_excel_tem_a_aba_verificacoes():
     r = _com_uma_falha()
     livro = load_workbook(io.BytesIO(excel_resultado({"alertas": [], "verificacoes": r["verificacoes"]}, [])))
     linhas = list(livro["Verificações"].iter_rows(values_only=True))
-    assert linhas[0] == ("Resultado", "Agente", "Verificação", "Esperado", "Encontrado")
+    assert linhas[0] == ("Resultado", "Agente", "Verificação", "Esperado", "Encontrado")   # o detalhe tecnico continua
     assert linhas[1][0] == "❌ FALHOU" and linhas[-1][0] == "✅ OK" and len(linhas) == 1 + len(r["verificacoes"])
     assert "Verificações" not in load_workbook(io.BytesIO(excel_resultado({"alertas": []}, []))).sheetnames
 

@@ -35,9 +35,15 @@ DESCONTO_LIQUIDEZ = 0.10
 NIVEIS_PRECISOS = {"endereco_completo", "rua_numero", "rua", "bairro", "coordenada_informada"}
 
 
-def _v(agente, verificacao, esperado, encontrado, ok) -> dict:
+def _v(agente, verificacao, esperado, encontrado, ok, problema=None) -> dict:
+    """`problema`: o que deu errado em uma frase simples (para a tela), quando ok nao e True."""
     return {"agente": agente, "verificacao": verificacao, "esperado": esperado,
-            "encontrado": encontrado, "ok": ok}
+            "encontrado": encontrado, "ok": ok,
+            "problema": problema if ok is False or ok == "alerta" else None}
+
+
+def contagem_txt(n, singular: str, plural: str) -> str:
+    return f"{n} {singular if n == 1 else plural}"
 
 
 def _norm(texto) -> str:
@@ -114,20 +120,22 @@ def _geral(resultado: dict) -> list[dict]:
         f"{len(linhas)} linhas; soma das etapas = {soma}; {len(repetidos)} em mais de uma etapa"
         + (f" ({', '.join(repetidos[:3])})" if repetidos else ""),
         not repetidos and soma == len(linhas) == esperado,
+        "algum anúncio aparece em mais de uma etapa do funil, ou falta no funil",
     ))
 
     id_exec = resultado.get("id_execucao")
     if id_exec:
-        outros = []
+        outros, nomes = [], []
         for nome, chave in (("zona (Agente 2)", "zona_homogenea"), ("Agente 3", "analise_qualitativa"),
                             ("Agente 4", "infraestrutura"), ("Agente 5", "preco_estimado")):
             dados = resultado.get(chave) or {}
             if dados and dados.get("id_execucao") not in (None, id_exec):
                 outros.append(f"{nome}: {dados.get('id_execucao')}")
+                nomes.append(nome)
         saida.append(_v(
             "Geral", "Os resultados dos Agentes 2 a 5 são desta execução",
             f"id_execucao {id_exec} em todos", "; ".join(outros) or "todos com o id desta execução",
-            not outros,
+            not outros, f"usou dados de outra avaliação ({', '.join(nomes)})",
         ))
     return saida
 
@@ -153,6 +161,8 @@ def _agente1(resultado: dict) -> list[dict]:
         (f"{len(outra_cidade)} de outra cidade ({', '.join(sorted(set(outra_cidade))[:3])})"
          if outra_cidade else f"todos da cidade pedida") + (f"; {sem_cidade} sem cidade no anúncio" if sem_cidade else ""),
         not outra_cidade if cidade else None,
+        f"{contagem_txt(len(outra_cidade), 'anúncio é', 'anúncios são')} de outra cidade "
+        f"({', '.join(sorted(set(outra_cidade))[:3])})",
     )]
     id_exec = resultado.get("id_execucao")
     de_outra = [c for c in anuncios if c.get("id_execucao") != id_exec]
@@ -167,6 +177,8 @@ def _agente1(resultado: dict) -> list[dict]:
         + (f"; coletados em {horarios[0]}" if len(horarios) == 1 else
            f"; coletados entre {horarios[0]} e {horarios[-1]}" if horarios else ""),
         bool(id_exec) and not de_outra and not sem_horario,
+        f"{contagem_txt(len(de_outra), 'anúncio não é', 'anúncios não são')} desta avaliação" if de_outra
+        else "faltou o horário da coleta em parte dos anúncios",
     ))
     saida.append(_fontes(resultado))
     saida.append(_contagem_coleta(resultado, anuncios))
@@ -193,7 +205,8 @@ def _contagem_coleta(resultado: dict, anuncios: list) -> dict:
         f"(com {c['repetidos_dos_cortados']} repetidos deles); no resultado: {len(anuncios)} anúncios e "
         f"{n_rep_resultado} repetidos"
     )
-    return _v("Agente 1", nome, esperado, encontrado, ok)
+    return _v("Agente 1", nome, esperado, encontrado, ok,
+              "a conta de anúncios encontrados, repetidos e mantidos não fecha")
 
 
 def _fontes(resultado: dict) -> dict:
@@ -218,7 +231,8 @@ def _fontes(resultado: dict) -> dict:
         else:
             ok = False
             partes.append(f"{rotulo}: não respondeu e nenhuma falha foi registrada")
-    return _v("Agente 1", nome, esperado, " | ".join(partes), ok)
+    return _v("Agente 1", nome, esperado, " | ".join(partes), ok,
+              "uma fonte de anúncios não respondeu e a falha não ficou registrada")
 
 
 # =============================================================================
@@ -242,7 +256,7 @@ def _agente2(resultado: dict) -> list[dict]:
         + (f" ({', '.join(f'{m}: {n}' for m, n in modelos.most_common())})" if modelos else "")
         + f", {por_status.get('FALLBACK_PYTHON', 0)} pela reserva (Python); "
         f"{falhas_ia} falha(s) da IA; {len(sem_decisao)} sem julgamento",
-        not sem_decisao,
+        not sem_decisao, f"{contagem_txt(len(sem_decisao), 'imóvel ficou', 'imóveis ficaram')} sem julgamento",
     ))
 
     zona = resultado.get("zona_homogenea") or {}
@@ -267,6 +281,8 @@ def _agente2(resultado: dict) -> list[dict]:
             f"{len(confirmados)} confirmados dentro do raio (casas {raio_casas} m, terrenos {raio_terrenos} m)",
             f"{len(fora)} fora do raio" + (f": {', '.join(fora[:3])}" if fora else ""),
             not fora,
+            f"{contagem_txt(len(fora), 'comparável confirmado está', 'comparáveis confirmados estão')} "
+            f"fora do raio da zona",
         ))
     else:
         saida.append(_v("Agente 2", "Todo comparável confirmado na zona tem distância ≤ raio usado",
@@ -277,6 +293,7 @@ def _agente2(resultado: dict) -> list[dict]:
         "Agente 2", "A checagem do próprio anúncio rodou para todos os anúncios",
         f"checagem_alvo em {len(anuncios)} anúncios",
         f"{len(anuncios) - len(sem_checagem)} com checagem; {len(sem_checagem)} sem", not sem_checagem,
+        f"a checagem do próprio anúncio não rodou em {contagem_txt(len(sem_checagem), 'anúncio', 'anúncios')}",
     ))
     return saida
 
@@ -314,6 +331,8 @@ def _agente3(resultado: dict) -> list[dict]:
     return [_v(
         "Agente 3", "Todo comparável que chegou foi avaliado ou tem falha registrada; notas entre 0 e 1",
         f"{esperado} avaliados (os que chegaram, até {LIMITE_AG3}), notas entre 0 e 1", encontrado, ok,
+        "nem todos os comparáveis foram avaliados" if len(avaliados) != esperado or sem_analise
+        else "alguma nota de qualidade veio fora do esperado",
     )]
 
 
@@ -329,13 +348,15 @@ def _agente4(resultado: dict) -> list[dict]:
     if ag4 and ag4.get("status") != "endereco_nao_localizado" and nota is not None:
         ok = isinstance(nota, (int, float)) and 0 <= nota <= 1 and (nivel is None or nivel in NIVEIS_PRECISOS)
         encontrado = f"rodou (localização: {nivel or 'não informada'}), nota {nota}"
+        problema = "a nota de infraestrutura veio fora do esperado"
     else:
         motivo = "endereço não localizado" if ag4.get("status") == "endereco_nao_localizado" else "falhou"
         ok = bool(aviso)
         encontrado = f"{motivo}; aviso de nota neutra {'dado' if aviso else 'NÃO dado'}"
+        problema = "a infraestrutura não foi avaliada e o aviso de nota média não apareceu"
     return [_v(
         "Agente 4", "Rodou com localização precisa, ou o aviso de nota neutra foi dado; nota entre 0 e 1",
-        "nota entre 0 e 1 com localização de rua/bairro, ou aviso de nota neutra (0,50)", encontrado, ok,
+        "nota entre 0 e 1 com localização de rua/bairro, ou aviso de nota neutra (0,50)", encontrado, ok, problema,
     )]
 
 
@@ -440,6 +461,8 @@ def _repetidos_provaveis(preco: dict) -> dict:
         "Agente 1", "Repetidos prováveis entre os usados",
         "nenhum grupo com mesmo preço (≤0,5%), mesma área (≤2%) e mesma rua (com ou sem número)",
         encontrado, "alerta" if grupos else True,
+        f"{contagem_txt(len(grupos), 'grupo de anúncios parece', 'grupos de anúncios parecem')} ser o mesmo "
+        f"imóvel e conta mais de uma vez no cálculo",
     )
 
 
@@ -452,6 +475,8 @@ def _provavel_no_calculo(resultado: dict, usados: list[dict]) -> dict:
         "nenhum anúncio com o perfil quase todo igual ao do imóvel (mesma rua, área, cômodos e preço até 10%)",
         f"{len(provaveis)}" + (f": {', '.join(str(u.get('url')) for u in provaveis[:3])}" if provaveis else ""),
         "alerta" if provaveis else True,
+        "um provável anúncio do próprio imóvel continua no cálculo" if len(provaveis) == 1
+        else f"{len(provaveis)} prováveis anúncios do próprio imóvel continuam no cálculo",
     )
 
 
@@ -460,7 +485,8 @@ def _agente5(resultado: dict) -> list[dict]:
     if not preco:
         return [_v("Agente 5", "Resultado do Agente 5", "resultado presente",
                    "o Agente 5 não devolveu resultado", any(str(f).startswith("agente5")
-                                                             for f in resultado.get("falhas") or []))]
+                                                             for f in resultado.get("falhas") or []),
+                   "o cálculo do valor não rodou e a falha não ficou registrada")]
     saida = []
     avaliacao = preco.get("avaliacao_planilha") or {}
     exibido = float(avaliacao.get("valor_medio_imovel") or 0)
@@ -474,6 +500,7 @@ def _agente5(resultado: dict) -> list[dict]:
             f"{_reais(exibido)} (liquidez {_reais(exibido * (1 - DESCONTO_LIQUIDEZ))}), tolerância de R$ 1",
             f"{_reais(refeito)} (diferença {_reais(dif)}; liquidez {_reais(liq)})",
             dif <= TOLERANCIA_REAIS and dif_liq <= TOLERANCIA_REAIS,
+            f"a conta refeita dá {_reais(refeito).split(',')[0]}, e o valor mostrado é {_reais(exibido).split(',')[0]}",
         ))
     else:
         saida.append(_v("Agente 5", "Refazer a conta de forma independente dá o valor exibido",
@@ -499,6 +526,7 @@ def _agente5(resultado: dict) -> list[dict]:
         "Agente 5", "Todos os comparáveis usados estão na zona",
         f"{len(usados)} usados na zona (confirmados ou com distância não verificada)",
         f"{len(fora)} fora da zona" + (f": {', '.join(map(str, fora[:3]))}" if fora else ""), not fora,
+        f"{contagem_txt(len(fora), 'comparável usado está', 'comparáveis usados estão')} fora da zona",
     ))
 
     saida.append(_provavel_no_calculo(resultado, usados))
@@ -509,6 +537,7 @@ def _agente5(resultado: dict) -> list[dict]:
         "Agente 5", "Nenhum anúncio do próprio imóvel entrou nos usados",
         "0 anúncios com eh_anuncio_do_alvo nos usados",
         f"{len(alvo_usado)}" + (f": {', '.join(map(str, alvo_usado[:3]))}" if alvo_usado else ""), not alvo_usado,
+        "o anúncio do próprio imóvel entrou no cálculo",
     ))
 
     alvo_tipo = normalizar_tipo((preco.get("imovel_alvo") or {}).get("tipo") or "")
@@ -523,6 +552,8 @@ def _agente5(resultado: dict) -> list[dict]:
     saida.append(_v(
         "Agente 5", "Terrenos usados coerentes com a decisão de separar o terreno", esperado_t,
         f"{'separou' if separou else 'não separou'} o terreno; {len(usados_t)} terrenos usados", ok_t,
+        f"o terreno foi separado com menos de {MIN_AMOSTRAS_CONFIAVEL} terrenos" if separou
+        else "terrenos entraram no cálculo sem o terreno ser separado",
     ))
 
     status = preco.get("status_avaliacao", "ok")
@@ -539,6 +570,8 @@ def _agente5(resultado: dict) -> list[dict]:
         + (f"; motivo registrado: {status}" if outro_motivo else "") + ")",
         f"{'com valor' if confiavel else 'sem valor'} (status {status})",
         confiavel == deveria_ter_valor,
+        "o valor não saiu, mas havia comparáveis suficientes" if deveria_ter_valor
+        else "o valor saiu com menos comparáveis que o mínimo",
     ))
     return saida
 
@@ -552,7 +585,8 @@ def verificar_execucao(resultado: dict) -> list[dict]:
             saida += etapa(resultado)
         except Exception as exc:   # uma verificacao quebrada nao derruba as outras
             saida.append(_v(etapa.__name__.strip("_").replace("agente", "Agente "), "Verificação não rodou",
-                            "verificação sem erro", f"erro: {type(exc).__name__}: {exc}", False))
+                            "verificação sem erro", f"erro: {type(exc).__name__}: {exc}", False,
+                            "uma conferência não rodou (erro interno)"))
     return saida
 
 
@@ -564,3 +598,78 @@ def ordenar_para_tela(verificacoes: list[dict]) -> list[dict]:
 
 def icone(ok) -> str:
     return {True: "✅", False: "❌", "alerta": "⚠️"}.get(ok, "⚪")
+
+
+# =============================================================================
+# CONFERENCIA NA TELA: titulo de uma linha e uma frase simples por agente
+# =============================================================================
+AGENTES = ("Agente 1", "Agente 2", "Agente 3", "Agente 4", "Agente 5")
+
+
+def _frase_ok(agente: str, resultado: dict) -> str:
+    """O que o agente fez, em uma frase (sem fórmulas nem ids)."""
+    alvo = resultado.get("imovel_alvo") or {}
+    preco = resultado.get("preco_estimado") or {}
+    if agente == "Agente 1":
+        c = (resultado.get("resumo_coleta") or {}).get("contagem") or {}
+        encontrados = c.get("antes_dos_repetidos") or (len(_anuncios(resultado))
+                                                       + len(resultado.get("duplicatas_descartadas") or []))
+        repetidos = c.get("repetidos_juntados", len(resultado.get("duplicatas_descartadas") or []))
+        local = f" de {alvo.get('cidade')}/{alvo.get('estado')}" if alvo.get("cidade") else ""
+        return (f"buscou {contagem_txt(encontrados, 'anúncio', 'anúncios')}{local}, todos desta avaliação. "
+                f"Juntou {contagem_txt(repetidos, 'anúncio repetido', 'anúncios repetidos')}.")
+    if agente == "Agente 2":
+        parecidos = (resultado.get("resumo") or {}).get("cluster_a")
+        if parecidos is None:
+            parecidos = sum(1 for c in resultado.get("comparaveis") or [] if c.get("cluster") == "A")
+        zona = resultado.get("zona_homogenea") or {}
+        if not zona:
+            return (f"separou {contagem_txt(parecidos, 'imóvel parecido', 'imóveis parecidos')} com o seu; "
+                    f"a zona do imóvel não foi calculada.")
+        perto = sum(1 for c in zona.get("comparaveis_confirmados") or []
+                    if not _eh_terreno(c) and not c.get("incluido_por_fallback_zona"))
+        raio = zona.get("raio_final_m") or (zona.get("zona_homogenea") or {}).get("raio_metros")
+        return (f"separou {contagem_txt(parecidos, 'imóvel parecido', 'imóveis parecidos')} com o seu e "
+                f"confirmou {perto} perto do imóvel" + (f" (até {int(raio)} m)." if raio else "."))
+    if agente == "Agente 3":
+        n = len((resultado.get("analise_qualitativa") or {}).get("comparaveis") or [])
+        return f"avaliou fotos e descrição de {contagem_txt(n, 'imóvel', 'imóveis')}."
+    if agente == "Agente 4":
+        ag4 = resultado.get("infraestrutura") or {}
+        nota = (ag4.get("scores") or {}).get("score_final")
+        if ag4.get("status") == "endereco_nao_localizado" or nota is None:
+            return "não avaliou o entorno (endereço sem localização precisa); usou a infraestrutura como média."
+        return f"avaliou o entorno do imóvel (nota {float(nota):.2f}".replace(".", ",") + " de 0 a 1)."
+    # Agente 5
+    usados = len(_usados(preco)[0])
+    if preco.get("avaliacao_confiavel", True) and (preco.get("avaliacao_planilha") or {}).get("valor_medio_imovel"):
+        return (f"calculou o valor com {contagem_txt(usados, 'comparável', 'comparáveis')}, "
+                f"e a conta refeita confere.")
+    from services.textos_tela import motivo_sem_valor
+    return f"não calculou o valor: {motivo_sem_valor(resultado, alvo)['motivo'].rstrip('.')}."
+
+
+def resumo_conferencia(resultado: dict, verificacoes: list[dict] | None = None) -> dict:
+    """
+    {"titulo": str, "frases": [str]} para o bloco "Conferência" da tela: titulo em uma
+    linha e uma frase simples por agente ("⚠️ ..." quando alguma verificacao dele falhou).
+    O detalhe tecnico (esperado, encontrado, ids) fica no Excel e no banco.
+    """
+    verificacoes = verificacoes if verificacoes is not None else verificar_execucao(resultado)
+    problemas = [v for v in verificacoes if v.get("ok") is False or v.get("ok") == "alerta"]
+    if not problemas:
+        titulo = f"Conferência: tudo certo, os {len(AGENTES)} agentes funcionaram como esperado"
+    else:
+        agentes = list(dict.fromkeys(v["agente"] for v in problemas))
+        titulo = f"Conferência: ⚠️ {contagem_txt(len(problemas), 'problema', 'problemas')} ({', '.join(agentes)})"
+    frases = []
+    for agente in ("Geral",) + AGENTES:
+        dele = [v.get("problema") or v.get("verificacao") for v in problemas if v["agente"] == agente]
+        if dele:
+            frases.append(f"⚠️ {agente if agente != 'Geral' else 'Conferência geral'}: " + "; ".join(dele) + ".")
+        elif agente != "Geral":
+            try:
+                frases.append(f"{agente}: {_frase_ok(agente, resultado)}")
+            except Exception:   # a frase e so informativa
+                frases.append(f"{agente}: funcionou como esperado.")
+    return {"titulo": titulo, "frases": frases}
