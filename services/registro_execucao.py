@@ -534,9 +534,9 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
         aba_verif.append([nome for nome, _ in colunas_verif])
         for celula in aba_verif[1]:
             celula.font, celula.fill = negrito, fundo_cabecalho
-        rotulos = {True: "OK", False: "FALHOU", None: "não verificável"}
+        rotulos = {True: "OK", False: "FALHOU", "alerta": "conferir", None: "não verificável"}
         for v in ordenar_para_tela(execucao["verificacoes"]):
-            aba_verif.append([f"{icone(v.get('ok'))} {rotulos.get(v.get('ok'))}", v.get("agente"),
+            aba_verif.append([f"{icone(v.get('ok'))} {rotulos.get(v.get('ok'), 'não verificável')}", v.get("agente"),
                               v.get("verificacao"), v.get("esperado"), v.get("encontrado")])
             for celula in aba_verif[aba_verif.max_row][2:]:
                 celula.alignment = Alignment(wrap_text=True, vertical="top")

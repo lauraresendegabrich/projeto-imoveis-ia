@@ -100,7 +100,7 @@ def test_falhas_primeiro_na_tela():
     r["preco_estimado"]["id_execucao"] = "outra"
     r.pop("resumo_coleta")                     # coleta antiga: fontes e contagens nao verificaveis
     ordem = [v["ok"] for v in ordenar_para_tela(verificar_execucao(r))]
-    assert ordem == sorted(ordem, key=lambda ok: {False: 0, None: 1, True: 2}[ok]) and ordem[0] is False
+    assert ordem == sorted(ordem, key=lambda ok: {False: 0, "alerta": 1, None: 2, True: 3}[ok]) and ordem[0] is False
     assert None in ordem and ordem[-1] is True
 
 
@@ -241,6 +241,23 @@ def test_ag5_terrenos_coerentes_com_a_decisao():
     assert v["encontrado"] == "não separou o terreno; 1 terrenos usados", v
 
 
+def test_ag1_repetidos_provaveis_entre_os_usados():
+    _passa(montar(), "Repetidos prováveis entre os usados")
+    r = montar()
+    usados = r["preco_estimado"]["comparaveis_usados"]["construcao"]
+    # O mesmo imovel em 3 anuncios: mesma rua (com e sem numero, grafia "R"), preco e area.
+    for u, rua in zip(usados[:3], ("Rua Manuel Vaz, 12", "R Manuel Vaz", "Rua Manuel Vaz,")):
+        u.update(rua=rua, preco=960_000, area=150)
+    usados[1]["preco"] = 962_000          # 0,2%: ainda o mesmo preco
+    v = _v(r, "Repetidos prováveis entre os usados")
+    assert v["ok"] == "alerta", v                                      # aviso, nao falha
+    assert v["encontrado"].startswith("1 grupo(s), 3 anúncios: Rua Manuel Vaz, 12 R$ 960.000 / 150 m² ×3"), v
+    # Rua diferente, ou area 3% maior: nao junta.
+    usados[2]["rua"] = "Rua Pedro Rendon"
+    usados[1]["area"] = 155
+    assert _v(r, "Repetidos prováveis entre os usados")["ok"] is True
+
+
 def test_ag5_sem_valor_so_com_poucos_comparaveis():
     _passa(montar(), "Sem valor ⇔ menos comparáveis")
     _passa(montar(n_casas=4), "Sem valor ⇔ menos comparáveis")           # 4 < 5: sem valor, coerente
@@ -266,7 +283,7 @@ def test_tela_mostra_a_lista_com_falhas_primeiro():
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     rotulo = next(e.label for e in at.expander if e.label.startswith("🧪 Verificações automáticas"))
-    assert "1 ❌ · 0 ⚪" in rotulo, rotulo
+    assert "1 ❌ · 0 ⚠️ · 0 ⚪" in rotulo, rotulo
     lista = next(m.value for m in at.markdown if m.value.startswith("- ❌"))
     itens = [l for l in lista.splitlines() if l.startswith("- ")]
     assert itens[0].startswith("- ❌ **Geral** · Os resultados dos Agentes 2 a 5") and itens[1].startswith("- ✅"), itens[:2]

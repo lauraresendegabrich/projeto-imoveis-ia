@@ -7,7 +7,8 @@ resultado de cada agente (o dict `resultado` que a interface monta) e conferem r
 
 verificar_execucao(resultado) -> lista de
     {"agente", "verificacao", "esperado", "encontrado", "ok"}
-ok: True (passou), False (falhou) ou None (nao verificavel: o agente nao grava o dado).
+ok: True (passou), False (falhou), "alerta" (pede conferencia, sem ser erro) ou None
+(nao verificavel: o agente nao grava o dado).
 
 Mostradas no modo conferencia (MOSTRAR_FUNIL), gravadas no banco (execucoes.verificacoes)
 e na aba "Verificacoes" do Excel.
@@ -18,6 +19,7 @@ import unicodedata
 from collections import Counter
 from statistics import mean
 
+from agents import identidade
 from agents.price_liquidity import (
     AREA_MINIMA_VALIDA, M2_CONSTRUCAO_MAX, M2_CONSTRUCAO_MIN, MIN_AMOSTRAS_CONFIAVEL, TIPOS_CONDOMINIAIS,
     TIPOS_TERRENO, converter_numero, normalizar_tipo,
@@ -391,6 +393,56 @@ def refazer_conta_agente5(preco: dict) -> float | None:
     return valor
 
 
+def grupos_repetidos_provaveis(usados: list[dict]) -> list[list[dict]]:
+    """
+    Grupos de usados com o mesmo preco (<=0,5%), a mesma area (<=2%) e a mesma rua
+    (nome parecido), com ou sem numero: provavelmente o mesmo imovel em varios anuncios
+    que o Agente 1 nao juntou (ou casas iguais de um loteamento).
+    """
+    pai = list(range(len(usados)))
+
+    def raiz(i):
+        while pai[i] != i:
+            pai[i] = pai[pai[i]]
+            i = pai[i]
+        return i
+
+    ruas = [identidade.rua(u) for u in usados]
+    for i in range(len(usados)):
+        for j in range(i + 1, len(usados)):
+            if not ruas[i] or not ruas[j] or not identidade._nomes_parecidos(ruas[i], ruas[j]):
+                continue
+            dp = identidade.dif_relativa(identidade.preco(usados[i]), identidade.preco(usados[j]))
+            da = identidade.dif_relativa(identidade.area(usados[i]), identidade.area(usados[j]))
+            if dp is not None and da is not None and dp <= 0.005 and da <= 0.02:
+                pai[raiz(i)] = raiz(j)
+    grupos = {}
+    for i, u in enumerate(usados):
+        grupos.setdefault(raiz(i), []).append(u)
+    return sorted((g for g in grupos.values() if len(g) >= 2), key=len, reverse=True)
+
+
+def _repetidos_provaveis(preco: dict) -> dict:
+    """Aviso (nao erro): podem ser casas iguais de um loteamento."""
+    usados_c, usados_t = _usados(preco)
+    grupos = grupos_repetidos_provaveis(usados_c) + grupos_repetidos_provaveis(usados_t)
+    if not grupos:
+        encontrado = "nenhum grupo"
+    else:
+        descricao = [
+            f"{g[0].get('rua') or '?'} {_reais(float(g[0].get('preco') or 0)).split(',')[0]} / "
+            f"{float(g[0].get('area') or 0):.0f} m² ×{len(g)}"
+            for g in grupos[:5]
+        ]
+        encontrado = (f"{len(grupos)} grupo(s), {sum(len(g) for g in grupos)} anúncios: " + "; ".join(descricao)
+                      + ("; ..." if len(grupos) > 5 else ""))
+    return _v(
+        "Agente 1", "Repetidos prováveis entre os usados",
+        "nenhum grupo com mesmo preço (≤0,5%), mesma área (≤2%) e mesma rua (com ou sem número)",
+        encontrado, "alerta" if grupos else True,
+    )
+
+
 def _agente5(resultado: dict) -> list[dict]:
     preco = resultado.get("preco_estimado") or {}
     if not preco:
@@ -414,6 +466,8 @@ def _agente5(resultado: dict) -> list[dict]:
     else:
         saida.append(_v("Agente 5", "Refazer a conta de forma independente dá o valor exibido",
                         "valor calculado", "não verificável: sem valor calculado ou sem comparáveis usados", None))
+
+    saida.append(_repetidos_provaveis(preco))
 
     usados_c, usados_t = _usados(preco)
     usados = usados_c + usados_t
@@ -489,10 +543,10 @@ def verificar_execucao(resultado: dict) -> list[dict]:
 
 
 def ordenar_para_tela(verificacoes: list[dict]) -> list[dict]:
-    """Falhas primeiro, depois as nao verificaveis, depois as que passaram."""
-    ordem = {False: 0, None: 1, True: 2}
-    return sorted(verificacoes or [], key=lambda v: ordem.get(v.get("ok"), 1))
+    """Falhas primeiro, depois os alertas, as nao verificaveis e as que passaram."""
+    ordem = {False: 0, "alerta": 1, None: 2, True: 3}
+    return sorted(verificacoes or [], key=lambda v: ordem.get(v.get("ok"), 2))
 
 
 def icone(ok) -> str:
-    return "✅" if ok is True else "❌" if ok is False else "⚪"
+    return {True: "✅", False: "❌", "alerta": "⚠️"}.get(ok, "⚪")

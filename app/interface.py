@@ -1003,14 +1003,15 @@ with area_principal.container():
         if funil_ligado():
             verificacoes = resultado.get("verificacoes") or verificar_execucao(resultado)
             n_falhas = sum(1 for v in verificacoes if v.get("ok") is False)
+            n_alerta = sum(1 for v in verificacoes if v.get("ok") == "alerta")
             n_nao = sum(1 for v in verificacoes if v.get("ok") is None)
             n_ok = sum(1 for v in verificacoes if v.get("ok") is True)
             with st.expander(
-                f"🧪 Verificações automáticas (conferência): {n_falhas} ❌ · {n_nao} ⚪ · {n_ok} ✅",
+                f"🧪 Verificações automáticas (conferência): {n_falhas} ❌ · {n_alerta} ⚠️ · {n_nao} ⚪ · {n_ok} ✅",
                 expanded=bool(n_falhas),
             ):
                 st.caption("Conferem se cada agente funcionou como esperado; não mudam nenhum cálculo. "
-                           "⚪ = não verificável (o agente não grava o dado).")
+                           "⚠️ = conferir (pode não ser erro); ⚪ = não verificável (o agente não grava o dado).")
                 st.markdown("\n".join(
                     f"- {icone(v['ok'])} **{v['agente']}** · {v['verificacao']}  \n"
                     f"  esperado: {v['esperado']} · encontrado: {v['encontrado']}".replace("$", "\\$")

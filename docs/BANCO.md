@@ -186,8 +186,9 @@ ser registradas; o app continua funcionando). **Rodada no Neon em 21/10/2026.**
 
 `verificacoes` guarda a lista das verificações feitas ao final de cada execução
 (`services/verificacoes.py`), uma por regra: `{agente, verificacao, esperado,
-encontrado, ok}`. `ok` é `true` (passou), `false` (falhou) ou `null` (não verificável:
-o agente não grava o dado). Não mudam nenhum cálculo.
+encontrado, ok}`. `ok` é `true` (passou), `false` (falhou), `"alerta"` (pede
+conferência, mas pode não ser erro; ex.: repetidos prováveis entre os usados) ou `null`
+(não verificável: o agente não grava o dado). Não mudam nenhum cálculo.
 
 ```sql
 -- Execuções com alguma verificação que falhou, e quais
