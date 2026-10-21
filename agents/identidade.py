@@ -135,10 +135,38 @@ def _anunciante(d: dict) -> str:
     return " ".join(p for p in _norm(nome).split() if p not in SUFIXOS_ANUNCIANTE)
 
 
+def _juntar_letras_soltas(palavras: list[str]) -> list[str]:
+    """
+    Siglas escritas com letras soltas viram uma palavra: "b e g" (B E G), "b g" (B&G,
+    o "&" ja virou espaco) e "bg" ficam todos "bg". O "e" entre letras e conjuncao.
+    """
+    saida, sequencia = [], []
+
+    def fechar():
+        if len(sequencia) >= 2:
+            letras = [l for i, l in enumerate(sequencia) if not (l == "e" and 0 < i < len(sequencia) - 1)]
+            saida.append("".join(letras))
+        else:
+            saida.extend(sequencia)
+        sequencia.clear()
+
+    for p in palavras:
+        if len(p) == 1 and p.isalpha():
+            sequencia.append(p)
+        else:
+            fechar()
+            saida.append(p)
+    fechar()
+    return saida
+
+
 def _anunciante_base(d: dict) -> str:
-    """Nome do anunciante sem palavras genericas, numeros (CRECI) e letras soltas."""
+    """
+    Nome do anunciante sem palavras genericas, numeros (CRECI) e letras soltas; siglas
+    com letras separadas ("B E G", "B&G") viram uma palavra ("bg").
+    """
     return " ".join(
-        p for p in _anunciante(d).split()
+        p for p in _juntar_letras_soltas(_anunciante(d).split())
         if p not in PALAVRAS_GENERICAS_ANUNCIANTE and len(p) > 1 and not any(ch.isdigit() for ch in p)
     )
 
@@ -147,6 +175,25 @@ def _codigo(d: dict) -> str | None:
     c = _campo(d, "codigo_imovel_anunciante")
     c = "" if c is None else re.sub(r"\s+", "", str(c)).upper()
     return c if len(c) >= 2 else None
+
+
+# Codigos gerados pelo portal (nao pela imobiliaria): no ImovelWeb, "MI-<13 digitos>-..."
+# (as vezes com prefixo: "TIA-A6PG-MI-..."), ~22 mil anuncios de poucos anunciantes
+# (Rankim, Sucursal). Cada anuncio do mesmo imovel ganha um codigo novo, entao codigos
+# diferentes nao provam unidades diferentes. Ja "IMCX<13 digitos>SP" se repete igual
+# em VivaReal, Chaves na Mao e ImovelWeb: e do sistema da imobiliaria e continua valendo.
+_CODIGO_DO_PORTAL = re.compile(r"(?:^|-)MI-\d{13}-")
+
+
+def codigo_do_portal(codigo: str | None) -> bool:
+    return bool(codigo and _CODIGO_DO_PORTAL.search(codigo))
+
+
+def _codigos_de_unidades_diferentes(a: dict, b: dict) -> bool:
+    """Mesmo portal + mesmo anunciante + codigos da imobiliaria diferentes = outra unidade."""
+    ca, cb = _codigo(a), _codigo(b)
+    return bool(ca and cb and ca != cb and not codigo_do_portal(ca) and not codigo_do_portal(cb)
+                and _anunciante(a) and _anunciante(a) == _anunciante(b) and portal(a) == portal(b))
 
 
 def grupo(d: dict) -> str | None:
@@ -241,7 +288,29 @@ def numero(d: dict) -> str | None:
         if not _vazio(v) and re.fullmatch(r"\d{1,6}", str(v).strip()):
             return str(v).strip().lstrip("0") or None
     m = re.search(r",\s*(?:n[º°o.]*\s*)?(\d{1,6})\b", str(_campo(d, "rua", "street") or ""), re.I)
-    return m.group(1).lstrip("0") or None if m else None
+    if m:
+        return m.group(1).lstrip("0") or None
+    return _numero_no_link(d)
+
+
+def _numero_no_link(d: dict) -> str | None:
+    """
+    ImovelWeb sem numero na rua: alguns anunciantes poem as iniciais do bairro e da rua
+    seguidas do numero no comeco do link ("jcjpv-888-casa-..." = Jardim Consorcio, Joao
+    Peixoto Viegas, 888). So vale quando as letras terminam com as iniciais da rua do
+    proprio anuncio (assim "3-quartos" ou "140-m2" nunca viram numero).
+    """
+    url = str(_campo(d, "url") or "")
+    if "imovelweb" not in url.lower():
+        return None
+    m = re.match(r"([a-z]{2,12})-(\d{1,5})-", url.rstrip("/").rsplit("/", 1)[-1].lower())
+    nome_rua = rua(d)
+    if not m or not nome_rua:
+        return None
+    iniciais = "".join(p[0] for p in nome_rua.split())
+    if len(iniciais) >= 2 and m.group(1).endswith(iniciais):
+        return m.group(2).lstrip("0") or None
+    return None
 
 
 def _bairros(d: dict) -> set[str]:
@@ -324,11 +393,10 @@ def mesmo_imovel(a: dict, b: dict) -> tuple[bool, str]:
     base_a, base_b = _anunciante_base(a), _anunciante_base(b)
     if cod_a and cod_a == cod_b and base_a and base_a == base_b:
         return True, "mesmo_codigo_e_anunciante"
-    anunc_a, anunc_b = _anunciante(a), _anunciante(b)
     # O proprio anunciante diz que sao imoveis diferentes: mesmo portal, mesmo
     # anunciante e codigos diferentes = outras unidades (era a maior fonte de fusao
-    # indevida em BH).
-    if cod_a and cod_b and cod_a != cod_b and anunc_a and anunc_a == anunc_b and portal(a) == portal(b):
+    # indevida em BH). Codigos gerados pelo portal ("MI-...") nao contam.
+    if _codigos_de_unidades_diferentes(a, b):
         return False, "veto_codigos_diferentes"
 
     g, motivo = regra_do_par(a, b)
@@ -481,9 +549,7 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
         # (sem veto com ninguem), mas dois membros do mesmo portal + anunciante com
         # codigos diferentes sao unidades diferentes (ex.: lancamento com dezenas
         # de unidades de mesmo preco/area) e nao podem ser o mesmo imovel.
-        cx, cy = _codigo(x), _codigo(y)
-        return bool(cx and cy and cx != cy and portal(x) == portal(y)
-                    and _anunciante(x) and _anunciante(x) == _anunciante(y))
+        return _codigos_de_unidades_diferentes(x, y)
 
     ordem = sorted(range(len(anuncios)), key=lambda k: -_completude(anuncios[k]))
     representantes: dict[tuple, list[int]] = {}   # bloco -> representantes nele

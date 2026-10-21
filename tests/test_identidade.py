@@ -392,6 +392,55 @@ def test_area_diferente_ainda_veta_sem_o_endereco_completo_ou_com_condominio():
     assert mesmo_imovel(a, _peixoto(area_construida=203.0, quartos=4, listing_id="2"))[1] == "veto_quartos"
 
 
+def _iw(listing_id, codigo, anunciante="Rankim 11", **campos):
+    """Anuncio do ImovelWeb da Av. Joao Peixoto Viegas sem numero na rua (o 888 so no link)."""
+    base = {"portal": "imovelweb", "source": "ImovelWeb", "rua": "Avenida João Peixoto Viegas",
+            "url": f"https://www.imovelweb.com.br/propriedades/jcjpv-888-casa-601361091-16-{listing_id}.html",
+            "listing_id": listing_id, "codigo_imovel_anunciante": codigo, "anunciante_nome": anunciante,
+            "area_construida": 135.0, "descricao": f"Casa {listing_id}"}
+    return _peixoto(**{**base, **campos})
+
+
+def test_numero_lido_do_link_do_imovelweb():
+    from agents.identidade import numero
+    assert numero(_iw("3044295820", None)) == "888"
+    # So quando as letras terminam com as iniciais da rua do anuncio.
+    assert numero(_iw("1", None, rua="Rua Pedro Rendon")) is None
+    assert numero(_iw("1", None, url="https://www.imovelweb.com.br/propriedades/"
+                                    "casa-a-venda-jardim-marajoara-3-quartos-140-m2-3046689017.html")) is None
+    # Com o numero do link, junta com o anuncio do VivaReal do mesmo endereco.
+    vr = _peixoto(area_construida=135.0, rua="Avenida João Peixoto Viegas, 888", anunciante_nome="Remax",
+                  descricao="Outro texto", listing_id="9")
+    junta, motivo = mesmo_imovel(_iw("3044295820", None), vr)
+    assert junta and motivo.startswith("casa_preco_area_rua_numero"), motivo
+
+
+def test_codigo_gerado_pelo_portal_nao_veta():
+    from agents.identidade import codigo_do_portal
+    assert codigo_do_portal("MI-1787983209690-7YMHCD") and codigo_do_portal("TIA-A6PG-MI-1784297184312-YS53J2")
+    assert not codigo_do_portal("IMCX1787702269080SP") and not codigo_do_portal("CA13241")
+    # Rankim no ImovelWeb: mesmo anunciante, codigos "MI-..." diferentes -> sao o mesmo imovel.
+    a = _iw("3044295820", "MI-1787983209690-7YMHCD")
+    b = _iw("3047479773", "MI-1791266469792-YKGPVQ")
+    junta, motivo = mesmo_imovel(a, b)
+    assert junta and motivo.startswith("casa_preco_area_rua_numero"), motivo
+    assert len(deduplicar([a, b])[0]) == 1
+    # Codigos da imobiliaria diferentes continuam vetando (outra unidade).
+    assert mesmo_imovel(_iw("1", "CA0101"), _iw("2", "CA0102")) == (False, "veto_codigos_diferentes")
+    assert len(deduplicar([_iw("1", "CA0101"), _iw("2", "CA0102")])[0]) == 2
+
+
+def test_anunciante_com_letras_soltas_e_e_comercial():
+    from agents.identidade import _anunciante_base
+    assert {_anunciante_base({"anunciante_nome": n}) for n in ("B E G Imoveis", "B&G IMÓVEIS", "BG Imóveis")} == {"bg"}
+    assert _anunciante_base({"anunciante_nome": "Silva e Souza Imóveis"}) == "silva souza"
+    a = _peixoto(area_construida=203.0, codigo_imovel_anunciante="CA13241", anunciante_nome="B E G Imoveis",
+                 listing_id="2907797125")
+    b = _peixoto(area_construida=203.0, codigo_imovel_anunciante="CA13241", anunciante_nome="B&G IMÓVEIS",
+                 portal="chavesnamao", source="Chaves na Mão", listing_id="46066008", descricao="Outro texto")
+    assert mesmo_imovel(a, b) == (True, "mesmo_codigo_e_anunciante")
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
