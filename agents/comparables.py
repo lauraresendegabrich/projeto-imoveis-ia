@@ -755,11 +755,23 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
         _codigos_imobiliaria(imovel_alvo.get("description") or imovel_alvo.get("descricao"))
         & _codigos_imobiliaria(comparavel.get("description") or comparavel.get("descricao"))
     ) if not imovel_alvo.get("descricao_gerada") else set()
+    # Codigos como "CA0406" sao sequenciais em cada imobiliaria e se repetem entre
+    # imobiliarias: so confirmam com preco igual (<=0,5%) ou area igual (<=2%), sem
+    # veto. Sem isso, so suspeita (decisao da usuaria, 21/10/2026).
+    codigo_em_comum = False
     if codigos_comuns:
+        codigo_em_comum = True
         score += 1.00
-        sinais.append(f"codigo_imobiliaria({sorted(codigos_comuns)[0]})")
-        if not veto:
-            tem_identificador = True
+        codigo = sorted(codigos_comuns)[0]
+        preco_ou_area_iguais = (
+            (preco_dif is not None and preco_dif <= 0.005) or (area_dif is not None and area_dif <= 0.02)
+        )
+        if preco_ou_area_iguais:
+            sinais.append(f"codigo_imobiliaria({codigo})")
+            if not veto:
+                tem_identificador = True
+        else:
+            sinais.append(f"codigo_imobiliaria({codigo}, sem preço ou área iguais)")
 
     # --- Rua + numero (+ unidade para apartamento) ---
     rua_alvo = identidade.rua(imovel_alvo)
@@ -839,8 +851,8 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
         mesmo_predio = g == "apto" and tem_area and (
             "mesma_rua_e_numero" in sinais or "coordenadas_iguais" in sinais
         )
-        # Foto em comum sem confirmar (apto, ou casa com veto de atributo): suspeita.
-        possivel_alvo = (tem_bairro and tem_area and tem_extra) or mesmo_predio or foto_em_comum
+        # Foto ou codigo da imobiliaria em comum sem confirmar: suspeita.
+        possivel_alvo = (tem_bairro and tem_area and tem_extra) or mesmo_predio or foto_em_comum or codigo_em_comum
 
     return (eh_alvo, possivel_alvo, sinais, round(score, 3))
 

@@ -122,6 +122,19 @@ def test_c3_codigo_com_veto_nao_confirma():
     assert not eh
 
 
+def test_c5_mesmo_codigo_com_preco_e_area_diferentes_so_suspeita():
+    # Codigos se repetem entre imobiliarias: sem preco (<=0,5%) ou area (<=2%) iguais,
+    # o mesmo codigo nao confirma. Area 5,6% maior e preco diferente (sem veto: casa
+    # tolera ate 10% de area).
+    alvo = dict(ALVO, description=DESC_A, descricao_gerada=False, price=1_200_000.0)
+    eh, suspeito, sinais, _ = ag2._eh_anuncio_do_alvo(alvo, anuncio(description=DESC_B, area=380.0, price=1_350_000.0))
+    assert not eh and suspeito, sinais
+    assert "codigo_imobiliaria(CA0406, sem preço ou área iguais)" in sinais and not any(s.startswith("veto") for s in sinais), sinais
+    # Mesmo codigo e preco igual (area diferente): confirma.
+    eh, _, sinais, _ = ag2._eh_anuncio_do_alvo(alvo, anuncio(description=DESC_B, area=380.0, price=1_200_000.0))
+    assert eh and "codigo_imobiliaria(CA0406)" in sinais, sinais
+
+
 def test_c4_extrai_so_codigos_com_letras_e_numeros():
     assert ag2._codigos_imobiliaria("Ref.: AP1234 | Referência 998877 | cod. 12") == {"AP1234"}
 
