@@ -34,11 +34,11 @@ def terreno(i, **extra):
             "id_execucao": ID, "coletado_em": "2026-10-21T09:00:00", **extra}
 
 
-def montar(area_terreno=None, n_casas=6, n_terrenos=2):
+def montar(area_terreno=None, n_casas=6, n_terrenos=2, extras_terreno=None):
     casas = [casa(i) for i in range(n_casas)]
     reprovada = casa(90, cluster="B", status_julgamento="REPROVADO_PRE_CLASSIFICACAO",
                      classificacao_zona=None, distancia_metros=None)
-    terrenos = [terreno(i) for i in range(n_terrenos)]
+    terrenos = [terreno(i, **(extras_terreno or {}).get(i, {})) for i in range(n_terrenos)]
     alvo5 = {"propertyType": "casa", "area": 120, "area_terreno": area_terreno}
     ag5 = executar_agente5(alvo5, copy.deepcopy(terrenos), copy.deepcopy(casas), {}, {})
     ag5["id_execucao"] = ID
@@ -190,6 +190,25 @@ def test_ag5_refaz_a_conta():
     r = montar()
     r["preco_estimado"]["avaliacao_planilha"]["valor_medio_imovel"] += 50
     _falha(r, "Refazer a conta de forma independente")
+
+
+def test_ag5_refaz_a_conta_com_terreno_acentuado_e_preco_m2_do_anuncio():
+    # Mesma regra do Agente 5 para o R$/m2 do terreno: topografia "acentuado" vale 80%
+    # e, com area invalida, vale o preco/m2 do anuncio.
+    r = montar(area_terreno=250, n_terrenos=6, extras_terreno={
+        0: {"topografia": "Aclive acentuado"}, 1: {"area": 5, "pricePerSqm": 700}})
+    usados_t = r["preco_estimado"]["comparaveis_usados"]["terreno"]
+    assert len(usados_t) == 6 and r["preco_estimado"]["calculo_terreno"]["aplicado"]
+    acentuado = next(t for t in usados_t if t["topografia"] == "Aclive acentuado")
+    assert acentuado["conta_m2"][0]["valor_m2"] == round(200_000 / 300 * 0.8, 2)
+    _passa(r, "Refazer a conta de forma independente")
+    # Sem a regra (preco / area em todos), a conta daria outro valor: o teste pega o caso.
+    sem_regra = copy.deepcopy(r)
+    for t in sem_regra["preco_estimado"]["comparaveis_usados"]["terreno"]:
+        t["topografia"], t["preco_m2_anuncio"] = None, None
+        if t["area"] == 5:
+            t["area"] = 1000
+    _falha(sem_regra, "Refazer a conta de forma independente")
 
 
 def test_ag5_refaz_a_conta_de_apartamento():

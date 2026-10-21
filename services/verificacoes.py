@@ -19,9 +19,11 @@ from collections import Counter
 from statistics import mean
 
 from agents.price_liquidity import (
-    M2_CONSTRUCAO_MAX, M2_CONSTRUCAO_MIN, MIN_AMOSTRAS_CONFIAVEL, TIPOS_CONDOMINIAIS, TIPOS_TERRENO,
-    normalizar_tipo,
+    AREA_MINIMA_VALIDA, M2_CONSTRUCAO_MAX, M2_CONSTRUCAO_MIN, MIN_AMOSTRAS_CONFIAVEL, TIPOS_CONDOMINIAIS,
+    TIPOS_TERRENO, converter_numero, normalizar_tipo,
 )
+
+FATOR_TOPOGRAFIA_ACENTUADA = 0.80   # mesma regra de calcular_valores_m2_terreno (Agente 5)
 from app.funil import montar_funil, resumo_funil
 
 LIMITE_AG3 = 10            # o Agente 3 analisa no maximo 10 comparaveis (MAX_COMPARAVEIS_AG3)
@@ -64,6 +66,21 @@ def _anuncios(resultado: dict) -> list[dict]:
 def _usados(preco: dict) -> tuple[list, list]:
     u = preco.get("comparaveis_usados") or {}
     return list(u.get("construcao") or []), list(u.get("terreno") or [])
+
+
+def _m2_terreno(t: dict) -> float | None:
+    """
+    R$/m2 de um terreno usado, pela mesma regra do Agente 5 (calcular_valores_m2_terreno):
+    preco / area; com area invalida (ou sem preco), o preco/m2 do anuncio; topografia
+    "acentuado" (aclive/declive) vale 80%.
+    """
+    preco, area = converter_numero(t.get("preco")), converter_numero(t.get("area"))
+    if not preco or not area or area < AREA_MINIMA_VALIDA:
+        return converter_numero(t.get("preco_m2_anuncio")) or None
+    valor = preco / area
+    if "acentuado" in str(t.get("topografia") or "").lower():
+        valor *= FATOR_TOPOGRAFIA_ACENTUADA
+    return valor
 
 
 def _media_aparada(valores: list[float]) -> float:
@@ -336,8 +353,7 @@ def refazer_conta_agente5(preco: dict) -> float | None:
     condominial = normalizar_tipo(alvo.get("tipo") or "") in TIPOS_CONDOMINIAIS
     separou = bool((preco.get("calculo_terreno") or {}).get("aplicado")) and not condominial
     if separou:
-        m2_terrenos = [float(t["preco"]) / float(t.get("area") or t.get("area_terreno"))
-                       for t in usados_t if t.get("preco") and (t.get("area") or t.get("area_terreno"))]
+        m2_terrenos = [v for v in (_m2_terreno(t) for t in usados_t) if v]
         if not m2_terrenos:
             return None
         menor_t, medio_t = min(m2_terrenos), _media_aparada(m2_terrenos)

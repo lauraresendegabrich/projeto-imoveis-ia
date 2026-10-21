@@ -1324,7 +1324,11 @@ def executar_agente5(
             "construcao": usados_construcao,
             # Terrenos usados, na mesma ordem de valores_m2_terreno: com a conta de cada um.
             "terreno": [
-                {**_resumo_imovel(t), "conta_m2": [{"valor_m2": round(v, 2), "na_media": ficou}]}
+                {**_resumo_imovel(t), "conta_m2": [{"valor_m2": round(v, 2), "na_media": ficou}],
+                 # Para refazer o R$/m2 do terreno (verificacoes): fator de topografia
+                 # e preco/m2 do anuncio quando a area e invalida.
+                 "topografia": t.get("topografia") or t.get("topography"),
+                 "preco_m2_anuncio": t.get("pricePerSqm")}
                 for t, v, ficou in zip(usados_terreno, valores_m2_terreno, marcar_media_aparada(valores_m2_terreno))
             ] if len(usados_terreno) == len(valores_m2_terreno) else [_resumo_imovel(t) for t in usados_terreno],
         },
