@@ -348,9 +348,10 @@ def test_pode_ser_condominio_so_com_indicio_real():
     from agents.identidade import _pode_ser_condominio as cond
     nao = ["Casa 3 dormitórios à venda", "Casa à venda no Jardim", "Sem condomínio, IPTU baixo",
            "Não paga condomínio", "Isento de condomínio", "Livre de condomínio",
-           "Valores de condomínio e IPTU podem sofrer alterações", "jcjpv-888-casa-601361091-16"]
+           "Valores de condomínio e IPTU podem sofrer alterações", "jcjpv-888-casa-601361091-16",
+           "Casa E Terreno À Venda", "Fora de condomínio", "Não é condomínio", "Casa A Venda"]
     sim = ["Casa 3 do condomínio Jardim", "Casa 03 em vila", "casa nº 3", "Casa A, com quintal",
-           "Casa em condomínio fechado", "Condomínio R$ 300", "Bloco B", "Lote 3"]
+           "Casa em condomínio fechado", "Condomínio R$ 300", "Bloco B", "Lote 3", "Casa B do condomínio"]
     assert [t for t in nao if cond({"descricao": t})] == []
     assert [t for t in sim if not cond({"descricao": t})] == []
     assert cond({"descricao": "", "property_sub_type": "Casa / Sobrado em Condomínio"})

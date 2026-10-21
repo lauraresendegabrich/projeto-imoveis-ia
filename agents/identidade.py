@@ -225,7 +225,8 @@ def _pode_ser_condominio(d: dict) -> bool:
     # condominio" e "valores de condominio e IPTU podem sofrer alteracoes" desligavam
     # a regra rua + numero).
     texto = re.sub(
-        r"\b(?:sem|nao (?:tem|paga|possui|ha|cobra)|isent[oa] de|livre de|nao e de)\s+(?:taxa de\s+)?condomini\w*"
+        r"\b(?:sem|nao (?:tem|paga|possui|ha|cobra)|isent[oa] de|livre de|fora de|nao e(?: de| em)?)"
+        r"\s+(?:taxa de\s+|um\s+)?condomini\w*"
         r"|\bcondomini\w*\s+(?:isento|zero|gratis)\b"
         r"|\bvalores? de condomini\w* e iptu",
         " ", texto,
@@ -237,8 +238,10 @@ def _pode_ser_condominio(d: dict) -> bool:
     if re.search(r"\bcasa (?:n[o.]? ?)?(?:0\d|\d{1,3} (?:do|no|da|na) (?:condominio|conjunto|residencial|vila))\b"
                  r"|\bcasa n[o.]? ?\d{1,3}\b", texto):
         return True
+    # Letra de unidade so seguida de pontuacao, fim do texto ou "do/no/da/na": "Casa A,"
+    # e "Casa B do condominio" sim; "Casa E Terreno a Venda" (titulo) e "Casa A Venda" nao.
     sem_acento = unicodedata.normalize("NFKD", original).encode("ascii", "ignore").decode()
-    return bool(re.search(r"\b[Cc]asa ([A-H])\b(?!\s*[-–]?\s*[Vv]enda)", sem_acento))
+    return bool(re.search(r"\b[Cc]asa ([A-H])(?=\s*(?:[,.;:)\-–]|$)|\s+(?:do|no|da|na)\b)", sem_acento))
 
 
 def regra_do_par(a: dict, b: dict) -> tuple[str | None, str]:
