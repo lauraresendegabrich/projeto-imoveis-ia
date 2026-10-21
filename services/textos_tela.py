@@ -137,6 +137,21 @@ def motivo_sem_valor(resultado: dict, imovel_alvo: dict | None = None) -> dict:
     return {"motivo": motivo, "fazer": fazer}
 
 
+def motivo_terreno_fora(preco: dict) -> str:
+    """Por que o terreno nao entrou no calculo do Agente 5 (passo a passo da tela)."""
+    from agents.price_liquidity import TIPOS_CONDOMINIAIS, normalizar_tipo
+    preco = preco or {}
+    alvo = preco.get("imovel_alvo") or {}
+    if normalizar_tipo(alvo.get("tipo") or "") in TIPOS_CONDOMINIAIS:
+        return "o imóvel é apartamento, e o terreno não entra no cálculo"
+    if not alvo.get("area_terreno_m2"):
+        return "terreno do imóvel não informado"
+    n = ((preco.get("valor_m2_zona_homogenea") or {}).get("terreno") or {}).get("quantidade_amostras", 0)
+    if preco.get("aviso_terreno") or 0 < n < MIN_AMOSTRAS_CONFIAVEL:
+        return f"só {contagem(n, 'terreno', 'terrenos')} à venda na região (mínimo de {MIN_AMOSTRAS_CONFIAVEL})"
+    return "não há terrenos comparáveis na zona"
+
+
 def linhas_referencia(resultado: dict) -> list[dict]:
     """Comparaveis validos (sem valor confiavel) para mostrar como referencia."""
     usados = ((resultado.get("preco_estimado") or {}).get("comparaveis_usados") or {})

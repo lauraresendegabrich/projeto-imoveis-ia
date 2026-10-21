@@ -20,6 +20,7 @@ from services.formatos import ler_numero_br
 from services.verificacoes import icone, ordenar_para_tela, verificar_execucao
 from services.textos_tela import (
     anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, linhas_referencia, motivo_sem_valor,
+    motivo_terreno_fora,
     nota_anuncio_do_alvo, texto_comparaveis_na_zona,
 )
 from services.leilao import (
@@ -1572,7 +1573,7 @@ with area_principal.container():
                     f"O valor vem dos anúncios comparáveis na sua zona homogênea. "
                     f"Construção: **{contagem(n_constr, 'imóvel', 'imóveis')}**. "
                     + (f"Terreno: **{contagem(n_terreno, 'terreno', 'terrenos')}**." if terreno_aplicado else
-                       "Terreno não entrou (imóvel condominial ou sem terreno/comparáveis de terreno).")
+                       f"Terreno não entrou: {motivo_terreno_fora(preco)}.")
                 )
 
                 # Passo 2 — m2 de construcao

@@ -201,6 +201,30 @@ def test_k_sem_imobiliaria_mais_proxima():
     assert "Imob X" not in _laudo(at)
 
 
+# ---------------------------------------------------------------- motivo do terreno no passo a passo
+def test_motivo_do_terreno_fora_do_calculo():
+    from services.textos_tela import motivo_terreno_fora
+    casas = [{"propertyType": "casa", "price": 500_000 + i * 10_000, "area": 100 + i} for i in range(6)]
+    terrenos = lambda n: [{"propertyType": "terreno", "price": 200_000 + i * 1000, "area": 300} for i in range(n)]
+    casos = (
+        ({"propertyType": "casa", "area": 120}, terrenos(6), casas, "terreno do imóvel não informado"),
+        ({"propertyType": "casa", "area": 120, "area_terreno": 200}, terrenos(3), casas,
+         "só 3 terrenos à venda na região (mínimo de 5)"),
+        ({"propertyType": "casa", "area": 120, "area_terreno": 200}, [], casas, "não há terrenos comparáveis na zona"),
+        ({"propertyType": "apartamento", "area": 80}, terrenos(6),
+         [dict(c, propertyType="apartamento") for c in casas], "o imóvel é apartamento, e o terreno não entra no cálculo"),
+    )
+    for alvo, ters, comps, esperado in casos:
+        assert motivo_terreno_fora(executar_agente5(alvo, ters, comps, {}, {})) == esperado, (alvo, esperado)
+    # Na tela (passo 1 do Agente 5), casa sem o terreno informado:
+    r = resultado_sem_valor()
+    r["preco_estimado"].update(status_avaliacao="ok", avaliacao_confiavel=True,
+                               imovel_alvo={"tipo": "casa", "area_terreno_m2": 0})
+    textos = " ".join(m.value for m in _tela(r).markdown)
+    assert "Terreno não entrou: terreno do imóvel não informado." in textos
+    assert "imóvel condominial ou sem terreno" not in textos
+
+
 # ---------------------------------------------------------------- sem dispersao Area x Preco
 def test_sem_grafico_de_dispersao_area_x_preco():
     r = resultado_sem_valor()
