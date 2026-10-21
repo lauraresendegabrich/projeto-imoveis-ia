@@ -2007,7 +2007,12 @@ def coletar_imoveis(
     # com IDs e URLs diferentes, o que a dedup por ID/URL nao pega. Fica um anuncio
     # por imovel (o mais completo); os descartados vao completos para
     # duplicatas_descartadas_ag1.json, com quem ficou no lugar e o motivo.
+    # Contagens da coleta (verificacoes: encontrados = mantidos + repetidos).
+    contagem = {"brutos": len(todos), "removidos_leilao_apos_enriquecimento": removidos_leilao,
+                "antes_dos_repetidos": len(combinados)}
     combinados, duplicatas_descartadas = deduplicar(combinados)
+    contagem["repetidos_juntados"] = len(duplicatas_descartadas)
+    contagem["unicos"] = len(combinados)
     _marcar_provaveis_lancamentos(combinados, duplicatas_descartadas)
     if duplicatas_descartadas:
         motivos = Counter(d["motivo_duplicata"].split("(")[0] for d in duplicatas_descartadas)
@@ -2025,6 +2030,10 @@ def coletar_imoveis(
         d for d in duplicatas_descartadas
         if (d["duplicata_de"]["portal"], d["duplicata_de"]["listing_id"], d["duplicata_de"]["url"]) in mantidos
     ]
+    contagem["cortados_pelo_limite"] = contagem["unicos"] - len(combinados)
+    contagem["repetidos_dos_cortados"] = contagem["repetidos_juntados"] - len(duplicatas_descartadas)
+    contagem["mantidos"] = len(combinados)
+    contagem["repetidos"] = len(duplicatas_descartadas)
 
     # Limpeza cosmetica minima: nao inventa acentos; apenas remove prefixos indevidos do scraper.
     prefixos_tipo = ["lote terreno ", "lote ", "terreno ", "casa ", "apartamento ", "sobrado "]
@@ -2067,7 +2076,8 @@ def coletar_imoveis(
     # os dados sao desta execucao, nao de uma rodada anterior).
     coletado_em = datetime.now().isoformat(timespec="seconds")
     # Resumo da coleta (o mesmo para todos os anuncios): situacao de cada fonte.
-    resumo_coleta = {"id_execucao": id_execucao, "coletado_em": coletado_em, "fontes": fontes}
+    resumo_coleta = {"id_execucao": id_execucao, "coletado_em": coletado_em, "fontes": fontes,
+                     "contagem": contagem}
     for im in combinados:
         im["escopo_busca"] = escopo
         im["id_execucao"] = id_execucao

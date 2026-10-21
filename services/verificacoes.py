@@ -150,13 +150,31 @@ def _agente1(resultado: dict) -> list[dict]:
         bool(id_exec) and not de_outra and not sem_horario,
     ))
     saida.append(_fontes(resultado))
-    saida.append(_v(
-        "Agente 1", "encontrados = mantidos + repetidos",
-        "total antes de juntar os repetidos = mantidos + repetidos",
-        f"não verificável: o Agente 1 não grava o total antes de juntar os repetidos "
-        f"(mantidos {len(anuncios)}, repetidos {len(resultado.get('duplicatas_descartadas') or [])})", None,
-    ))
+    saida.append(_contagem_coleta(resultado, anuncios))
     return saida
+
+
+def _contagem_coleta(resultado: dict, anuncios: list) -> dict:
+    """encontrados = mantidos + repetidos (com os cortados pelo limite por tipo)."""
+    nome = "encontrados = mantidos + repetidos"
+    esperado = ("encontrados = únicos + repetidos; únicos = mantidos + cortados pelo limite; "
+                "mantidos e repetidos iguais aos do resultado")
+    c = (resultado.get("resumo_coleta") or {}).get("contagem")
+    n_rep_resultado = len(resultado.get("duplicatas_descartadas") or [])
+    if not c:
+        return _v("Agente 1", nome, esperado,
+                  f"não verificável: coleta sem as contagens (mantidos {len(anuncios)}, repetidos {n_rep_resultado})", None)
+    ok = (c["antes_dos_repetidos"] == c["unicos"] + c["repetidos_juntados"]
+          and c["unicos"] == c["mantidos"] + c["cortados_pelo_limite"]
+          and c["repetidos_juntados"] == c["repetidos"] + c["repetidos_dos_cortados"]
+          and c["mantidos"] == len(anuncios) and c["repetidos"] == n_rep_resultado)
+    encontrado = (
+        f"encontrados {c['antes_dos_repetidos']} = {c['unicos']} únicos + {c['repetidos_juntados']} repetidos; "
+        f"únicos {c['unicos']} = {c['mantidos']} mantidos + {c['cortados_pelo_limite']} cortados pelo limite "
+        f"(com {c['repetidos_dos_cortados']} repetidos deles); no resultado: {len(anuncios)} anúncios e "
+        f"{n_rep_resultado} repetidos"
+    )
+    return _v("Agente 1", nome, esperado, encontrado, ok)
 
 
 def _fontes(resultado: dict) -> dict:

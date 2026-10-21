@@ -150,6 +150,42 @@ def test_fonte_sem_resposta_e_sem_falha_registrada_falha():
     assert v["ok"] is False and "nenhuma falha foi registrada" in v["encontrado"], v
 
 
+# ---------------------------------------------------------------- contagens
+def repetido(i, portal, lid):
+    """O mesmo imovel (mesmo codigo da imobiliaria) anunciado em outro portal."""
+    return linha(i, portal=portal, listing_id=lid, url=f"https://{portal}/{lid}", rua="Rua 0",
+                 codigo_imovel_anunciante="CA0406", anunciante_nome="Pagani Imoveis", preco=777000, area_construida=150)
+
+
+def test_encontrados_igual_a_mantidos_mais_repetidos():
+    coletados = coletar([repetido(0, "vivareal", "9001"), repetido(0, "chavesnamao", "9002")]
+                        + [linha(i) for i in range(1, 12)], id_execucao="exec-1")
+    c = coletados[0]["resumo_coleta"]["contagem"]
+    assert (c["antes_dos_repetidos"], c["unicos"], c["repetidos_juntados"], c["mantidos"], c["repetidos"]) == \
+        (13, 12, 1, 12, 1), c
+    v = _v(resultado_da_coleta(coletados), "encontrados = mantidos + repetidos")
+    assert v["ok"] is True and v["encontrado"].startswith("encontrados 13 = 12 únicos + 1 repetidos"), v
+
+
+def test_cortados_pelo_limite_entram_na_conta():
+    coletados = coletar([linha(i) for i in range(205)], id_execucao="exec-1")
+    c = coletados[0]["resumo_coleta"]["contagem"]
+    assert c["cortados_pelo_limite"] == 5 and c["mantidos"] == 200, c
+    assert _v(resultado_da_coleta(coletados), "encontrados = mantidos + repetidos")["ok"] is True
+
+
+def test_conta_que_nao_fecha_falha():
+    coletados = coletar([repetido(0, "vivareal", "9001"), repetido(0, "chavesnamao", "9002")]
+                        + [linha(i) for i in range(1, 12)], id_execucao="exec-1")
+    r = resultado_da_coleta(coletados)
+    r["duplicatas_descartadas"] = []                   # o repetido sumiu do resultado
+    v = _v(r, "encontrados = mantidos + repetidos")
+    assert v["ok"] is False and "no resultado: 12 anúncios e 0 repetidos" in v["encontrado"], v
+    r = resultado_da_coleta(coletados)
+    r["resumo_coleta"] = {"contagem": dict(coletados[0]["resumo_coleta"]["contagem"], antes_dos_repetidos=20)}
+    assert _v(r, "encontrados = mantidos + repetidos")["ok"] is False
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
