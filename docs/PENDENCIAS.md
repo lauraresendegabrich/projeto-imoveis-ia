@@ -36,19 +36,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
     ser casas iguais de loteamento ou números inventados ("9999").
   - Decidir se o Agente 1 deve juntar esses casos e com qual regra.
 - [ ] **O que ainda impede juntar os repetidos da Av. João Peixoto Viegas, 888 (21/10/2026).**
-  Depois de `f0dbc29`, os 31 anúncios a R$ 830.000 nessa avenida passaram de 12 para 11
-  imóveis distintos; nos 9 usados da rodada, de 9 para 6. O que sobra:
-  - ImovelWeb sem número na rua: o 888 só aparece no link ("jcjpv-888-casa-…"). Ideia:
-    ler o número do link ou da descrição.
-  - Os dois anúncios da Rankim no ImovelWeb caem em `veto_codigos_diferentes`, mas os
-    códigos ("MI-1787983209690-…") são gerados pelo portal, não pela imobiliária. Ideia:
-    não usar códigos "MI-…" no veto.
-  - VivaReal "B E G Imoveis" × Chaves na Mão "B&G IMÓVEIS", com o mesmo código CA13241:
-    o nome normalizado fica diferente ("b e g" × "b g"), e a regra "mesmo código e
-    anunciante" não pega. Ideia: comparar o anunciante sem espaços.
-  - Chaves na Mão 46815748 tem número 800 (os outros, 888), e no link a área está
-    trocada (203 no link, 135 no anúncio).
-  - Efeito da regra nova: com o mesmo endereço e preço, áreas entre 2% e 10% também
+  Depois de `c5e157a`, os 9 anúncios a R$ 830.000 dessa rodada são 4 imóveis distintos.
+  O que sobra:
+  - Chaves na Mão 46815748 (KAZZA): número 800 (os outros, 888) e área trocada no link
+    (203 no link, 135 no anúncio). Decisão da usuária: fica como está.
+  - Chaves na Mão 47235519 (FOXTER, 203 m²): sem número e sem código em comum.
+  - Chaves na Mão 46262870 (AM Imóveis): "Casa / Sobrado em Condomínio", sem área.
+  - Efeito de `f0dbc29`: com o mesmo endereço e preço, áreas entre 2% e 10% também
     juntam (ex.: Av. João Batista Di Vitoriano, 268: 3,8%), e antes ficavam sem prova.
 - [ ] **Mesmo imóvel com fotos de imobiliárias diferentes (Jardim Consórcio, 21/10/2026).**
   - O anúncio da Scheid (R$ 750.000, VivaReal 2915942556) e o da Monte Alegre
@@ -119,6 +113,15 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Repetidos entre portais: número no link, códigos do portal, siglas do anunciante**
+  (`c5e157a`, 21/10/2026).
+  - ImovelWeb sem número na rua: o número é lido do começo do link quando as letras
+    terminam com as iniciais da rua ("jcjpv-888-…").
+  - Códigos "MI-<13 dígitos>-…" (ImovelWeb, ~22 mil anúncios de Rankim e Sucursal) são
+    gerados pelo portal e não vetam. "IMCX…SP" é do sistema da imobiliária (igual nos
+    três portais) e continua vetando.
+  - Nome do anunciante: "B E G" = "B&G" = "BG".
 
 - **Repetidos da Av. João Peixoto Viegas, 888** (`f0dbc29`, 21/10/2026).
   `_pode_ser_condominio` deixou de disparar com "Casa 3 dormitórios", "sem condomínio"
