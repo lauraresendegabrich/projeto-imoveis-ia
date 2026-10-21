@@ -108,6 +108,54 @@ def test_d_tela_e_laudo_mostram_o_motivo():
     assert "Faltou 1 casa para o mínimo de 5" in laudo and "- O raio já foi ampliado até 1.500 m (o máximo)." in laudo
 
 
+# ---------------------------------------------------------------- (e) proprio anuncio no topo
+def _indice(at, tipo, texto):
+    """Posicao do primeiro elemento do tipo com o texto, na ordem da tela."""
+    elementos = list(_percorrer(at.main))
+    return next(i for i, el in enumerate(elementos) if el.type == tipo and texto in str(getattr(el, "value", "")))
+
+
+def _percorrer(no):
+    for filho in getattr(no, "children", {}).values():
+        yield filho
+        yield from _percorrer(filho)
+
+
+def test_e_anuncio_excluido_aparece_logo_abaixo_do_valor():
+    at = _tela(resultado_sem_valor())
+    infos = [i.value for i in at.info if "Encontramos o anúncio do próprio imóvel" in i.value]
+    assert infos and "saiu do cálculo" in infos[0] and "[Ver o anúncio](https://x/0)" in infos[0], infos
+    # Logo abaixo dos cartoes de valor e antes de "Como chegamos neste valor".
+    pos_aviso = _indice(at, "info", "Encontramos o anúncio do próprio imóvel")
+    assert _indice(at, "metric", "") < pos_aviso < _indice(at, "subheader", "Como chegamos")
+    assert "encontramos o anúncio do próprio imóvel e ele saiu do cálculo (https://x/0)" in _laudo(at)
+
+
+def test_e_suspeito_continua_no_calculo():
+    r = resultado_sem_valor()
+    r["comparaveis"] = r["zona_homogenea"]["comparaveis_confirmados"] = NA_ZONA[1:]
+    r["preco_estimado"]["comparaveis_usados"]["construcao"][0]["possivel_anuncio_do_alvo"] = True
+    at = _tela(r)
+    avisos = [w.value for w in at.warning if "Possível anúncio do próprio imóvel" in w.value]
+    assert avisos and "continua no cálculo" in avisos[0] and "(https://x/1)" in avisos[0], avisos
+    assert not [i for i in at.info if "Encontramos o anúncio" in i.value]
+
+
+# ---------------------------------------------------------------- (f) referencia sem valor
+def test_f_sem_valor_mostra_os_comparaveis_validos_como_referencia():
+    at = _tela(resultado_sem_valor())
+    assert any("Não é uma estimativa" in c.value for c in at.caption)
+    tabela = [m.value for m in at.markdown if "R\\$/m²" in m.value and "[ver](https://x/1)" in m.value]
+    assert tabela and "R\\$ 5.050" in tabela[0] and "101 m²" in tabela[0], tabela   # 510.000 / 101
+
+
+def test_f_com_valor_nao_mostra_a_referencia():
+    r = resultado_sem_valor()
+    r["preco_estimado"].update(status_avaliacao="ok", avaliacao_confiavel=True)
+    at = _tela(r)
+    assert not any("Não é uma estimativa" in c.value for c in at.caption)
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

@@ -18,7 +18,8 @@ from app.funil import funil_ligado, montar_funil, mostrar_funil
 from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
 from services.textos_tela import (
-    anuncios_do_alvo_na_zona, contagem, motivo_sem_valor, nota_anuncio_do_alvo, texto_comparaveis_na_zona,
+    anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, linhas_referencia, motivo_sem_valor,
+    nota_anuncio_do_alvo, texto_comparaveis_na_zona,
 )
 from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, contar_status_zona,
@@ -1018,6 +1019,40 @@ with area_principal.container():
                 if avaliacao_confiavel and (preco or {}).get("aviso_infraestrutura"):
                     st.caption(f"⚠️ {preco['aviso_infraestrutura']}")
 
+            # Anuncio do proprio imovel logo abaixo do valor: mexe no preco (continua
+            # aparecendo tambem nas tabelas de baixo).
+            excluidos_alvo, suspeitos_alvo = anuncios_do_proprio_imovel(resultado)
+            if excluidos_alvo:
+                st.info(
+                    "🎯 Encontramos o anúncio do próprio imóvel e ele saiu do cálculo."
+                    + "".join(f" [Ver o anúncio]({u})" for u in excluidos_alvo if u)
+                )
+            if suspeitos_alvo:
+                links_suspeitos = ", ".join(f"[o anúncio]({u})" for u in suspeitos_alvo if u)
+                st.warning(
+                    "⚠️ Possível anúncio do próprio imóvel: continua no cálculo."
+                    + (f" Confira {links_suspeitos}." if links_suspeitos else "")
+                )
+
+            # Sem valor confiavel: os comparaveis validos como referencia (nao e estimativa).
+            referencia = linhas_referencia(resultado) if not avaliacao_confiavel else []
+            if referencia:
+                import pandas as pd
+                st.markdown(f"**Anúncios válidos encontrados ({len(referencia)}), só como referência**")
+                st.caption(
+                    "⚠️ Não é uma estimativa: são poucos anúncios para um valor confiável. "
+                    "Use só para ter uma ideia dos preços perto do imóvel."
+                )
+                st.markdown(pd.DataFrame([{
+                    "Preço": fmt_brl(l["preco"]),
+                    "Área": f"{l['area']:.0f} m²",
+                    "R$/m²": fmt_brl(l["m2"]),
+                    "Rua": l["rua"] or "-",
+                    "Bairro": l["bairro"] or "-",
+                    "Anúncio": f"[ver]({l['url']})" if l["url"] else "-",
+                } for l in referencia]).rename(columns={"R$/m²": "R\\$/m²"}).to_markdown(index=False),
+                    unsafe_allow_html=True)
+
             # Comparaveis com a distancia nao verificada (contam para o minimo de 5) e
             # busca na cidade toda: aviso com numeros, com ou sem valor minimo CAIXA.
             if resultado.get("aviso_raio"):
@@ -1758,6 +1793,10 @@ with area_principal.container():
                     + [f"- {_fazer}" for _fazer in sem_valor["fazer"]]
                 )
 
+            for _url in excluidos_alvo:
+                bloco_resultado += f"\nAtenção: encontramos o anúncio do próprio imóvel e ele saiu do cálculo ({_url or 'sem link'})."
+            for _url in suspeitos_alvo:
+                bloco_resultado += f"\nAtenção: possível anúncio do próprio imóvel, continua no cálculo ({_url or 'sem link'})."
             if resultado.get("aviso_raio"):
                 bloco_resultado += f"\nAtenção: {resultado['aviso_raio']}"
             if (preco or {}).get("aviso_terreno"):
