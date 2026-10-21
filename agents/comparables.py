@@ -468,6 +468,117 @@ def _extrair_unidade(imovel: dict) -> str:
     return "-".join(partes)
 
 
+# ---------------------------------------------------------------- provas do proprio anuncio
+# Sinais identificadores da checagem "e o anuncio do proprio imovel?", alem de preco +
+# descricao e rua + numero (decisao da usuaria, 20/10/2026; caso de Palhoca):
+#   link do anuncio informado no formulario > foto em comum > codigo da imobiliaria.
+
+# Portais do mesmo grupo usam o mesmo id de anuncio (VivaReal e ZAP).
+FAMILIA_PORTAL = {
+    "vivareal": "grupozap", "zapimoveis": "grupozap", "zap": "grupozap",
+    "chavesnamao": "chavesnamao", "imovelweb": "imovelweb", "lugarcerto": "lugarcerto",
+}
+_PADROES_LINK = (
+    ("grupozap", r"(?:vivareal|zapimoveis)\.com\.br/.*?id-(\d+)"),
+    ("chavesnamao", r"chavesnamao\.com\.br/.*?/id-(\d+)"),
+    ("imovelweb", r"imovelweb\.com\.br/.*?-(\d{6,})\.html"),
+    ("lugarcerto", r"lugarcerto\.com\.br/.*?(\d{5,})(?:\D*)$"),
+)
+
+
+def _id_do_link(link) -> tuple[str, str] | None:
+    """('grupozap', '2903862416') a partir do link de um anuncio; None se nao reconhecer."""
+    url = str(link or "").strip().lower().split("?")[0].split("#")[0]
+    for familia, padrao in _PADROES_LINK:
+        m = re.search(padrao, url)
+        if m:
+            return familia, m.group(1)
+    return None
+
+
+def _ids_do_anuncio(anuncio: dict) -> set:
+    """Ids do anuncio (portal + listing_id, e o que se extrai do proprio link)."""
+    ids = set()
+    familia = FAMILIA_PORTAL.get(identidade.portal(anuncio))
+    lid = str(anuncio.get("listing_id") or "").strip()
+    if familia and lid:
+        ids.add((familia, lid))
+    pelo_link = _id_do_link(anuncio.get("url"))
+    if pelo_link:
+        ids.add(pelo_link)
+    return ids
+
+
+def _codigos_fotos(urls) -> set:
+    """
+    Codigo de cada foto, sem tamanho nem parametros: o hash de 32 caracteres
+    (VivaReal/ZAP .../vr-listing/<hash>/..., Lugar Certo), o numero da imagem do
+    ImovelWeb e o codigo da imagem do Chaves na Mao. So casa entre fotos do mesmo
+    servico de imagens (VivaReal e ZAP usam o mesmo).
+    """
+    if isinstance(urls, str):
+        urls = urls.split("|")
+    codigos = set()
+    for url in urls or []:
+        u = str(url or "").lower()
+        m = re.search(r"/([0-9a-f]{32})(?:/|$|\?|\.)", u)
+        if m:
+            codigos.add(m.group(1))
+            continue
+        m = re.search(r"imovelwebcdn\.com/avisos/.*/(\d{6,})\.\w+", u)
+        if m:
+            codigos.add(f"imovelweb:{m.group(1)}")
+            continue
+        m = re.search(r"chavesnamao\.com\.br/imn/.*?/imoveis/\d+/(\d+)/.*-([0-9a-f]{6,})-(\d+)\.\w+", u)
+        if m:
+            codigos.add(f"chavesnamao:{m.group(1)}-{m.group(2)}-{m.group(3)}")
+    return codigos
+
+
+def _fotos_do_anuncio(anuncio: dict) -> set:
+    return _codigos_fotos(anuncio.get("images")) | _codigos_fotos(anuncio.get("fotos_urls"))
+
+
+_PADRAO_CODIGO_IMOBILIARIA = re.compile(
+    r"(?:c[oó]d(?:igo)?\.?(?:\s+d[oa]\s+im[oó]vel)?|ref(?:er[eê]ncia)?\.?)\s*[:#.\-–]*\s*([a-z0-9][a-z0-9\-/]{3,})",
+    re.IGNORECASE,
+)
+
+
+def _codigos_imobiliaria(texto) -> set:
+    """Codigos de referencia citados na descricao ('CODIGO DO IMOVEL : CA0406', 'Ref. AP1234')."""
+    codigos = set()
+    for m in _PADRAO_CODIGO_IMOBILIARIA.finditer(str(texto or "")):
+        codigo = m.group(1).upper().strip("-/")
+        if len(codigo) >= 4 and re.search(r"[A-Z]", codigo) and re.search(r"\d", codigo):
+            codigos.add(codigo)
+    return codigos
+
+
+# Trechos de rodape que se repetem em todos os anuncios de uma imobiliaria: saem antes
+# de comparar descricoes (senao dois anuncios diferentes parecem iguais pelo rodape).
+_PADRAO_RODAPE = re.compile(
+    r"agende|atendemos|plantao|creci|whats|telefone|\bfone\b|ligue|entre em contato|horario de atendimento"
+    r"|\(\d{2}\)\s*\d|\d{4,5}-\d{4}",
+)
+
+
+def _sem_rodape(texto) -> str:
+    """Tira os trechos de rodape (agende sua visita, atendemos..., CRECI, telefone, nome da imobiliaria)."""
+    partes = re.split(r"<br\s*/?>|\n|\r|(?<=[.!?])\s+", str(texto or ""), flags=re.IGNORECASE)
+    mantidas = []
+    for parte in partes:
+        norm = _normalizar_texto(parte)
+        if not norm:
+            continue
+        if _PADRAO_RODAPE.search(norm):
+            continue
+        if len(norm) <= 40 and re.search(r"imove|imobiliaria|corretor|negocios", norm):
+            continue
+        mantidas.append(parte.strip())
+    return " ".join(mantidas)
+
+
 # Continencia de descricoes (checagem do proprio anuncio): o texto mais curto precisa
 # ter pelo menos isto para a proporcao de palavras contidas no mais longo valer.
 CONTINENCIA_MIN_CARACTERES = 120
@@ -484,8 +595,9 @@ def _similaridade_descricao(texto_a: str, texto_b: str) -> float:
     """
     from difflib import SequenceMatcher
 
-    a = _normalizar_texto(texto_a)
-    b = _normalizar_texto(texto_b)
+    # Sem o rodape da imobiliaria (igual em todos os anuncios dela).
+    a = _normalizar_texto(_sem_rodape(texto_a))
+    b = _normalizar_texto(_sem_rodape(texto_b))
     # Texto curto nao e distintivo o suficiente para afirmar "mesmo anuncio".
     if len(a) < 60 or len(b) < 60:
         return 0.0
@@ -557,6 +669,12 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
     score = 0.0
     tem_identificador = False   # ao menos um sinal que prova a identidade do anuncio
 
+    # (0) LINK DO ANUNCIO informado pela usuaria: confirma ate com veto de atributo
+    #     (ela afirmou que e este o anuncio do imovel).
+    link_alvo = _id_do_link(imovel_alvo.get("link_anuncio"))
+    if link_alvo and link_alvo in _ids_do_anuncio(comparavel):
+        return (True, False, [f"link_do_anuncio({link_alvo[0]}:{link_alvo[1]})"], 3.0)
+
     g, motivo = identidade.regra_do_par(imovel_alvo, comparavel)
     if g is None:
         return (False, False, [motivo], 0.0)
@@ -619,6 +737,28 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
             sinais.append(f"casa_preco_area_descricao(area_dif={area_dif}, desc={sim_desc})")
             tem_identificador = True
 
+
+    # --- Foto em comum (mesmo codigo de foto, ignorando tamanho e parametros) ---
+    # Casa: confirma (sem veto). Apto: so suspeita (lancamentos repetem as fotos).
+    foto_em_comum = False
+    fotos_comuns = _codigos_fotos(imovel_alvo.get("images")) & _fotos_do_anuncio(comparavel)
+    if fotos_comuns:
+        foto_em_comum = True
+        score += 1.00
+        sinais.append(f"foto_em_comum({sorted(fotos_comuns)[0]})")
+        if g == "casa" and not veto:
+            tem_identificador = True
+
+    # --- Codigo de referencia da imobiliaria citado nas duas descricoes ---
+    codigos_comuns = (
+        _codigos_imobiliaria(imovel_alvo.get("description") or imovel_alvo.get("descricao"))
+        & _codigos_imobiliaria(comparavel.get("description") or comparavel.get("descricao"))
+    ) if not imovel_alvo.get("descricao_gerada") else set()
+    if codigos_comuns:
+        score += 1.00
+        sinais.append(f"codigo_imobiliaria({sorted(codigos_comuns)[0]})")
+        if not veto:
+            tem_identificador = True
 
     # --- Rua + numero (+ unidade para apartamento) ---
     rua_alvo = identidade.rua(imovel_alvo)
@@ -698,7 +838,8 @@ def _eh_anuncio_do_alvo(imovel_alvo: dict, comparavel: dict) -> tuple[bool, bool
         mesmo_predio = g == "apto" and tem_area and (
             "mesma_rua_e_numero" in sinais or "coordenadas_iguais" in sinais
         )
-        possivel_alvo = (tem_bairro and tem_area and tem_extra) or mesmo_predio
+        # Foto em comum sem confirmar (apto, ou casa com veto de atributo): suspeita.
+        possivel_alvo = (tem_bairro and tem_area and tem_extra) or mesmo_predio or foto_em_comum
 
     return (eh_alvo, possivel_alvo, sinais, round(score, 3))
 

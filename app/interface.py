@@ -253,6 +253,13 @@ with st.sidebar:
         st.markdown("**📸 Fotos do imóvel** (opcional, máx. 8)")
         st.caption("Cole os links diretos das fotos, um por linha")
         fotos_texto = st.text_area("Links das fotos", value="", height=80, help="Cole até 8 URLs de imagens (uma por linha). Ex: https://...imovel.jpg")
+        # So para reconhecer o anuncio do proprio imovel entre os comparaveis (Ag2):
+        # nao entra em nenhum prompt.
+        link_anuncio = st.text_input(
+            "Link do anúncio deste imóvel (se tiver)", value="",
+            placeholder="Ex.: https://www.vivareal.com.br/imovel/...-id-2903862416/",
+            help="Se o imóvel estiver anunciado num portal, o anúncio dele fica fora da comparação.",
+        )
 
         # Leilao CAIXA: estes valores NAO entram no imovel_alvo nem em nenhum agente
         # (preco de leilao fica bem abaixo do mercado e distorceria os comparaveis).
@@ -395,6 +402,7 @@ elif submitted:
         "preco_digitado": texto_preco_anunciado, "preco_lido": preco_anunciado or None,
         "descricao": descricao or None, "descricao_caracteres": len(descricao or ""),
         "fotos": [l.strip() for l in (fotos_texto or "").splitlines() if l.strip()],
+        "link_anuncio": link_anuncio.strip() or None,
         "leilao": {
             "valor_minimo_digitado": texto_valor_minimo_caixa,
             "valor_avaliacao_digitado": texto_valor_avaliacao_caixa,
@@ -431,6 +439,8 @@ elif submitted:
         # Texto generico gerado acima: nao serve de prova de identidade no Ag2.
         "descricao_gerada": not descricao,
         "images": [],
+        # Prova mais forte de que um comparavel e o anuncio do proprio imovel (Ag2).
+        "link_anuncio": link_anuncio.strip() or None,
     }
 
     # Processa fotos: links diretos informados pelo usuario

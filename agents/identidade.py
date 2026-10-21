@@ -91,6 +91,8 @@ CAMPOS_IDENTIDADE = (
     "price", "preco", "area", "area_construida", "bedrooms", "quartos",
     "parkingSpaces", "vagas", "suites", "andar", "street", "rua", "numero",
     "neighborhood", "bairro", "lat", "lon", "description", "descricao", "titulo", "title",
+    # Para a checagem do proprio anuncio contra os repetidos: banheiros, fotos.
+    "bathrooms", "banheiros", "images", "fotos_urls",
 )
 
 
