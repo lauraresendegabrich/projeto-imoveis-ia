@@ -85,6 +85,35 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Tela de resultado e formulário: ajustes** (20/10/2026; branch `ajustes-tela-resultado`).
+  - Coisas que confundiam:
+    - ao clicar em "Avaliar Imóvel", o resultado anterior sai da tela antes de começar;
+    - ao terminar, o cabeçalho vira "✅ Avaliação concluída em N segundos" e saem o aviso
+      do F5, a barra e o status;
+    - a contagem da zona explica a diferença: "5 comparáveis na zona (1 é o anúncio do
+      próprio imóvel e saiu do cálculo)", e o aviso de amostra do Agente 5 diz o mesmo;
+    - sem valor, aparece o motivo exato no lugar de "verifique a área informada"
+      (`services/textos_tela.motivo_sem_valor`; ex.: "Faltou 1 casa para o mínimo de 5")
+      e o que fazer (o raio já foi ampliado até X m, a busca já incluiu a cidade toda,
+      informe a área do terreno), na tela, no bloco do Agente 5 e no laudo. Não existia
+      um bloco "Por que deu este resultado" no modo conferência: a lógica foi criada
+      nessa função.
+  - No topo: o aviso do anúncio do próprio imóvel (excluído ou suspeito, com o link)
+    aparece logo abaixo do valor e no laudo; sem valor confiável, os comparáveis válidos
+    aparecem como referência, com o aviso "Não é uma estimativa".
+  - Acabamento:
+    - avisos e justificativa do Agente 5 com acento (e o "10%%" do laudo corrigido);
+    - plural nas contagens da tela, dos alertas e dos avisos de zona e de raio;
+    - funil com "–" no lugar de vazio e preço como "R$ 1.200.000";
+    - UF em linha própria;
+    - Vagas começa vazio. Vazio = não informado, 0 = sem vaga, e a checagem do próprio
+      anúncio segue isso: 0 vaga agora veta um apartamento com vaga;
+    - aviso de terreno vazio;
+    - sem o bloco "Imobiliária mais próxima" na tela. O Agente 4 ainda faz essa busca;
+      dá para tirar depois, se ela não for usada.
+  - Testes: `tests/test_tela_resultado.py` (13), mais os ajustes em funil, identidade,
+    alertas e Agente 5.
+
 - **Checagem do próprio anúncio: provas mais fortes que a descrição** (20/10/2026).
   Novos sinais em `_eh_anuncio_do_alvo`, do mais forte ao mais fraco:
   - **Link do anúncio**: campo novo no formulário, "Link do anúncio deste imóvel (se
