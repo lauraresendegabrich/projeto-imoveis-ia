@@ -52,7 +52,8 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
     - mesma casa: menor distância 20 (phash) e 18 (dhash); 0 pares com distância ≤ 10;
     - casas diferentes do mesmo bairro: menor distância 18 (phash) e 12 (dhash).
     Comparação visual por hash não foi implementada.
-  - O anúncio da Monte Alegre continua no cálculo como "possível alvo". Caminhos
+  - O anúncio da Monte Alegre continua no cálculo, agora como "provável anúncio do próprio
+    imóvel" (aviso em destaque; `4a19d7b`). Caminhos
     possíveis: perguntar no formulário "este é o mesmo imóvel?" para os suspeitos, ou
     comparar por IA de visão.
 
@@ -113,6 +114,22 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Conferência na tela, avisos de repetidos e do próprio anúncio** (21/10/2026; branch
+  `conferencia-e-avisos`).
+  - `e168040` (A): `_pode_ser_condominio` não dispara mais com "Casa E Terreno À
+    Venda", "fora de condomínio" e "não é condomínio".
+  - `4a19d7b` (D): "provável anúncio do próprio imóvel". Vale para o suspeito com
+    mesma rua, área até 1%, mesmos quartos, banheiros e vagas e preço até 10% diferente.
+    Continua no cálculo, mas aparece no topo, em destaque, no laudo e como ⚠️ nas
+    verificações. Caso da Monte Alegre (VivaReal 2904140532). Os avisos de
+    possível/provável anúncio do próprio imóvel dizem o motivo em uma linha.
+  - `065050f` (C): "Possível repetido no cálculo" com os anúncios agrupados logo
+    abaixo ("Ver os N anúncios que podem ser repetidos", "Grupo 1: nº 888, R$ 830.000,
+    203 m²"), sem a coluna Motivo.
+  - `b4a11d9` (B): a conferência saiu do topo e foi para o fim da tela, fechada. Tem
+    título de uma linha e uma frase simples por agente. O detalhe técnico continua no
+    Excel e no banco.
 
 - **Repetidos entre portais: número no link, códigos do portal, siglas do anunciante**
   (`c5e157a`, 21/10/2026).
