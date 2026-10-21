@@ -892,6 +892,30 @@ def _geocodificar_alvo_identidade(imovel_alvo: dict) -> None:
     logger.info(f"[Ag2][AutoMatch] alvo geocodificado por rua+numero: {lat:.6f}, {lon:.6f}")
 
 
+# "Provavel anuncio do proprio imovel": suspeito com a mesma rua, area ate 1%, mesmos
+# quartos, banheiros e vagas e preco ate 10% diferente. Continua no calculo (nao ha
+# prova), mas o aviso fica no topo da tela e nas verificacoes. Decisao da usuaria,
+# 21/10/2026 (Sao Paulo: o mesmo imovel anunciado pela Scheid a R$ 750.000 e pela
+# Monte Alegre a R$ 700.000, com fotos diferentes; o hash das fotos nao separa).
+PROVAVEL_AREA = 0.01
+PROVAVEL_PRECO = 0.10
+
+
+def _provavel_anuncio_do_alvo(imovel_alvo: dict, anuncio: dict) -> bool:
+    rua_a, rua_b = identidade.rua(imovel_alvo), identidade.rua(anuncio)
+    if not rua_a or not rua_b or not identidade._nomes_parecidos(rua_a, rua_b):
+        return False
+    area_dif = identidade.dif_relativa(identidade.area(imovel_alvo), identidade.area(anuncio))
+    preco_dif = identidade.dif_relativa(identidade.preco(imovel_alvo), identidade.preco(anuncio))
+    if area_dif is None or area_dif > PROVAVEL_AREA or preco_dif is None or preco_dif > PROVAVEL_PRECO:
+        return False
+    for nomes in (("quartos", "bedrooms"), ("banheiros", "bathrooms"), ("vagas", "parkingSpaces")):
+        va, vb = identidade._num(identidade._campo(imovel_alvo, *nomes)), identidade._num(identidade._campo(anuncio, *nomes))
+        if va is None or vb is None or int(va) != int(vb):
+            return False
+    return True
+
+
 def _marcar_anuncio_do_alvo(imovel_alvo: dict, imoveis: list[dict]) -> int:
     """
     Marca (nao remove) os coletados em dois niveis:
@@ -957,6 +981,11 @@ def _marcar_anuncio_do_alvo(imovel_alvo: dict, imoveis: list[dict]) -> int:
             im["match_alvo_sinais"] = sinais
             im["match_alvo_score"] = score
             suspeitos += 1
+            # Suspeito com o perfil quase todo igual: "provavel" (continua no calculo).
+            if any(_provavel_anuncio_do_alvo(imovel_alvo, anuncio) for anuncio, _ in testes):
+                im["provavel_anuncio_do_alvo"] = True
+                im["checagem_alvo"]["provavel"] = True
+                im["checagem_alvo"]["sinais"] = sinais + ["provavel_anuncio_do_alvo"]
             logger.info(
                 f"[Ag2][AutoMatch] possivel anuncio do alvo (NAO excluido — perfil "
                 f"compativel, identidade nao confirmada) sinais={sinais} "

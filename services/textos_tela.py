@@ -63,6 +63,65 @@ def anuncios_do_proprio_imovel(resultado: dict) -> tuple[list[str], list[str]]:
     return excluidos, suspeitos
 
 
+def _reais_txt(v) -> str:
+    return f"R$ {float(v):,.0f}".replace(",", ".")
+
+
+def motivo_parecido_com_o_alvo(alvo: dict, comp: dict) -> str:
+    """
+    Por que um anuncio parece o do proprio imovel, em uma linha:
+    "mesma rua, mesma área (182 m²), mesmos quartos, banheiros e vagas; preço R$ 700.000".
+    """
+    from agents import identidade
+    iguais = []
+    rua_a, rua_c = identidade.rua(alvo), identidade.rua(comp)
+    if rua_a and rua_c and identidade._nomes_parecidos(rua_a, rua_c):
+        iguais.append("mesma rua")
+    area_c = identidade._num(identidade.area(comp))
+    area_dif = identidade.dif_relativa(identidade.area(alvo), area_c)
+    if area_c:
+        iguais.append(f"mesma área ({area_c:g} m²)" if area_dif is not None and area_dif <= 0.02
+                      else f"área de {area_c:g} m²")
+    comodos = []
+    for nome, campos in (("quartos", ("quartos", "bedrooms")), ("banheiros", ("banheiros", "bathrooms")),
+                         ("vagas", ("vagas", "parkingSpaces"))):
+        va, vc = identidade._num(identidade._campo(alvo, *campos)), identidade._num(identidade._campo(comp, *campos))
+        if va is not None and vc is not None and int(va) == int(vc):
+            comodos.append(nome)
+    if comodos:
+        texto = comodos[0] if len(comodos) == 1 else ", ".join(comodos[:-1]) + " e " + comodos[-1]
+        iguais.append(("mesmas " if comodos[0] == "vagas" else "mesmos ") + texto)
+    preco_c = identidade._num(identidade.preco(comp))
+    linha = ", ".join(iguais)
+    if preco_c:
+        linha += ("; " if linha else "") + f"preço {_reais_txt(preco_c)}"
+    return linha
+
+
+def suspeitos_do_proprio_imovel(resultado: dict, alvo: dict | None = None) -> list[dict]:
+    """
+    Possiveis anuncios do proprio imovel que continuam no calculo:
+    [{"url", "provavel", "motivo"}], os provaveis primeiro.
+    """
+    alvo = alvo or resultado.get("imovel_alvo") or {}
+    por_url = {c.get("url"): c for c in (resultado.get("comparaveis") or []) + (resultado.get("terrenos") or [])
+               if c.get("url")}
+    usados = ((resultado.get("preco_estimado") or {}).get("comparaveis_usados") or {})
+    saida, vistos = [], set()
+    for u in (u for lista in usados.values() for u in lista or []):
+        url = u.get("url") or ""
+        if not u.get("possivel_anuncio_do_alvo") or u.get("eh_anuncio_do_alvo") or url in vistos:
+            continue
+        vistos.add(url)
+        comp = por_url.get(url) or u
+        saida.append({
+            "url": url,
+            "provavel": bool(u.get("provavel_anuncio_do_alvo") or comp.get("provavel_anuncio_do_alvo")),
+            "motivo": motivo_parecido_com_o_alvo(alvo, comp),
+        })
+    return sorted(saida, key=lambda s: not s["provavel"])
+
+
 def _metros(v) -> str:
     return f"{int(v):,}".replace(",", ".")
 

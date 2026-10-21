@@ -141,6 +141,28 @@ def test_e_suspeito_continua_no_calculo():
     assert not [i for i in at.info if "Encontramos o anúncio" in i.value]
 
 
+def test_e_provavel_anuncio_do_proprio_imovel_em_destaque_com_o_motivo():
+    from services.verificacoes import verificar_execucao
+    monte = {"url": "https://vr/2904140532", "propertyType": "Casas", "street": "Avenida João Batista Di Vitoriano, 322",
+             "neighborhood": "Jardim Consórcio", "price": 700000.0, "area": 182.0, "bedrooms": 3, "bathrooms": 4,
+             "parkingSpaces": 2, "cluster": "A", "possivel_anuncio_do_alvo": True, "provavel_anuncio_do_alvo": True}
+    r = resultado_sem_valor()
+    r["preco_estimado"].update(status_avaliacao="ok", avaliacao_confiavel=True)
+    r["comparaveis"] = r["zona_homogenea"]["comparaveis_confirmados"] = NA_ZONA[1:] + [monte]
+    r["preco_estimado"]["comparaveis_usados"]["construcao"].append(
+        {"url": monte["url"], "preco": 700000.0, "area": 182.0, "rua": monte["street"], "status_zona": "confirmado",
+         "possivel_anuncio_do_alvo": True, "provavel_anuncio_do_alvo": True})
+    alvo = {"rua": "Avenida João Batista Di Vitoriano", "area": 182.0, "bedrooms": 3, "bathrooms": 4,
+            "parkingSpaces": 2, "price": 750000.0, "tipo": "house"}
+    at = _tela(r, alvo)
+    destaque = [e.value for e in at.error if "Provável anúncio do próprio imóvel" in e.value]
+    assert destaque and ("mesma rua, mesma área (182 m²), mesmos quartos, banheiros e vagas; preço R\\$ 700.000"
+                         in destaque[0]) and "(https://vr/2904140532)" in destaque[0], destaque
+    assert "provável anúncio do próprio imóvel, continua no cálculo" in _laudo(at)
+    v = next(v for v in verificar_execucao(r) if v["verificacao"].startswith("Provável anúncio do próprio imóvel"))
+    assert v["ok"] == "alerta", v
+
+
 # ---------------------------------------------------------------- (f) referencia sem valor
 def test_f_sem_valor_mostra_os_comparaveis_validos_como_referencia():
     at = _tela(resultado_sem_valor())

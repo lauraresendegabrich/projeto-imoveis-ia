@@ -177,6 +177,50 @@ def test_e2_zero_vagas_e_sem_vaga_e_veta_quem_tem_vaga():
     assert "veto_vagas" not in sinais, sinais
 
 
+# ---------------------------------------------------------------- provavel anuncio do proprio imovel
+# Sao Paulo, Jardim Consorcio (21/10/2026): o formulario (anuncio da Scheid, R$ 750.000)
+# e o anuncio da Monte Alegre (VivaReal 2904140532, R$ 700.000) sao o mesmo imovel.
+ALVO_SP = {"rua": "Avenida João Batista Di Vitoriano", "numero": "", "bairro": "Jardim Consórcio",
+           "neighborhood": "Jardim Consórcio", "cidade": "São Paulo", "estado": "SP", "tipo": "house",
+           "propertyType": "Casas", "area": 182.0, "bedrooms": 3, "bathrooms": 4, "parkingSpaces": 2,
+           "price": 750000.0, "description": "Casa", "descricao_gerada": True, "images": []}
+
+
+def monte_alegre(**extra):
+    base = {"portal": "vivareal", "listing_id": "2904140532", "url": "https://www.vivareal.com.br/x-id-2904140532/",
+            "propertyType": "Casas", "tipo": "casa", "street": "Avenida João Batista Di Vitoriano, 322",
+            "neighborhood": "Jardim Consórcio", "price": 700000.0, "area": 182.0, "area_terreno": 145.0,
+            "bedrooms": 3, "bathrooms": 4, "parkingSpaces": 2, "description": "Sobrado da Monte Alegre"}
+    base.update(extra)
+    return base
+
+
+def _marcar(anuncio):
+    original = ag2._geocodificar_alvo_identidade
+    ag2._geocodificar_alvo_identidade = lambda alvo: None
+    try:
+        ag2._marcar_anuncio_do_alvo(dict(ALVO_SP), [anuncio])
+    finally:
+        ag2._geocodificar_alvo_identidade = original
+    return anuncio
+
+
+def test_f1_monte_alegre_e_provavel_anuncio_do_proprio_imovel():
+    im = _marcar(monte_alegre())
+    assert im.get("possivel_anuncio_do_alvo") and not im.get("eh_anuncio_do_alvo"), im.get("checagem_alvo")
+    assert im.get("provavel_anuncio_do_alvo") and im["checagem_alvo"]["provavel"]
+    assert "provavel_anuncio_do_alvo" in im["checagem_alvo"]["sinais"]
+
+
+def test_f2_provavel_so_com_o_perfil_quase_todo_igual():
+    for diferenca in ({"price": 840000.0},                  # 10,7% mais caro
+                      {"bathrooms": 3},                     # banheiros diferentes
+                      {"area": 186.0},                      # 2,2% de area
+                      {"street": "Rua Pedro Rendon, 36"}):  # outra rua
+        im = _marcar(monte_alegre(**diferenca))
+        assert not im.get("provavel_anuncio_do_alvo"), (diferenca, im.get("checagem_alvo"))
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

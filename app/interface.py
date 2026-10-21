@@ -20,7 +20,7 @@ from services.formatos import ler_numero_br
 from services.verificacoes import icone, ordenar_para_tela, verificar_execucao
 from services.textos_tela import (
     anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, linhas_referencia, motivo_sem_valor,
-    motivo_terreno_fora,
+    motivo_terreno_fora, suspeitos_do_proprio_imovel,
     nota_anuncio_do_alvo, texto_comparaveis_na_zona,
 )
 from services.leilao import (
@@ -1058,17 +1058,24 @@ with area_principal.container():
 
             # Anuncio do proprio imovel logo abaixo do valor: mexe no preco (continua
             # aparecendo tambem nas tabelas de baixo).
-            excluidos_alvo, suspeitos_alvo = anuncios_do_proprio_imovel(resultado)
+            excluidos_alvo, _ = anuncios_do_proprio_imovel(resultado)
+            suspeitos_alvo = suspeitos_do_proprio_imovel(resultado, imovel_alvo_export)
+            # Provavel anuncio do proprio imovel (perfil quase todo igual): em destaque.
+            for s_alvo in [s for s in suspeitos_alvo if s["provavel"]]:
+                st.error(
+                    f"⚠️ **Provável anúncio do próprio imóvel (continua no cálculo):** "
+                    f"{s_alvo['motivo']}.".replace("$", "\\$")
+                    + (f" [Ver o anúncio]({s_alvo['url']})" if s_alvo["url"] else "")
+                )
             if excluidos_alvo:
                 st.info(
                     "🎯 Encontramos o anúncio do próprio imóvel e ele saiu do cálculo."
                     + "".join(f" [Ver o anúncio]({u})" for u in excluidos_alvo if u)
                 )
-            if suspeitos_alvo:
-                links_suspeitos = ", ".join(f"[o anúncio]({u})" for u in suspeitos_alvo if u)
+            for s_alvo in [s for s in suspeitos_alvo if not s["provavel"]]:
                 st.warning(
-                    "⚠️ Possível anúncio do próprio imóvel: continua no cálculo."
-                    + (f" Confira {links_suspeitos}." if links_suspeitos else "")
+                    f"⚠️ Possível anúncio do próprio imóvel (continua no cálculo): {s_alvo['motivo']}.".replace("$", "\\$")
+                    + (f" [Confira o anúncio]({s_alvo['url']})" if s_alvo["url"] else "")
                 )
 
             # Sem valor confiavel: os comparaveis validos como referencia (nao e estimativa).
@@ -1767,8 +1774,11 @@ with area_principal.container():
 
             for _url in excluidos_alvo:
                 bloco_resultado += f"\nAtenção: encontramos o anúncio do próprio imóvel e ele saiu do cálculo ({_url or 'sem link'})."
-            for _url in suspeitos_alvo:
-                bloco_resultado += f"\nAtenção: possível anúncio do próprio imóvel, continua no cálculo ({_url or 'sem link'})."
+            for s_alvo in suspeitos_alvo:
+                bloco_resultado += (
+                    f"\nAtenção: {'provável' if s_alvo['provavel'] else 'possível'} anúncio do próprio imóvel, "
+                    f"continua no cálculo ({s_alvo['motivo']}; {s_alvo['url'] or 'sem link'})."
+                )
             if resultado.get("aviso_raio"):
                 bloco_resultado += f"\nAtenção: {resultado['aviso_raio']}"
             if (preco or {}).get("aviso_terreno"):

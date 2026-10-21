@@ -443,6 +443,18 @@ def _repetidos_provaveis(preco: dict) -> dict:
     )
 
 
+def _provavel_no_calculo(resultado: dict, usados: list[dict]) -> dict:
+    """Aviso (nao erro): provavel anuncio do proprio imovel continua no calculo."""
+    urls_provaveis = {c.get("url") for c in _anuncios(resultado) if c.get("provavel_anuncio_do_alvo")}
+    provaveis = [u for u in usados if u.get("provavel_anuncio_do_alvo") or u.get("url") in urls_provaveis]
+    return _v(
+        "Agente 5", "Provável anúncio do próprio imóvel no cálculo",
+        "nenhum anúncio com o perfil quase todo igual ao do imóvel (mesma rua, área, cômodos e preço até 10%)",
+        f"{len(provaveis)}" + (f": {', '.join(str(u.get('url')) for u in provaveis[:3])}" if provaveis else ""),
+        "alerta" if provaveis else True,
+    )
+
+
 def _agente5(resultado: dict) -> list[dict]:
     preco = resultado.get("preco_estimado") or {}
     if not preco:
@@ -488,6 +500,8 @@ def _agente5(resultado: dict) -> list[dict]:
         f"{len(usados)} usados na zona (confirmados ou com distância não verificada)",
         f"{len(fora)} fora da zona" + (f": {', '.join(map(str, fora[:3]))}" if fora else ""), not fora,
     ))
+
+    saida.append(_provavel_no_calculo(resultado, usados))
 
     urls_alvo = {c.get("url") for c in _anuncios(resultado) if c.get("eh_anuncio_do_alvo") and c.get("url")}
     alvo_usado = [u.get("url") for u in usados if u.get("eh_anuncio_do_alvo") or u.get("url") in urls_alvo]

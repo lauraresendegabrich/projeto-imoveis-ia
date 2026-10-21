@@ -813,6 +813,8 @@ def executar_agente5(
             # possivel_anuncio_do_alvo=True PERMANECE no calculo (so alerta).
             "eh_anuncio_do_alvo": bool(im.get("eh_anuncio_do_alvo")),
             "possivel_anuncio_do_alvo": bool(im.get("possivel_anuncio_do_alvo")),
+            # Suspeito com o perfil quase todo igual (Ag2): tambem continua no calculo.
+            "provavel_anuncio_do_alvo": bool(im.get("provavel_anuncio_do_alvo")),
             "suspeita_leilao": _cheira_leilao(im),
             # De onde veio o comparavel (nao muda o calculo; usado no aviso da
             # avaliacao de leilao e na auditoria):
