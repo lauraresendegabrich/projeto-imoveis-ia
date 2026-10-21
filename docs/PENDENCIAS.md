@@ -85,6 +85,23 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Resolvido
 
+- **Funil: nomes das etapas e a conta de cada anúncio** (20/10/2026).
+  - As etapas de saída começam com "Saiu no": "Saiu no Agente 1 (busca)", "Saiu no
+    Agente 2 (parecidos)", "Saiu no Agente 2 (zona)" e "Saiu no Agente 5 (cálculo)".
+  - "✅ Entrou no cálculo" virou "✅ Chegou ao cálculo".
+  - Para os que chegaram ao cálculo, o Motivo diz o que aconteceu na conta:
+    - "R$ X/m², usado na média";
+    - "R$ X/m², cortado pela média aparada";
+    - numa casa, o mesmo R$/m² entra nas duas séries e pode sair "usado na média uma
+      vez (a outra cópia foi cortada)";
+    - "não houve cálculo: N comparáveis < mínimo de 5".
+  - A situação na zona (confirmado, distância não verificada, ampliação do raio) foi
+    para a coluna "Zona", na tela e na aba Funil do Excel.
+  - Não existia um bloco "Conta do Agente 5": para o funil saber o que foi cortado, o
+    Agente 5 passou a gravar em cada comparável usado o `conta_m2`, com o R$/m² e a
+    indicação de se ele ficou na média aparada (`marcar_media_aparada`, o mesmo corte de
+    `calcular_media_aparada`). O valor calculado não muda.
+
 - **Tela de resultado e formulário: ajustes** (20/10/2026; branch `ajustes-tela-resultado`).
   - Coisas que confundiam:
     - ao clicar em "Avaliar Imóvel", o resultado anterior sai da tela antes de começar;
