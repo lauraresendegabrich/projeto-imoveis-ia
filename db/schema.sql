@@ -74,7 +74,10 @@ CREATE TABLE IF NOT EXISTS execucoes (
 
     -- Entrada do usuário e checagem do próprio anúncio (migração 003) ---------
     entrada_usuario             JSONB,                     -- tudo o que o formulário mandou (digitado e lido)
-    checagem_anuncio_alvo       JSONB                      -- anúncios com mais sinais de serem o próprio imóvel
+    checagem_anuncio_alvo       JSONB,                     -- anúncios com mais sinais de serem o próprio imóvel
+
+    -- Verificações automáticas (migração 004) --------------------------------
+    verificacoes                JSONB                      -- {agente, verificacao, esperado, encontrado, ok} (services/verificacoes.py)
 );
 
 CREATE INDEX IF NOT EXISTS idx_execucoes_data_hora ON execucoes (data_hora DESC);

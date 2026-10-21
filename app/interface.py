@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.funil import funil_ligado, montar_funil, mostrar_funil
 from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
+from services.verificacoes import icone, ordenar_para_tela, verificar_execucao
 from services.textos_tela import (
     anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, linhas_referencia, motivo_sem_valor,
     nota_anuncio_do_alvo, texto_comparaveis_na_zona,
@@ -933,7 +934,14 @@ with area_principal.container():
             "infraestrutura": resultado_ag4,
             "preco_estimado": resultado_ag5,
             "resumo": resumo,
+            # Para as verificacoes automaticas (services/verificacoes.py).
+            "imovel_alvo": imovel_alvo,
+            "falhas": falhas_execucao,
+            "localizacao_alvo": localizacao_alvo,
         }
+        # Verificacoes automaticas: leem o resultado de cada agente e conferem regras
+        # (nao mudam nenhum calculo). Tela (modo conferencia), banco e Excel.
+        resultado["verificacoes"] = verificar_execucao(resultado)
 
         # Salva no session_state pra não perder no rerun
         st.session_state["resultado"] = resultado
@@ -968,6 +976,7 @@ with area_principal.container():
             )
             # Guardado no resultado (sessao) para o botao de exportar Excel: mesmo
             # conteudo gravado no banco.
+            registro_execucao["verificacoes"] = resultado["verificacoes"]
             resultado["registro"] = {"execucao": registro_execucao, "comparaveis": registro_comparaveis}
             gravar_em_segundo_plano(registro_execucao, registro_comparaveis)
         except Exception as e:
@@ -989,6 +998,24 @@ with area_principal.container():
 
         st.divider()
         st.subheader("📊 Resultado da Avaliação")
+
+        # ── VERIFICACOES AUTOMATICAS (modo conferencia; MOSTRAR_FUNIL=0 desliga) ──
+        if funil_ligado():
+            verificacoes = resultado.get("verificacoes") or verificar_execucao(resultado)
+            n_falhas = sum(1 for v in verificacoes if v.get("ok") is False)
+            n_nao = sum(1 for v in verificacoes if v.get("ok") is None)
+            n_ok = sum(1 for v in verificacoes if v.get("ok") is True)
+            with st.expander(
+                f"🧪 Verificações automáticas (conferência): {n_falhas} ❌ · {n_nao} ⚪ · {n_ok} ✅",
+                expanded=bool(n_falhas),
+            ):
+                st.caption("Conferem se cada agente funcionou como esperado; não mudam nenhum cálculo. "
+                           "⚪ = não verificável (o agente não grava o dado).")
+                st.markdown("\n".join(
+                    f"- {icone(v['ok'])} **{v['agente']}** · {v['verificacao']}  \n"
+                    f"  esperado: {v['esperado']} · encontrado: {v['encontrado']}".replace("$", "\\$")
+                    for v in ordenar_para_tela(verificacoes)
+                ))
 
         # Preço estimado
         preco = resultado.get("preco_estimado", {})

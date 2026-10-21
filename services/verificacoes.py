@@ -1,0 +1,435 @@
+"""
+Verificacoes automaticas ao final de cada avaliacao
+==================================================
+
+Conferem se cada agente funcionou como esperado. Nao mudam nenhum calculo: leem o
+resultado de cada agente (o dict `resultado` que a interface monta) e conferem regras.
+
+verificar_execucao(resultado) -> lista de
+    {"agente", "verificacao", "esperado", "encontrado", "ok"}
+ok: True (passou), False (falhou) ou None (nao verificavel: o agente nao grava o dado).
+
+Mostradas no modo conferencia (MOSTRAR_FUNIL), gravadas no banco (execucoes.verificacoes)
+e na aba "Verificacoes" do Excel.
+"""
+from __future__ import annotations
+
+import unicodedata
+from collections import Counter
+from statistics import mean
+
+from agents.price_liquidity import (
+    M2_CONSTRUCAO_MAX, M2_CONSTRUCAO_MIN, MIN_AMOSTRAS_CONFIAVEL, TIPOS_CONDOMINIAIS, TIPOS_TERRENO,
+    normalizar_tipo,
+)
+from app.funil import montar_funil, resumo_funil
+
+LIMITE_AG3 = 10            # o Agente 3 analisa no maximo 10 comparaveis (MAX_COMPARAVEIS_AG3)
+TOLERANCIA_REAIS = 1.0     # refazer a conta do Agente 5: diferenca maxima aceita
+DESCONTO_LIQUIDEZ = 0.10
+# Mesmos niveis de agents/collector.NIVEIS_GEO_PRECISOS, mais a coordenada informada.
+NIVEIS_PRECISOS = {"endereco_completo", "rua_numero", "rua", "bairro", "coordenada_informada"}
+
+
+def _v(agente, verificacao, esperado, encontrado, ok) -> dict:
+    return {"agente": agente, "verificacao": verificacao, "esperado": esperado,
+            "encontrado": encontrado, "ok": ok}
+
+
+def _norm(texto) -> str:
+    texto = unicodedata.normalize("NFKD", str(texto or "")).encode("ascii", "ignore").decode()
+    return " ".join(texto.lower().split())
+
+
+def _reais(v) -> str:
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _eh_terreno(c: dict) -> bool:
+    return (c.get("cluster") == "terreno"
+            or normalizar_tipo(c.get("propertyType") or c.get("tipo") or "") in TIPOS_TERRENO)
+
+
+def _anuncios(resultado: dict) -> list[dict]:
+    """Anuncios do Agente 2 (construidos e terrenos), sem repetir o mesmo objeto."""
+    vistos, lista = set(), []
+    for c in (resultado.get("comparaveis") or []) + (resultado.get("terrenos") or []):
+        chave = c.get("url") or id(c)
+        if chave not in vistos:
+            vistos.add(chave)
+            lista.append(c)
+    return lista
+
+
+def _usados(preco: dict) -> tuple[list, list]:
+    u = preco.get("comparaveis_usados") or {}
+    return list(u.get("construcao") or []), list(u.get("terreno") or [])
+
+
+def _media_aparada(valores: list[float]) -> float:
+    """TRIMMEAN(0,5) do Excel, escrito de novo aqui (independente do Agente 5)."""
+    v = sorted(valores)
+    n = len(v)
+    cortar = int(n * 0.5)
+    cortar -= cortar % 2
+    while cortar >= n:
+        cortar -= 2
+    lado = max(cortar, 0) // 2
+    return mean(v[lado:n - lado] if lado else v)
+
+
+# =============================================================================
+# GERAL
+# =============================================================================
+def _geral(resultado: dict) -> list[dict]:
+    saida = []
+    linhas = montar_funil(resultado)
+    urls = Counter(l["Anúncio"] for l in linhas if l.get("Anúncio"))
+    repetidos = [u for u, n in urls.items() if n > 1]
+    anuncios = _anuncios(resultado)
+    esperado = len(anuncios) + len(resultado.get("duplicatas_descartadas") or [])
+    soma = sum(resumo_funil(linhas).values())
+    saida.append(_v(
+        "Geral", "Cada anúncio aparece em exatamente uma etapa do funil",
+        f"{esperado} anúncios, cada um em uma etapa; soma das etapas = {esperado}",
+        f"{len(linhas)} linhas; soma das etapas = {soma}; {len(repetidos)} em mais de uma etapa"
+        + (f" ({', '.join(repetidos[:3])})" if repetidos else ""),
+        not repetidos and soma == len(linhas) == esperado,
+    ))
+
+    id_exec = resultado.get("id_execucao")
+    if id_exec:
+        outros = []
+        for nome, chave in (("zona (Agente 2)", "zona_homogenea"), ("Agente 3", "analise_qualitativa"),
+                            ("Agente 4", "infraestrutura"), ("Agente 5", "preco_estimado")):
+            dados = resultado.get(chave) or {}
+            if dados and dados.get("id_execucao") not in (None, id_exec):
+                outros.append(f"{nome}: {dados.get('id_execucao')}")
+        saida.append(_v(
+            "Geral", "Os resultados dos Agentes 2 a 5 são desta execução",
+            f"id_execucao {id_exec} em todos", "; ".join(outros) or "todos com o id desta execução",
+            not outros,
+        ))
+    return saida
+
+
+# =============================================================================
+# AGENTE 1
+# =============================================================================
+def _agente1(resultado: dict) -> list[dict]:
+    alvo = resultado.get("imovel_alvo") or {}
+    cidade, uf = _norm(alvo.get("cidade")), _norm(alvo.get("estado"))
+    anuncios = _anuncios(resultado)
+    outra_cidade, sem_cidade = [], 0
+    for c in anuncios:
+        cid = _norm(c.get("city") or c.get("cidade"))
+        est = _norm(c.get("state") or c.get("estado"))
+        if not cid:
+            sem_cidade += 1
+        elif (cidade and cid != cidade) or (uf and len(est) == 2 and est != uf):
+            outra_cidade.append(f"{c.get('city') or c.get('cidade')}/{c.get('state') or c.get('estado') or '?'}")
+    saida = [_v(
+        "Agente 1", "Todos os anúncios são da cidade/UF pedidas",
+        f"{alvo.get('cidade') or '?'}/{alvo.get('estado') or '?'}",
+        (f"{len(outra_cidade)} de outra cidade ({', '.join(sorted(set(outra_cidade))[:3])})"
+         if outra_cidade else f"todos da cidade pedida") + (f"; {sem_cidade} sem cidade no anúncio" if sem_cidade else ""),
+        not outra_cidade if cidade else None,
+    )]
+    # Dados que o Agente 1 ainda nao grava (ver docs/PENDENCIAS.md).
+    saida.append(_v(
+        "Agente 1", "Os dados são desta execução (id_execucao / horário)",
+        "id_execucao desta execução em cada anúncio coletado",
+        "não verificável: o Agente 1 não grava id_execucao nem o horário da coleta", None,
+    ))
+    saida.append(_v(
+        "Agente 1", "Cada fonte consultada respondeu, ou a falha está registrada",
+        "situação de cada fonte (Athena, Apify)",
+        "não verificável: o Agente 1 só escreve as falhas de fonte no log", None,
+    ))
+    saida.append(_v(
+        "Agente 1", "encontrados = mantidos + repetidos",
+        "total antes de juntar os repetidos = mantidos + repetidos",
+        f"não verificável: o Agente 1 não grava o total antes de juntar os repetidos "
+        f"(mantidos {len(anuncios)}, repetidos {len(resultado.get('duplicatas_descartadas') or [])})", None,
+    ))
+    return saida
+
+
+# =============================================================================
+# AGENTE 2
+# =============================================================================
+def _agente2(resultado: dict) -> list[dict]:
+    saida = []
+    anuncios = _anuncios(resultado)
+    casas = [c for c in anuncios if not _eh_terreno(c)]
+    por_status = Counter(c.get("status_julgamento") for c in casas)
+    modelos = Counter(f"{c.get('provider_llm') or '?'}/{c.get('modelo_llm')}" for c in casas
+                      if c.get("status_julgamento") == "JULGADO_LLM")
+    sem_decisao = [c for c in casas
+                   if c.get("status_julgamento") in (None, "NAO_JULGADO") or c.get("cluster") not in ("A", "B")]
+    falhas_ia = (resultado.get("resumo") or {}).get("llm_nao_julgados", 0)
+    saida.append(_v(
+        "Agente 2", "Todo imóvel construído tem decisão (pré-classificação, IA ou reserva)",
+        f"{len(casas)} com decisão; nenhum sem julgamento",
+        f"{por_status.get('REPROVADO_PRE_CLASSIFICACAO', 0)} pela pré-classificação, "
+        f"{por_status.get('JULGADO_LLM', 0)} pela IA"
+        + (f" ({', '.join(f'{m}: {n}' for m, n in modelos.most_common())})" if modelos else "")
+        + f", {por_status.get('FALLBACK_PYTHON', 0)} pela reserva (Python); "
+        f"{falhas_ia} falha(s) da IA; {len(sem_decisao)} sem julgamento",
+        not sem_decisao,
+    ))
+
+    zona = resultado.get("zona_homogenea") or {}
+    if zona:
+        raio_casas = zona.get("raio_final_m") or (zona.get("zona_homogenea") or {}).get("raio_metros")
+        raio_terrenos = zona.get("raio_final_terrenos_m") or raio_casas
+        confirmados, vistos = [], set()
+        for c in (zona.get("comparaveis_confirmados") or []) + (zona.get("terrenos") or []):
+            chave = c.get("url") or id(c)
+            if chave in vistos or c.get("incluido_por_fallback_zona"):
+                continue
+            vistos.add(chave)
+            confirmados.append(c)
+        fora = []
+        for c in confirmados:
+            raio = raio_terrenos if _eh_terreno(c) else raio_casas
+            dist = c.get("distancia_metros")
+            if dist is None or raio is None or float(dist) > float(raio):
+                fora.append(f"{dist if dist is not None else 'sem distância'} m (raio {raio})")
+        saida.append(_v(
+            "Agente 2", "Todo comparável confirmado na zona tem distância ≤ raio usado",
+            f"{len(confirmados)} confirmados dentro do raio (casas {raio_casas} m, terrenos {raio_terrenos} m)",
+            f"{len(fora)} fora do raio" + (f": {', '.join(fora[:3])}" if fora else ""),
+            not fora,
+        ))
+    else:
+        saida.append(_v("Agente 2", "Todo comparável confirmado na zona tem distância ≤ raio usado",
+                        "zona calculada", "não verificável: a zona não foi calculada nesta avaliação", None))
+
+    sem_checagem = [c for c in anuncios if not c.get("checagem_alvo")]
+    saida.append(_v(
+        "Agente 2", "A checagem do próprio anúncio rodou para todos os anúncios",
+        f"checagem_alvo em {len(anuncios)} anúncios",
+        f"{len(anuncios) - len(sem_checagem)} com checagem; {len(sem_checagem)} sem", not sem_checagem,
+    ))
+    return saida
+
+
+# =============================================================================
+# AGENTE 3
+# =============================================================================
+def _agente3(resultado: dict) -> list[dict]:
+    ag3 = resultado.get("analise_qualitativa") or {}
+    zona = resultado.get("zona_homogenea") or {}
+    falhou = any(str(f).startswith("agente3") for f in resultado.get("falhas") or [])
+    if zona:
+        chegaram = [c for c in zona.get("comparaveis_confirmados") or []
+                    if c.get("cluster") == "A" and (c.get("classificacao_zona") == "na_zona"
+                                                     or c.get("incluido_por_fallback_zona"))]
+    else:
+        chegaram = [c for c in resultado.get("comparaveis") or [] if c.get("cluster") == "A"]
+    esperado = min(len(chegaram), LIMITE_AG3)
+    avaliados = ag3.get("comparaveis") or []
+    notas_ruins, sem_analise = [], 0
+    for c in avaliados + ([ag3["imovel_alvo"]] if ag3.get("imovel_alvo") else []):
+        analise = c.get("analise_qualitativa") or {}
+        nota = (analise.get("scores") or {}).get("score_qualitativo")
+        if not analise or not analise.get("status"):
+            sem_analise += 1
+        elif not isinstance(nota, (int, float)) or not 0 <= nota <= 1:
+            notas_ruins.append(str(nota))
+    if not ag3 and falhou:
+        encontrado, ok = "o Agente 3 falhou e a falha está registrada", True
+    else:
+        encontrado = (f"{len(avaliados)} avaliados de {len(chegaram)} que chegaram (limite de {LIMITE_AG3}); "
+                      f"{sem_analise} sem análise; {len(notas_ruins)} nota(s) fora de 0 a 1"
+                      + (f" ({', '.join(notas_ruins[:3])})" if notas_ruins else ""))
+        ok = len(avaliados) == esperado and not sem_analise and not notas_ruins
+    return [_v(
+        "Agente 3", "Todo comparável que chegou foi avaliado ou tem falha registrada; notas entre 0 e 1",
+        f"{esperado} avaliados (os que chegaram, até {LIMITE_AG3}), notas entre 0 e 1", encontrado, ok,
+    )]
+
+
+# =============================================================================
+# AGENTE 4
+# =============================================================================
+def _agente4(resultado: dict) -> list[dict]:
+    ag4 = resultado.get("infraestrutura") or {}
+    preco = resultado.get("preco_estimado") or {}
+    nivel = (resultado.get("imovel_alvo") or {}).get("geocodificacao_nivel") or resultado.get("localizacao_alvo")
+    nota = (ag4.get("scores") or {}).get("score_final")
+    aviso = preco.get("aviso_infraestrutura")
+    if ag4 and ag4.get("status") != "endereco_nao_localizado" and nota is not None:
+        ok = isinstance(nota, (int, float)) and 0 <= nota <= 1 and (nivel is None or nivel in NIVEIS_PRECISOS)
+        encontrado = f"rodou (localização: {nivel or 'não informada'}), nota {nota}"
+    else:
+        motivo = "endereço não localizado" if ag4.get("status") == "endereco_nao_localizado" else "falhou"
+        ok = bool(aviso)
+        encontrado = f"{motivo}; aviso de nota neutra {'dado' if aviso else 'NÃO dado'}"
+    return [_v(
+        "Agente 4", "Rodou com localização precisa, ou o aviso de nota neutra foi dado; nota entre 0 e 1",
+        "nota entre 0 e 1 com localização de rua/bairro, ou aviso de nota neutra (0,50)", encontrado, ok,
+    )]
+
+
+# =============================================================================
+# AGENTE 5
+# =============================================================================
+def refazer_conta_agente5(preco: dict) -> float | None:
+    """
+    Valor medio refeito de forma independente a partir dos comparaveis usados: R$/m2 de
+    cada um (descontando o terreno quando o terreno foi separado), media aparada 0,5 e
+    area do imovel. None quando nao ha comparaveis para refazer.
+    """
+    usados_c, usados_t = _usados(preco)
+    alvo = preco.get("imovel_alvo") or {}
+    area_alvo = float(alvo.get("area_construida_m2") or 0)
+    area_terreno_alvo = float(alvo.get("area_terreno_m2") or 0)
+    condominial = normalizar_tipo(alvo.get("tipo") or "") in TIPOS_CONDOMINIAIS
+    separou = bool((preco.get("calculo_terreno") or {}).get("aplicado")) and not condominial
+    if separou:
+        m2_terrenos = [float(t["preco"]) / float(t.get("area") or t.get("area_terreno"))
+                       for t in usados_t if t.get("preco") and (t.get("area") or t.get("area_terreno"))]
+        if not m2_terrenos:
+            return None
+        menor_t, medio_t = min(m2_terrenos), _media_aparada(m2_terrenos)
+
+    def _plausivel(v):
+        return M2_CONSTRUCAO_MIN <= v <= M2_CONSTRUCAO_MAX
+
+    serie_min, serie_med = [], []
+    for u in usados_c:
+        p, a = float(u.get("preco") or 0), float(u.get("area") or 0)
+        if p <= 0 or a <= 0:
+            continue
+        total = p / a
+        at = float(u.get("area_terreno") or 0)
+        if not separou or at <= 0:
+            serie_min.append(total)
+            serie_med.append(total)
+            continue
+        c_min, c_med = p - menor_t * at, p - medio_t * at
+        if c_min > 0:
+            serie_min.append(c_min / a)
+        if c_med > 0:
+            serie_med.append(c_med / a)
+        if c_min <= 0 and c_med <= 0:
+            serie_min.append(total)
+            serie_med.append(total)
+    valores = [v for v in serie_min if _plausivel(v)]
+    if not condominial:
+        valores += [v for v in serie_med if _plausivel(v)]
+    if not valores:
+        return None
+    valor = _media_aparada(valores) * area_alvo
+    if separou:
+        valor += medio_t * area_terreno_alvo
+    return valor
+
+
+def _agente5(resultado: dict) -> list[dict]:
+    preco = resultado.get("preco_estimado") or {}
+    if not preco:
+        return [_v("Agente 5", "Resultado do Agente 5", "resultado presente",
+                   "o Agente 5 não devolveu resultado", any(str(f).startswith("agente5")
+                                                             for f in resultado.get("falhas") or []))]
+    saida = []
+    avaliacao = preco.get("avaliacao_planilha") or {}
+    exibido = float(avaliacao.get("valor_medio_imovel") or 0)
+    refeito = refazer_conta_agente5(preco)
+    if exibido > 0 and refeito is not None:
+        dif = abs(refeito - exibido)
+        liq = float(avaliacao.get("valor_liquidez") or 0)
+        dif_liq = abs(liq - exibido * (1 - DESCONTO_LIQUIDEZ))
+        saida.append(_v(
+            "Agente 5", "Refazer a conta de forma independente dá o valor exibido",
+            f"{_reais(exibido)} (liquidez {_reais(exibido * (1 - DESCONTO_LIQUIDEZ))}), tolerância de R$ 1",
+            f"{_reais(refeito)} (diferença {_reais(dif)}; liquidez {_reais(liq)})",
+            dif <= TOLERANCIA_REAIS and dif_liq <= TOLERANCIA_REAIS,
+        ))
+    else:
+        saida.append(_v("Agente 5", "Refazer a conta de forma independente dá o valor exibido",
+                        "valor calculado", "não verificável: sem valor calculado ou sem comparáveis usados", None))
+
+    usados_c, usados_t = _usados(preco)
+    usados = usados_c + usados_t
+    zona = resultado.get("zona_homogenea") or {}
+    urls_zona = {c.get("url") for chave in ("comparaveis_confirmados", "terrenos", "comparaveis_nao_verificados",
+                                             "terrenos_nao_verificados")
+                 for c in zona.get(chave) or [] if c.get("url")}
+    fora = []
+    for u in usados:
+        status = u.get("status_zona") or "confirmado"
+        if status == "sem_validacao":
+            if zona.get("comparaveis_confirmados"):
+                fora.append(f"{u.get('url')} (sem validação com zona calculada)")
+        elif zona and u.get("url") and u["url"] not in urls_zona:
+            fora.append(u.get("url"))
+    saida.append(_v(
+        "Agente 5", "Todos os comparáveis usados estão na zona",
+        f"{len(usados)} usados na zona (confirmados ou com distância não verificada)",
+        f"{len(fora)} fora da zona" + (f": {', '.join(map(str, fora[:3]))}" if fora else ""), not fora,
+    ))
+
+    urls_alvo = {c.get("url") for c in _anuncios(resultado) if c.get("eh_anuncio_do_alvo") and c.get("url")}
+    alvo_usado = [u.get("url") for u in usados if u.get("eh_anuncio_do_alvo") or u.get("url") in urls_alvo]
+    saida.append(_v(
+        "Agente 5", "Nenhum anúncio do próprio imóvel entrou nos usados",
+        "0 anúncios com eh_anuncio_do_alvo nos usados",
+        f"{len(alvo_usado)}" + (f": {', '.join(map(str, alvo_usado[:3]))}" if alvo_usado else ""), not alvo_usado,
+    ))
+
+    alvo_tipo = normalizar_tipo((preco.get("imovel_alvo") or {}).get("tipo") or "")
+    separou = bool((preco.get("calculo_terreno") or {}).get("aplicado"))
+    if alvo_tipo in TIPOS_TERRENO:
+        esperado_t, ok_t = "imóvel é terreno: terrenos usados são o próprio cálculo", True
+    elif separou:
+        esperado_t = f"terreno separado: pelo menos {MIN_AMOSTRAS_CONFIAVEL} terrenos usados"
+        ok_t = len(usados_t) >= MIN_AMOSTRAS_CONFIAVEL
+    else:
+        esperado_t, ok_t = "terreno não separado: 0 terrenos usados", not usados_t
+    saida.append(_v(
+        "Agente 5", "Terrenos usados coerentes com a decisão de separar o terreno", esperado_t,
+        f"{'separou' if separou else 'não separou'} o terreno; {len(usados_t)} terrenos usados", ok_t,
+    ))
+
+    status = preco.get("status_avaliacao", "ok")
+    confiavel = bool(preco.get("avaliacao_confiavel", True))
+    n = len(usados_c)
+    outro_motivo = (not preco.get("zona_calculada_nesta_avaliacao", True)
+                    or status in ("sem_amostra", "valor_nao_estimado"))
+    if alvo_tipo in TIPOS_TERRENO:
+        n = len(usados_t)
+    deveria_ter_valor = n >= MIN_AMOSTRAS_CONFIAVEL and not outro_motivo
+    saida.append(_v(
+        "Agente 5", "Sem valor ⇔ menos comparáveis válidos que o mínimo (ou outro motivo registrado)",
+        f"{'com valor' if deveria_ter_valor else 'sem valor'} ({n} válidos, mínimo {MIN_AMOSTRAS_CONFIAVEL}"
+        + (f"; motivo registrado: {status}" if outro_motivo else "") + ")",
+        f"{'com valor' if confiavel else 'sem valor'} (status {status})",
+        confiavel == deveria_ter_valor,
+    ))
+    return saida
+
+
+def verificar_execucao(resultado: dict) -> list[dict]:
+    """Todas as verificacoes, na ordem dos agentes. Nunca levanta excecao."""
+    resultado = resultado or {}
+    saida = []
+    for etapa in (_geral, _agente1, _agente2, _agente3, _agente4, _agente5):
+        try:
+            saida += etapa(resultado)
+        except Exception as exc:   # uma verificacao quebrada nao derruba as outras
+            saida.append(_v(etapa.__name__.strip("_").replace("agente", "Agente "), "Verificação não rodou",
+                            "verificação sem erro", f"erro: {type(exc).__name__}: {exc}", False))
+    return saida
+
+
+def ordenar_para_tela(verificacoes: list[dict]) -> list[dict]:
+    """Falhas primeiro, depois as nao verificaveis, depois as que passaram."""
+    ordem = {False: 0, None: 1, True: 2}
+    return sorted(verificacoes or [], key=lambda v: ordem.get(v.get("ok"), 1))
+
+
+def icone(ok) -> str:
+    return "✅" if ok is True else "❌" if ok is False else "⚪"

@@ -271,6 +271,9 @@ def montar_registro(
     # Checagem "e o anuncio do proprio imovel?" (Agente 2): os anuncios com mais sinais,
     # para explicar depois por que um anuncio entrou ou saiu do calculo.
     execucao["checagem_anuncio_alvo"] = _checagem_anuncio_alvo(coletados)
+    # Verificacoes automaticas (services/verificacoes.py): a interface preenche depois
+    # de montar o resultado completo.
+    execucao["verificacoes"] = None
     return execucao, _linhas_comparaveis(id_execucao, ag5)
 
 
@@ -522,6 +525,24 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
     aba.freeze_panes = "A2"
     if aba.max_row > 1:
         aba.auto_filter.ref = aba.dimensions
+
+    # ── Verificacoes automaticas (services/verificacoes.py): falhas primeiro ─
+    if execucao.get("verificacoes"):
+        from services.verificacoes import icone, ordenar_para_tela
+        aba_verif = livro.create_sheet("Verificações")
+        colunas_verif = (("Resultado", 12), ("Agente", 11), ("Verificação", 60), ("Esperado", 55), ("Encontrado", 70))
+        aba_verif.append([nome for nome, _ in colunas_verif])
+        for celula in aba_verif[1]:
+            celula.font, celula.fill = negrito, fundo_cabecalho
+        rotulos = {True: "OK", False: "FALHOU", None: "não verificável"}
+        for v in ordenar_para_tela(execucao["verificacoes"]):
+            aba_verif.append([f"{icone(v.get('ok'))} {rotulos.get(v.get('ok'))}", v.get("agente"),
+                              v.get("verificacao"), v.get("esperado"), v.get("encontrado")])
+            for celula in aba_verif[aba_verif.max_row][2:]:
+                celula.alignment = Alignment(wrap_text=True, vertical="top")
+        for indice, (_, largura) in enumerate(colunas_verif, start=1):
+            aba_verif.column_dimensions[aba_verif.cell(row=1, column=indice).column_letter].width = largura
+        aba_verif.freeze_panes = "A2"
 
     # ── Funil (conferencia): onde cada anuncio saiu e por que ─────────────
     if funil:
