@@ -27,6 +27,26 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
 
 ## Agente 1 — Repetidos entre portais (`agents/identidade.py`)
 
+- [ ] **Anúncios repetidos não juntados (São Paulo, Jardim Consórcio, 21/10/2026).**
+  - A verificação "Repetidos prováveis entre os usados" (⚠️; mesmo preço ≤0,5%, mesma
+    área ≤2%, mesma rua, com ou sem número) encontrou 17 grupos nos 103 usados, com 49
+    anúncios. Cada grupo devia contar 1 vez, então são 32 anúncios a mais na média.
+  - 13 grupos (33 anúncios) têm números compatíveis (iguais ou sem número). 4 grupos (16
+    anúncios) têm números diferentes na mesma rua (Pedro Rendon 08, 1, 101, 36): podem
+    ser casas iguais de loteamento ou números inventados ("9999").
+  - Decidir se o Agente 1 deve juntar esses casos e com qual regra.
+- [ ] **Mesmo imóvel com fotos de imobiliárias diferentes (Jardim Consórcio, 21/10/2026).**
+  - O anúncio da Scheid (R$ 750.000, VivaReal 2915942556) e o da Monte Alegre
+    (R$ 700.000, VivaReal 2904140532) são a mesma casa, mas cada imobiliária fez as
+    próprias fotos (ângulos e enquadramentos diferentes, cada uma com a sua marca d'água).
+  - O hash perceptual não separa os casos:
+    - mesma casa: menor distância 20 (phash) e 18 (dhash); 0 pares com distância ≤ 10;
+    - casas diferentes do mesmo bairro: menor distância 18 (phash) e 12 (dhash).
+    Comparação visual por hash não foi implementada.
+  - O anúncio da Monte Alegre continua no cálculo como "possível alvo". Caminhos
+    possíveis: perguntar no formulário "este é o mesmo imóvel?" para os suspeitos, ou
+    comparar por IA de visão.
+
 - [x] **Resolvido em 17/10/2026: menor área + alerta `area_diferente_entre_portais`.** Área do par juntado dependia do anúncio que fica. Ao
   juntar o mesmo imóvel de dois portais, fica o anúncio mais completo (mais campos
   preenchidos) com a área dele, sem comparar com a do outro. Curitiba/Cajuru
@@ -84,6 +104,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   gratuito.
 
 ## Resolvido
+
+- **Verificação de repetidos prováveis e texto do terreno** (21/10/2026).
+  - `eef9c57`: verificação "Repetidos prováveis entre os usados", com o novo estado
+    ⚠️ `"alerta"` (pede conferência, mas pode não ser erro).
+  - Commit `tela:` seguinte: o passo a passo do Agente 5 diz o motivo exato de o terreno
+    não entrar ("terreno do imóvel não informado", "só N terrenos à venda na região",
+    "não há terrenos comparáveis na zona", "o imóvel é apartamento").
 
 - **Revisão dos commits de 20 e 21/10** (21/10/2026).
   - `717c04b`: a verificação que refaz a conta do Agente 5 calcula o R$/m² de cada
