@@ -25,22 +25,6 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   avaliação e pular o Qwen se ele demorar; fazer o notebook cancelar pedidos
   abandonados; GPU mais forte.
 
-## Agente 1 — Dados que as verificações automáticas precisam (aguardando aprovação)
-
-Três verificações de `services/verificacoes.py` aparecem como ⚪ "não verificável",
-porque o Agente 1 (`agents/collector.py`) não grava o dado que elas usam:
-
-- [ ] **Dados desta execução:** o Agente 1 não recebe o `id_execucao` nem grava o
-  horário da coleta nos anúncios (os Agentes 2 a 5 já gravam, e isso já é verificado).
-  Proposta: `coletar_imoveis(..., id_execucao=)` grava `id_execucao` e `coletado_em`
-  em cada anúncio.
-- [ ] **Fontes:** as falhas do Athena (por subtipo ou indisponível) e do Apify só vão
-  para o log. Proposta: devolver a situação de cada fonte (consultada / respondeu /
-  falhou e o erro), por exemplo em `escopo_busca` ou num campo `fontes_consultadas`.
-- [ ] **encontrados = mantidos + repetidos:** o Agente 1 não grava o total antes de
-  juntar os repetidos, nem quantos saíram como leilão ou pelo limite por tipo.
-  Proposta: gravar `total_antes_repetidos`, `removidos_leilao` e `cortados_pelo_limite`.
-
 ## Agente 1 — Repetidos entre portais (`agents/identidade.py`)
 
 - [x] **Resolvido em 17/10/2026: menor área + alerta `area_diferente_entre_portais`.** Área do par juntado dependia do anúncio que fica. Ao
@@ -100,6 +84,23 @@ porque o Agente 1 (`agents/collector.py`) não grava o dado que elas usam:
   gratuito.
 
 ## Resolvido
+
+- **Agente 1: dados para as verificações automáticas** (21/10/2026; aprovado pela
+  usuária). As três verificações do Agente 1 que apareciam como ⚪ passaram a ser
+  verificadas numa coleta nova:
+  - `7df21e1`: `id_execucao` e `coletado_em` em cada anúncio (`coletar_imoveis(...,
+    id_execucao=)`). Confere se os dados são desta execução.
+  - `60ab144`: `resumo_coleta.fontes` com a situação do Athena (consultas que
+    responderam, falhas por subtipo ou "indisponível") e do Apify (se foi consultado
+    e por quê, se respondeu, o erro). O erro do Apify é gravado sem o token, porque
+    as URLs das chamadas levam `?token=`. Antes, as falhas só iam para o log, e o
+    Apify devolvia lista vazia em qualquer erro.
+  - `c2994e7`: `resumo_coleta.contagem` com brutos, leilões removidos, total antes de
+    juntar os repetidos, repetidos, únicos, cortados pelo limite por tipo, mantidos.
+    Confere: encontrados = únicos + repetidos; únicos = mantidos + cortados; e
+    mantidos e repetidos iguais aos do resultado.
+  - Testes: `tests/test_coleta_registro.py` (10, com Athena e Apify simulados e `data/`
+    numa pasta temporária).
 
 - **Verificações automáticas ao final de cada execução** (20/10/2026).
   - `services/verificacoes.verificar_execucao(resultado)` devolve uma lista de
