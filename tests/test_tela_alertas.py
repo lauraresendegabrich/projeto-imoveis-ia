@@ -73,8 +73,12 @@ def test_possivel_repetido_no_calculo():
     at = _tela("repetido")
     aviso = _aviso(at, "Possível repetido no cálculo: 2 anúncios, em 1 grupo,")
     assert aviso and "pesando mais de uma vez na média. Confira os anúncios." in aviso[0], aviso
+    # Logo abaixo do aviso, agrupado: titulo do grupo e os anuncios, sem a coluna Motivo.
+    assert "Ver os 2 anúncios que podem ser repetidos" in [e.label for e in at.expander]
+    assert any(m.value == "**Grupo 1: nº 314, R\\$ 550.000, 142 m²**" for m in at.markdown), \
+        [m.value for m in at.markdown if "Grupo" in m.value]
     tabela = _tabela_com(at, "Rua Projetada, 314")
-    assert tabela and "Grupo: nº 314" in tabela[0] and "[ver](https://x/Rua Elvio, 314)" in tabela[0], tabela
+    assert tabela and "[ver](https://x/Rua Elvio, 314)" in tabela[0] and "| Motivo" not in tabela[0], tabela
     assert any(l.endswith("Confira os anúncios na tela ou no Excel.")
                for l in _laudo(at).splitlines() if "Possível repetido" in l)
 

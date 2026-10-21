@@ -98,12 +98,43 @@ def _anuncios_do_alerta(alerta):
     return anuncios
 
 
+def _linha_anuncio(a):
+    return {
+        "Endereço": ", ".join(x for x in (a.get("endereco"), a.get("bairro")) if x) or "-",
+        "Preço": fmt_brl(a["preco"]) if a.get("preco") else "-",
+        "Área": f"{float(a['area']):g} m²" if a.get("area") else "-",
+        "Portal": a.get("portal") or "-",
+        "Anúncio": f"[ver]({a['link']})" if a.get("link") else "-",
+    }
+
+
+def _mostrar_grupos_de_repetidos(alerta):
+    """
+    Logo abaixo do aviso "Possivel repetido no calculo": um titulo por grupo ("Grupo 1:
+    nº 888, R$ 830.000, 203 m²") e os anuncios do grupo embaixo.
+    """
+    import pandas as pd
+    detalhe = alerta.get("detalhe")
+    itens = (detalhe.get("anuncios") if isinstance(detalhe, dict) else detalhe) or []
+    grupos = [g for g in itens if isinstance(g, dict) and g.get("anuncios")]
+    n = sum(len(g["anuncios"]) for g in grupos)
+    with st.expander(f"Ver os {n} anúncios que podem ser repetidos"):
+        for i, g in enumerate(grupos, start=1):
+            area = f", {float(g['area']):g} m²" if g.get("area") else ""
+            st.markdown(f"**Grupo {i}: nº {g.get('numero') or '-'}, {fmt_brl(g.get('preco') or 0)}{area}**")
+            st.markdown(pd.DataFrame([_linha_anuncio(a) for a in g["anuncios"]]).to_markdown(index=False),
+                        unsafe_allow_html=True)
+
+
 def mostrar_alertas_na_tela(resultado):
     """Aviso de cada alerta (texto explicativo) e os anuncios envolvidos num expander."""
     import pandas as pd
     for alerta in alertas_na_tela(resultado):
         texto = str(alerta.get("mensagem") or "").replace("R$", "R\\$")   # $ nao vira formula
         st.warning(f"⚠️ {texto}")
+        if alerta.get("codigo") == "possivel_repetido_no_calculo":
+            _mostrar_grupos_de_repetidos(alerta)
+            continue
         anuncios = _anuncios_do_alerta(alerta)
         rotulo = (f"Ver os {len(anuncios)} anúncios iguais" if alerta.get("codigo") == "amostra_concentrada"
                   else "Ver os anúncios")
