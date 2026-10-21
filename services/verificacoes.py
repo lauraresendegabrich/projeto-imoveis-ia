@@ -135,11 +135,19 @@ def _agente1(resultado: dict) -> list[dict]:
          if outra_cidade else f"todos da cidade pedida") + (f"; {sem_cidade} sem cidade no anúncio" if sem_cidade else ""),
         not outra_cidade if cidade else None,
     )]
-    # Dados que o Agente 1 ainda nao grava (ver docs/PENDENCIAS.md).
+    id_exec = resultado.get("id_execucao")
+    de_outra = [c for c in anuncios if c.get("id_execucao") != id_exec]
+    sem_horario = [c for c in anuncios if not c.get("coletado_em")]
+    horarios = sorted({c.get("coletado_em") for c in anuncios if c.get("coletado_em")})
     saida.append(_v(
         "Agente 1", "Os dados são desta execução (id_execucao / horário)",
-        "id_execucao desta execução em cada anúncio coletado",
-        "não verificável: o Agente 1 não grava id_execucao nem o horário da coleta", None,
+        f"id_execucao {id_exec} e horário da coleta em cada anúncio",
+        f"{len(anuncios) - len(de_outra)} de {len(anuncios)} com o id desta execução"
+        + (f" (outros: {', '.join(sorted({str(c.get('id_execucao')) for c in de_outra})[:3])})" if de_outra else "")
+        + f"; {len(sem_horario)} sem horário"
+        + (f"; coletados em {horarios[0]}" if len(horarios) == 1 else
+           f"; coletados entre {horarios[0]} e {horarios[-1]}" if horarios else ""),
+        bool(id_exec) and not de_outra and not sem_horario,
     ))
     saida.append(_v(
         "Agente 1", "Cada fonte consultada respondeu, ou a falha está registrada",

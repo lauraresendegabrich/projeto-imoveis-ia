@@ -1606,6 +1606,7 @@ def coletar_imoveis(
     lat_alvo: float = None,
     lon_alvo: float = None,
     nivel_geo_alvo: str = None,
+    id_execucao: str = None,
 ) -> list[dict]:
     """
     Coleta imoveis para o Agente 2. Athena e a fonte principal; Apify complementa
@@ -1618,6 +1619,10 @@ def coletar_imoveis(
         .meta.json via _cache_compativel), reutiliza `arquivo_processados` do disco
         e pula a coleta. Se o cache for de outra consulta ou estiver vazio, e ignorado
         e uma nova coleta e feita. Com False, sempre coleta do zero.
+
+    id_execucao : str (opcional)
+        Gravado em cada anuncio coletado, junto com o horario da coleta (coletado_em),
+        para as verificacoes automaticas conferirem que os dados sao desta execucao.
     """
     tipos_suportados = {"apartment", "house"}
     tipo_imovel = (tipo_imovel or "").strip().lower()
@@ -2023,8 +2028,13 @@ def coletar_imoveis(
 
     # Escopo que a busca usou ("rua+bairro" ou "cidade"), para a tela mostrar o que
     # aconteceu de fato em vez de adivinhar comparando nomes de bairro.
+    # id_execucao e horario desta coleta em cada anuncio (verificacoes automaticas:
+    # os dados sao desta execucao, nao de uma rodada anterior).
+    coletado_em = datetime.now().isoformat(timespec="seconds")
     for im in combinados:
         im["escopo_busca"] = escopo
+        im["id_execucao"] = id_execucao
+        im["coletado_em"] = coletado_em
 
     # JSONs continuam como snapshots/debug. O pipeline deve usar o retorno em memoria.
     # Sempre sobrescreve, inclusive com [], para nunca servir dados de outra coleta:

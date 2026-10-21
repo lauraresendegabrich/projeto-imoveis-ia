@@ -577,6 +577,8 @@ with area_principal.container():
                 lat_alvo=imovel_alvo.get("lat"),
                 lon_alvo=imovel_alvo.get("lon"),
                 nivel_geo_alvo=imovel_alvo.get("geocodificacao_nivel"),
+                # Gravado em cada anuncio (verificacoes: dados desta execucao).
+                id_execucao=id_execucao,
             )
 
         t1 = time.time()

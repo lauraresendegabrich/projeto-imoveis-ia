@@ -22,14 +22,16 @@ def casa(i, **extra):
             "street": f"Rua {i}", "neighborhood": "Centro", "city": "Curitiba", "state": "PR", "cluster": "A",
             "status_julgamento": "JULGADO_LLM", "provider_llm": "gemini", "modelo_llm": "gemini-2.5-flash",
             "checagem_alvo": {"resultado": "nao", "score": 0.0, "sinais": []},
-            "classificacao_zona": "na_zona", "distancia_metros": 100 + i * 50, **extra}
+            "classificacao_zona": "na_zona", "distancia_metros": 100 + i * 50,
+            "id_execucao": ID, "coletado_em": "2026-10-21T09:00:00", **extra}
 
 
 def terreno(i, **extra):
     return {"url": f"https://t/{i}", "propertyType": "Terrenos", "price": 200_000 + i * 15_000, "area": 300 + i * 10,
             "city": "Curitiba", "state": "PR", "cluster": "terreno", "status_julgamento": "SEPARADO_TIPO",
             "checagem_alvo": {"resultado": "nao", "score": 0.0, "sinais": []},
-            "classificacao_zona": "na_zona", "distancia_metros": 200 + i * 30, **extra}
+            "classificacao_zona": "na_zona", "distancia_metros": 200 + i * 30,
+            "id_execucao": ID, "coletado_em": "2026-10-21T09:00:00", **extra}
 
 
 def montar(area_terreno=None, n_casas=6, n_terrenos=2):
@@ -87,7 +89,6 @@ def test_base_tudo_passa_menos_o_nao_verificavel():
     falhas = [v for v in vs if v["ok"] is False]
     assert not falhas, falhas
     assert [v["verificacao"] for v in vs if v["ok"] is None] == [
-        "Os dados são desta execução (id_execucao / horário)",
         "Cada fonte consultada respondeu, ou a falha está registrada",
         "encontrados = mantidos + repetidos",
     ]
@@ -244,7 +245,7 @@ def test_tela_mostra_a_lista_com_falhas_primeiro():
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     rotulo = next(e.label for e in at.expander if e.label.startswith("🧪 Verificações automáticas"))
-    assert "1 ❌ · 3 ⚪" in rotulo, rotulo
+    assert "1 ❌ · 2 ⚪" in rotulo, rotulo
     lista = next(m.value for m in at.markdown if m.value.startswith("- ❌"))
     itens = [l for l in lista.splitlines() if l.startswith("- ")]
     assert itens[0].startswith("- ❌ **Geral** · Os resultados dos Agentes 2 a 5") and itens[1].startswith("- ⚪"), itens[:2]
