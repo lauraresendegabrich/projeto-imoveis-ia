@@ -182,7 +182,7 @@ LIMIT 20;
 
 Rodar `db/migracoes/004_verificacoes.sql` no SQL Editor do Neon **antes** de colocar
 no ar o código que grava a coluna (sem ela, a gravação falha e as avaliações deixam de
-ser registradas; o app continua funcionando).
+ser registradas; o app continua funcionando). **Rodada no Neon em 21/10/2026.**
 
 `verificacoes` guarda a lista das verificações feitas ao final de cada execução
 (`services/verificacoes.py`), uma por regra: `{agente, verificacao, esperado,

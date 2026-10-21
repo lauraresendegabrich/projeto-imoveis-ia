@@ -109,8 +109,8 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   - Onde aparece:
     - no modo conferência, no topo do resultado, como lista ❌ / ⚪ / ✅, com as falhas
       primeiro;
-    - no banco, na coluna `execucoes.verificacoes` (migração 004, **rodar no Neon
-      antes do merge**);
+    - no banco, na coluna `execucoes.verificacoes` (migração 004, rodada no Neon em
+      21/10/2026: coluna `verificacoes` JSONB conferida);
     - no Excel, na aba "Verificações".
   - O que é conferido:
     - Geral: cada anúncio aparece em uma só etapa do funil; os resultados dos Agentes
