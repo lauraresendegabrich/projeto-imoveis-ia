@@ -66,9 +66,9 @@ CREATE TABLE IF NOT EXISTS execucoes (
     status_agente5              TEXT,                      -- ok / sem_amostra / valor_nao_estimado / amostra_insuficiente
     qtd_comparaveis_construcao  INTEGER,
     qtd_terrenos                INTEGER,
-    lance_maximo                NUMERIC(14, 2),            -- liquidez ÷ fator de lucro
-    sobra                       NUMERIC(14, 2),            -- lance máximo − valor mínimo (negativa = falta)
-    decisao                     TEXT,                      -- Não descartar / Descartar / Sem estimativa
+    lance_maximo                NUMERIC(14, 2),            -- maior lance com ROI de 30% (services/leilao.py)
+    sobra                       NUMERIC(14, 2),            -- lance máximo − valor mínimo (negativa = falta p/ "Oportunidade")
+    decisao                     TEXT,                      -- Oportunidade / Margem apertada / Descartar / Sem estimativa
     tempo_venda                 TEXT,
     alertas                     JSONB,                     -- sinais automáticos de atenção (services/alertas.py)
 

@@ -25,6 +25,7 @@ from services.textos_tela import (
     nota_anuncio_do_alvo, texto_comparaveis_na_zona,
 )
 from services.leilao import (
+    ALIQUOTA_IR, CORRETAGEM, CUSTOS_ANTES_DA_VENDA, texto_lance_descarte, texto_lance_maximo, texto_percentual,
     FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, contar_status_zona,
     ler_data_br, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
 )
@@ -168,7 +169,8 @@ def mostrar_avaliacao_leilao(leilao):
     decisao = leilao["decisao"]
     # Fundo e texto explicitos: legiveis com o tema claro ou escuro do Streamlit.
     cores = {
-        "Não descartar": ("#e3f4e8", "#1b6b34", "✅"),
+        "Oportunidade": ("#e3f4e8", "#1b6b34", "✅"),
+        "Margem apertada": ("#fdf3d7", "#7a5a00", "🟡"),
         "Descartar": ("#fbe4e2", "#a3261c", "❌"),
         "Sem estimativa": ("#ececec", "#4a4a4a", "⚪"),
     }
@@ -186,18 +188,28 @@ def mostrar_avaliacao_leilao(leilao):
         )
     if leilao.get("lance_maximo") is None:
         return
-    sobra = leilao["sobra"]
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Lance máximo", fmt_brl(leilao["lance_maximo"]))
+        st.metric("ROI pagando o valor mínimo", texto_percentual(leilao["roi"]))
     with col2:
         st.metric("Valor mínimo CAIXA", fmt_brl(leilao["valor_minimo"]))
     with col3:
-        st.metric("Sobra" if sobra >= 0 else "Falta", fmt_brl(abs(sobra)))
-    st.caption(
-        f"Lance máximo = valor de liquidez ÷ {leilao['fator_lucro']:.2f} "
-        f"(lucro de 55%, com os custos de aquisição já incluídos)."
-    )
+        st.metric("Lance máximo", fmt_brl(leilao["lance_maximo"]))
+    st.markdown(f"**{texto_lance_maximo(leilao, fmt_brl)}**")
+    st.caption(texto_lance_descarte(leilao, fmt_brl))
+    conta = leilao["conta"]
+    with st.expander("Conta do investimento (pagando o valor mínimo)"):
+        st.markdown(pd.DataFrame([
+            ("Arrematação (valor mínimo)", fmt_brl(conta["arrematacao"])),
+            (f"Custos antes da venda (arrematação + {texto_percentual(CUSTOS_ANTES_DA_VENDA, 0)})",
+             fmt_brl(conta["custos_antes_da_venda"])),
+            ("Receita da venda (valor de liquidez)", fmt_brl(conta["venda"])),
+            (f"Corretagem ({texto_percentual(CORRETAGEM, 0)} da venda)", fmt_brl(conta["corretagem"])),
+            (f"IR ({texto_percentual(ALIQUOTA_IR, 0)} de venda − custos antes da venda)", fmt_brl(conta["ir"])),
+            ("Todos os custos", fmt_brl(conta["custos_totais"])),
+            ("Resultado", fmt_brl(conta["resultado"])),
+            ("ROI (resultado ÷ custos antes da venda)", texto_percentual(conta["roi"])),
+        ], columns=["", "Valor"]).to_markdown(index=False))
     if leilao.get("valor_avaliacao"):
         st.caption(f"Valor de avaliação CAIXA (informativo): {fmt_brl(leilao['valor_avaliacao'])}")
     if leilao.get("aviso_zona"):

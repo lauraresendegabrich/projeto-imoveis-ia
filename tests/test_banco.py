@@ -70,14 +70,14 @@ def test_execucao_tem_os_campos_principais():
     assert e["origem"] == "CAIXA" and e["tipo"] == "casa" and e["uf"] == "PR"
     assert e["endereco"] == "Rua X, 100"
     assert e["valor_minimo"] == 323158 and e["valor_avaliacao"] == 410000
-    assert e["decisao"] == "Não descartar" and round(e["lance_maximo"]) == 415763 and round(e["sobra"]) == 92605
+    assert e["decisao"] == "Oportunidade" and round(e["lance_maximo"]) == 337068 and round(e["sobra"]) == 13910
     assert e["status_agente5"] == "ok" and e["liquidez"] == 644432.4 and e["valor_mercado"] == 716036.0
     assert e["anuncios_encontrados"] == 3 and e["repetidos"] == 2 and e["parecidos"] == 12
     assert e["confirmados_na_zona"] == 9 and e["raio_zona_m"] == 450
     assert e["usados_por_fallback"] == 1 and e["terrenos_usados"] == 1
     assert e["qtd_comparaveis_construcao"] == 2 and e["qtd_terrenos"] == 1
     assert e["tempo_venda"] == "60 a 90 dias" and e["tempo_s"] == 300.5
-    assert e["parametros"]["fator_lucro_leilao"] == 1.55 and e["parametros"]["min_amostras_confiavel"] == 5
+    assert e["parametros"]["regra_leilao"]["roi_oportunidade"] == 0.30 and e["parametros"]["min_amostras_confiavel"] == 5
     assert e["modelos_ia"]["agente4"] == "Gemini" and e["fontes"]["anuncios_apify"] == 1
     assert e["falhas"]["falhas"] == ["agente3: Timeout"]
 
@@ -152,12 +152,13 @@ def test_excel_tem_abas_resumo_e_comparaveis():
 def test_excel_resumo_campo_valor():
     livro, _ = _abrir_excel()
     resumo = {linha[0]: linha[1] for linha in livro["Resumo"].iter_rows(values_only=True)}
-    assert resumo["Decisão"] == "Não descartar"
-    assert round(resumo["Lance máximo"]) == 415763 and round(resumo["Sobra (negativo = falta)"]) == 92605
+    assert resumo["Decisão"] == "Oportunidade" and round(resumo["ROI pagando o valor mínimo"], 4) == 0.3495
+    assert round(resumo["Lance máximo (ROI de 30%)"]) == 337068
+    assert round(resumo["Sobra até o lance máximo (negativo = falta)"]) == 13910
     assert resumo["Valor mínimo CAIXA"] == 323158 and resumo["Valor de liquidez (−10%)"] == 644432.4
     assert resumo["Cidade"] == "Curitiba" and resumo["Estimativa confiável"] == "Sim"
     assert resumo["Identificador da avaliação"] == "abc123"
-    celula_lance = next(l[1] for l in livro["Resumo"].iter_rows() if l[0].value == "Lance máximo")
+    celula_lance = next(l[1] for l in livro["Resumo"].iter_rows() if l[0].value == "Lance máximo (ROI de 30%)")
     assert "R$" in celula_lance.number_format
 
 

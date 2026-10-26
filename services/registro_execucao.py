@@ -12,7 +12,10 @@ from pathlib import Path
 
 from services.alertas import calcular_alertas
 from services.leilao import texto_aviso_lancamento, texto_aviso_raio
-from services.leilao import FATOR_LUCRO_LEILAO, ORIGEM_CAIXA
+from services.leilao import (
+    ALIQUOTA_IR, CORRETAGEM, CUSTOS_ANTES_DA_VENDA, ORIGEM_CAIXA, ROI_OPORTUNIDADE, ROI_MARGEM_APERTADA,
+    conta_investimento,
+)
 
 RAIZ = Path(__file__).resolve().parent.parent
 
@@ -186,7 +189,10 @@ def montar_registro(
         "id_execucao": id_execucao,
         "versao_codigo": versao_codigo(),
         "parametros": {
-            "fator_lucro_leilao": FATOR_LUCRO_LEILAO,
+            "regra_leilao": {
+                "custos_antes_da_venda": CUSTOS_ANTES_DA_VENDA, "corretagem": CORRETAGEM,
+                "aliquota_ir": ALIQUOTA_IR, "roi_margem_apertada": ROI_MARGEM_APERTADA, "roi_oportunidade": ROI_OPORTUNIDADE,
+            },
             "min_amostras_confiavel": MIN_AMOSTRAS_CONFIAVEL,
             "min_confirmados_zona": MIN_CONFIRMADOS_ZONA,
             "raio_zona_m": raio,
@@ -277,6 +283,7 @@ def montar_registro(
     return execucao, _linhas_comparaveis(id_execucao, ag5)
 
 
+
 # =============================================================================
 # Excel do resultado da avaliacao (botao de exportacao na interface)
 # =============================================================================
@@ -287,6 +294,7 @@ FORMATO_REAIS = '"R$" #,##0.00'
 FORMATO_AREA = '#,##0.00 "m²"'
 FORMATO_INTEIRO = "#,##0"
 FORMATO_DATA = "DD/MM/YYYY"
+FORMATO_PERCENTUAL = "0.00%"
 
 ROTULOS_LOCALIZACAO = {
     "endereco_completo": "Endereço completo",
@@ -325,9 +333,10 @@ LINHAS_RESUMO = (
     ("Estimativa confiável", "_confiavel", None),
     ("Leilão CAIXA", None, None),
     ("Decisão", "decisao", None),
-    ("Lance máximo", "lance_maximo", FORMATO_REAIS),
+    ("ROI pagando o valor mínimo", "_roi", FORMATO_PERCENTUAL),
     ("Valor mínimo CAIXA", "valor_minimo", FORMATO_REAIS),
-    ("Sobra (negativo = falta)", "sobra", FORMATO_REAIS),
+    ("Lance máximo (ROI de 30%)", "lance_maximo", FORMATO_REAIS),
+    ("Sobra até o lance máximo (negativo = falta)", "sobra", FORMATO_REAIS),
     ("Valor de avaliação CAIXA (informativo)", "valor_avaliacao", FORMATO_REAIS),
     ("Modalidade", "modalidade", None),
     ("Data do leilão", "data_leilao", FORMATO_DATA),
@@ -407,6 +416,12 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
     valores["_confiavel"] = "Sim" if execucao.get("status_agente5") == "ok" else "Não"
     n_alertas = len(execucao.get("alertas") or [])
     valores["_alertas"] = f"{n_alertas} (veja a aba Alertas)" if n_alertas else "Nenhum"
+    # ROI nao e coluna do banco: sai da liquidez e do valor minimo (mesma conta do leilao).
+    valores["_roi"] = (
+        conta_investimento(execucao["valor_minimo"], execucao["liquidez"])["roi"]
+        if execucao.get("lance_maximo") is not None and execucao.get("valor_minimo") and execucao.get("liquidez")
+        else None
+    )
     valores["_formas_pagamento"] = ", ".join(execucao.get("formas_pagamento") or []) or None
     parametros = execucao.get("parametros") or {}
     valores["_raio_ia"] = parametros.get("raio_ia_m", execucao.get("raio_zona_m"))

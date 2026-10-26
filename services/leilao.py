@@ -2,18 +2,36 @@
 Avaliacao de imovel de leilao da CAIXA
 ======================================
 
-Pergunta respondida: ate quanto posso pagar por este imovel para ter 55% de lucro?
-Os 55% JA INCLUEM os custos de aquisicao (comissao, ITBI, registro, debitos): nada e
-somado nem descontado.
+Pergunta respondida: qual o retorno (ROI) de arrematar pelo valor minimo, e ate quanto
+posso dar de lance para o imovel continuar "Oportunidade"?
+
+Conta do investimento (regra do professor), com venda = valor de liquidez do Agente 5:
+  custos antes da venda = arrematacao x (1 + CUSTOS_ANTES_DA_VENDA)      (33%)
+  corretagem            = venda x CORRETAGEM                              (5%)
+  IR                    = (venda - custos antes da venda) x ALIQUOTA_IR   (15%; 0 se negativo)
+  resultado             = venda - custos antes - corretagem - IR
+  ROI                   = resultado / custos antes da venda
 
 Regra (nesta ordem):
   1. A estimativa do Agente 5 e confiavel? Usa o status que ele ja calcula
      (price_liquidity.py, MIN_AMOSTRAS_CONFIAVEL). Qualquer status diferente de "ok"
      (sem_amostra, valor_nao_estimado, amostra_insuficiente) ou Agente 5 sem
      resultado -> "Sem estimativa", sem lance maximo.
-  2. lance_maximo = liquidez / FATOR_LUCRO_LEILAO
-  3. sobra = lance_maximo - valor_minimo_caixa
-       sobra >= 0 -> "Nao descartar"; sobra < 0 -> "Descartar"
+  2. ROI pagando o valor minimo da etapa atual:
+       ROI < 15% -> "Descartar"; 15% a 30% -> "Margem apertada"; 30% ou mais -> "Oportunidade"
+  3. lance_maximo = maior lance com ROI de ROI_OPORTUNIDADE (30%): "Lance ate R$ X para
+     continuar Oportunidade"; lance_limite_descarte = maior lance com ROI de
+     ROI_MARGEM_APERTADA (15%): "Acima de R$ Y, descartar";
+     sobra = lance_maximo - valor_minimo (negativa = falta para "Oportunidade")
+
+Modalidades (nomes do site da CAIXA) e etapa atual: avaliar_imovel_leilao.
+  Leilao SFI       : 1o e 2o leilao, cada um com data/hora e valor minimo. Ate a data/hora
+                     do 1o -> 1o; depois, ate a do 2o -> 2o; depois -> encerrado. O valor
+                     do 2o pode ser MAIOR que o do 1o (no 2o o minimo e a divida).
+  Licitacao Aberta : data/hora da licitacao (encerramento) e valor minimo.
+  Venda Online     : data/hora de encerramento (cronometro do site) e valor minimo.
+  Compra Direta    : so valor minimo; sem encerramento (a primeira proposta vence), o
+                     "ativo" depende so da situacao manual.
 
 O valor minimo e o "valor minimo de venda" do site da CAIXA. Ele NAO entra em nenhum
 agente: preco de leilao fica bem abaixo do mercado e distorceria a escolha dos
@@ -21,26 +39,41 @@ comparaveis. O valor de avaliacao CAIXA e so informativo.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from services.formatos import ler_numero_br
 
-# Lucro desejado de 55%, com os custos de aquisicao ja incluidos. Unico lugar do fator.
-FATOR_LUCRO_LEILAO = 1.55
+# Conta do investimento (regra do professor). Unico lugar destes percentuais.
+CUSTOS_ANTES_DA_VENDA = 0.33   # sobre a arrematacao (ITBI, registro, debitos, reforma...)
+CORRETAGEM = 0.05              # sobre a venda
+ALIQUOTA_IR = 0.15             # sobre venda - custos antes da venda
+
+# Faixas de ROI (arrematando pelo valor minimo). Limite exato entra na faixa de cima.
+ROI_MARGEM_APERTADA = 0.15
+ROI_OPORTUNIDADE = 0.30
 
 ORIGEM_CAIXA = "CAIXA"
 
-# Modalidades do site da CAIXA. No Leilao SFI so registramos qual valor foi informado
-# (1o ou 2o leilao); nao ha tratamento das etapas.
-MODALIDADES_CAIXA = [
-    "Venda Online",
-    "Venda Direta Online",
-    "Compra Direta",
-    "Licitação Aberta",
-    "Leilão SFI (valor do 1º leilão)",
-    "Leilão SFI (valor do 2º leilão)",
-    "Outra",
-]
+# Modalidades do site da CAIXA (nomes exatos). Os registros antigos ("Venda Direta
+# Online", "Leilão SFI (valor do 1º/2º leilão)", "Outra") ficam no banco como estao.
+MODALIDADE_SFI = "Leilão SFI"
+MODALIDADE_LICITACAO = "Licitação Aberta"
+MODALIDADE_VENDA_ONLINE = "Venda Online"
+MODALIDADE_COMPRA_DIRETA = "Compra Direta"
+MODALIDADES_CAIXA = [MODALIDADE_SFI, MODALIDADE_LICITACAO, MODALIDADE_VENDA_ONLINE, MODALIDADE_COMPRA_DIRETA]
+
+# Comissao: no Leilao SFI e na Licitacao Aberta o comprador paga ao leiloeiro; na Venda
+# Online e na Compra Direta a corretagem e da CAIXA. So registrada e mostrada: nao entra
+# na conta (os custos antes da venda ja cobrem a aquisicao).
+COMISSAO_LEILOEIRO = 0.05
+MODALIDADES_COM_LEILOEIRO = (MODALIDADE_SFI, MODALIDADE_LICITACAO)
+
+# Exercicio do Direito de Preferencia nao e modalidade: so um aviso no Leilao SFI.
+AVISO_DIREITO_PREFERENCIA = "O antigo dono pode recomprar até a data do leilão."
+
+# Situacao manual do imovel. "Ativo" = situacao ativa e prazo nao encerrado.
+SITUACAO_ATIVO = "ativo"
+SITUACOES_LEILAO = [SITUACAO_ATIVO, "vendido", "retirado", "suspenso"]
 
 # Formas de pagamento como aparecem na pagina do imovel na CAIXA ("Formas de
 # pagamento aceitas"). So registradas: nao entram no calculo.
@@ -51,9 +84,53 @@ FORMAS_PAGAMENTO_CAIXA = [
     "Parcelamento",
 ]
 
-DECISAO_NAO_DESCARTAR = "Não descartar"
+DECISAO_OPORTUNIDADE = "Oportunidade"
+DECISAO_MARGEM_APERTADA = "Margem apertada"
 DECISAO_DESCARTAR = "Descartar"
 DECISAO_SEM_ESTIMATIVA = "Sem estimativa"
+
+
+def conta_investimento(arrematacao: float, venda: float) -> dict:
+    """A conta do professor, linha a linha (tela, laudo e testes usam a mesma)."""
+    custos_antes = arrematacao * (1 + CUSTOS_ANTES_DA_VENDA)
+    corretagem = venda * CORRETAGEM
+    ir = max(0.0, (venda - custos_antes) * ALIQUOTA_IR)
+    custos_totais = custos_antes + corretagem + ir
+    resultado = venda - custos_totais
+    return {
+        "arrematacao": arrematacao,
+        "custos_antes_da_venda": custos_antes,
+        "venda": venda,
+        "corretagem": corretagem,
+        "ir": ir,
+        "custos_totais": custos_totais,
+        "resultado": resultado,
+        "roi": resultado / custos_antes,
+    }
+
+
+def lance_para_roi(venda: float, roi: float) -> float:
+    """
+    Maior arrematacao que ainda da o ROI pedido. Invertendo a conta (com IR positivo,
+    o que vale para qualquer ROI >= 0):
+        ROI = venda x (1 - corretagem - IR) / custos_antes - (1 - IR)
+    """
+    custos_antes = venda * (1 - CORRETAGEM - ALIQUOTA_IR) / (roi + 1 - ALIQUOTA_IR)
+    return custos_antes / (1 + CUSTOS_ANTES_DA_VENDA)
+
+
+def texto_percentual(valor: float, casas: int = 2) -> str:
+    """0.70683 -> '70,68%'; texto_percentual(0.3, 0) -> '30%'."""
+    return f"{valor * 100:.{casas}f}%".replace(".", ",")
+
+
+def classificar_roi(roi: float) -> str:
+    roi = round(roi, 9)  # lance exatamente no limite nao cai na faixa de baixo por arredondamento
+    if roi >= ROI_OPORTUNIDADE:
+        return DECISAO_OPORTUNIDADE
+    if roi >= ROI_MARGEM_APERTADA:
+        return DECISAO_MARGEM_APERTADA
+    return DECISAO_DESCARTAR
 
 
 def ler_valor_reais(texto) -> float | None:
@@ -204,9 +281,11 @@ def avaliar_leilao(
 
     Retorna None quando o valor minimo nao foi informado (o bloco nao aparece).
     Caso contrario, um dict com: origem, decisao, valor_minimo, valor_avaliacao,
-    lance_maximo, sobra, liquidez, fator_lucro, status_agente5 e
-    comparaveis_fora_da_regiao (quantos comparaveis usados nao foram confirmados
-    dentro da zona homogenea: entraram por fallback ou sem validacao de distancia).
+    roi (arrematando pelo valor minimo), conta (conta_investimento no valor minimo),
+    lance_maximo (ROI de 30%), lance_limite_descarte (ROI de 15%), sobra, liquidez,
+    status_agente5 e comparaveis_fora_da_regiao (quantos comparaveis usados nao foram
+    confirmados dentro da zona homogenea: entraram por fallback ou sem validacao de
+    distancia).
     """
     valor_minimo = _numero(valor_minimo)
     if valor_minimo is None:
@@ -218,10 +297,12 @@ def avaliar_leilao(
         "origem": ORIGEM_CAIXA,
         "valor_minimo": valor_minimo,
         "valor_avaliacao": _numero(valor_avaliacao),
-        "fator_lucro": FATOR_LUCRO_LEILAO,
         "status_agente5": status,
         "decisao": DECISAO_SEM_ESTIMATIVA,
+        "roi": None,
+        "conta": None,
         "lance_maximo": None,
+        "lance_limite_descarte": None,
         "sobra": None,
         "liquidez": None,
         "comparaveis_fora_da_regiao": 0,
@@ -232,8 +313,9 @@ def avaliar_leilao(
     if status != "ok" or not resultado_ag5.get("avaliacao_confiavel", False) or liquidez is None:
         return base
 
-    # 2 e 3. Lance maximo e sobra.
-    lance_maximo = liquidez / FATOR_LUCRO_LEILAO
+    # 2. ROI arrematando pelo valor minimo. 3. Lances limite e sobra.
+    conta = conta_investimento(valor_minimo, liquidez)
+    lance_maximo = lance_para_roi(liquidez, ROI_OPORTUNIDADE)
     sobra = lance_maximo - valor_minimo
 
     usados = resultado_ag5.get("comparaveis_usados") or {}
@@ -246,12 +328,141 @@ def avaliar_leilao(
 
     return {
         **base,
-        "decisao": DECISAO_NAO_DESCARTAR if sobra >= 0 else DECISAO_DESCARTAR,
+        "decisao": classificar_roi(conta["roi"]),
+        "roi": conta["roi"],
+        "conta": conta,
         "lance_maximo": lance_maximo,
+        "lance_limite_descarte": lance_para_roi(liquidez, ROI_MARGEM_APERTADA),
         "sobra": sobra,
         "liquidez": liquidez,
         "comparaveis_fora_da_regiao": fora_da_regiao,
     }
+
+
+def como_datahora(valor) -> datetime | None:
+    """Data sem hora vale ate o fim do dia; None continua None."""
+    if valor is None or isinstance(valor, datetime):
+        return valor
+    if isinstance(valor, date):
+        return datetime.combine(valor, time.max)
+    raise TypeError(f"data invalida: {valor!r}")
+
+
+def etapa_atual(leilao: dict, agora: datetime) -> dict:
+    """
+    Etapa em que o imovel esta agora e o valor minimo que vale para ela.
+
+    Leilao SFI: ate a data/hora do 1o -> etapa 1; depois, ate a do 2o -> etapa 2; depois
+    do 2o -> encerrado (o ROI usa o valor da ultima etapa). Sem nenhuma data, usa o
+    valor do 1o (ou do 2o, se so ele foi informado). Nao supoe que o 2o e mais barato.
+    Demais modalidades: valor_minimo e data_encerramento (Compra Direta nao tem).
+
+    Retorna {etapa (1, 2 ou None), valor_minimo, encerramento, encerrado,
+    outra_etapa, valor_minimo_outra_etapa}.
+    """
+    if leilao.get("modalidade") != MODALIDADE_SFI:
+        encerramento = como_datahora(leilao.get("data_encerramento"))
+        return {
+            "etapa": None, "valor_minimo": _numero(leilao.get("valor_minimo")),
+            "encerramento": encerramento, "encerrado": encerramento is not None and agora > encerramento,
+            "outra_etapa": None, "valor_minimo_outra_etapa": None,
+        }
+
+    datas = {1: como_datahora(leilao.get("data_1_leilao")), 2: como_datahora(leilao.get("data_2_leilao"))}
+    valores = {1: _numero(leilao.get("valor_minimo_1")), 2: _numero(leilao.get("valor_minimo_2"))}
+    encerrado = False
+    if datas[1] is not None and agora <= datas[1]:
+        etapa = 1
+    elif datas[2] is not None and agora <= datas[2]:
+        etapa = 2
+    elif datas[1] is not None or datas[2] is not None:
+        etapa, encerrado = (2 if datas[2] is not None else 1), True
+    else:
+        etapa = 1 if valores[1] is not None or valores[2] is None else 2
+    outra = 2 if etapa == 1 else 1
+    return {
+        "etapa": etapa, "valor_minimo": valores[etapa],
+        "encerramento": datas[etapa], "encerrado": encerrado,
+        "outra_etapa": outra, "valor_minimo_outra_etapa": valores[outra],
+    }
+
+
+def esta_ativo(situacao: str | None, encerrado: bool) -> bool:
+    """Ativo = situacao manual ativa (vazia conta como ativa) e prazo nao encerrado."""
+    return (situacao or SITUACAO_ATIVO) == SITUACAO_ATIVO and not encerrado
+
+
+def _data_hora_br(momento: datetime) -> str:
+    return momento.strftime("%d/%m/%Y %H:%M")
+
+
+def texto_prazo(encerramento: datetime | None, agora: datetime) -> str | None:
+    """'Encerra em 3 dias e 4 h (29/10/2026 10:00)' ou 'Encerrado em 29/10/2026 10:00'."""
+    if encerramento is None:
+        return None
+    if agora > encerramento:
+        return f"Encerrado em {_data_hora_br(encerramento)}"
+    falta = encerramento - agora
+    dias, horas = falta.days, falta.seconds // 3600
+    if dias:
+        partes = f"{dias} {'dia' if dias == 1 else 'dias'} e {horas} h"
+    else:
+        partes = f"{horas} h" if horas else "menos de 1 h"
+    return f"Encerra em {partes} ({_data_hora_br(encerramento)})"
+
+
+def avaliar_imovel_leilao(resultado_ag5: dict | None, leilao: dict, agora: datetime | None = None) -> dict | None:
+    """
+    Avaliacao completa de um imovel da CAIXA, pela modalidade.
+
+    `leilao` traz: modalidade, valor_avaliacao, situacao e, conforme a modalidade,
+    valor_minimo_1, data_1_leilao, valor_minimo_2, data_2_leilao (Leilao SFI) ou
+    valor_minimo, data_encerramento (as outras). Datas: datetime (ou date = fim do dia).
+
+    Retorna o dict de avaliar_leilao (no valor minimo da etapa atual) mais: modalidade,
+    etapa, encerramento, encerrado, prazo, situacao, ativo, comissao_leiloeiro,
+    aviso_direito_preferencia e, no SFI, outra_etapa, valor_minimo_outra_etapa e
+    roi_outra_etapa. None sem valor minimo da etapa.
+    """
+    agora = agora or datetime.now()
+    modalidade = leilao.get("modalidade")
+    etapa = etapa_atual(leilao, agora)
+    avaliacao = avaliar_leilao(resultado_ag5, etapa["valor_minimo"], leilao.get("valor_avaliacao"))
+    if avaliacao is None:
+        return None
+
+    situacao = leilao.get("situacao") or SITUACAO_ATIVO
+    avaliacao.update({
+        "modalidade": modalidade,
+        "etapa": etapa["etapa"],
+        "encerramento": etapa["encerramento"],
+        "encerrado": etapa["encerrado"],
+        "prazo": texto_prazo(etapa["encerramento"], agora),
+        "situacao": situacao,
+        "ativo": esta_ativo(situacao, etapa["encerrado"]),
+        "comissao_leiloeiro": COMISSAO_LEILOEIRO if modalidade in MODALIDADES_COM_LEILOEIRO else None,
+        "aviso_direito_preferencia": AVISO_DIREITO_PREFERENCIA if modalidade == MODALIDADE_SFI else None,
+        "outra_etapa": None,
+        "valor_minimo_outra_etapa": None,
+        "roi_outra_etapa": None,
+    })
+    if modalidade == MODALIDADE_SFI and etapa["valor_minimo_outra_etapa"] is not None:
+        avaliacao["outra_etapa"] = etapa["outra_etapa"]
+        avaliacao["valor_minimo_outra_etapa"] = etapa["valor_minimo_outra_etapa"]
+        if avaliacao["liquidez"] is not None:
+            avaliacao["roi_outra_etapa"] = conta_investimento(
+                etapa["valor_minimo_outra_etapa"], avaliacao["liquidez"])["roi"]
+    return avaliacao
+
+
+def texto_lance_maximo(leilao: dict, fmt_brl) -> str:
+    """'Lance até R$ X para continuar Oportunidade' (ROI de 30%)."""
+    return f"Lance até {fmt_brl(leilao['lance_maximo'])} para continuar {DECISAO_OPORTUNIDADE}"
+
+
+def texto_lance_descarte(leilao: dict, fmt_brl) -> str:
+    """'Acima de R$ Y, descartar' (ROI de 15%)."""
+    return f"Acima de {fmt_brl(leilao['lance_limite_descarte'])}, descartar"
 
 
 def linhas_laudo(leilao: dict | None, fmt_brl) -> list[str]:
@@ -268,13 +479,22 @@ def linhas_laudo(leilao: dict | None, fmt_brl) -> list[str]:
             "a distância dos comparáveis não foi verificada."
         )
     if leilao.get("lance_maximo") is not None:
-        sobra = leilao["sobra"]
+        conta = leilao["conta"]
         linhas += [
-            f"Lance máximo: {fmt_brl(leilao['lance_maximo'])}",
+            f"ROI pagando o valor mínimo: {texto_percentual(leilao['roi'])}",
             f"Valor mínimo CAIXA: {fmt_brl(leilao['valor_minimo'])}",
-            f"{'Sobra' if sobra >= 0 else 'Falta'}: {fmt_brl(abs(sobra))}",
-            f"(lance máximo = liquidez ÷ {leilao['fator_lucro']:.2f}; "
-            f"lucro de 55% com os custos de aquisição incluídos)",
+            texto_lance_maximo(leilao, fmt_brl),
+            texto_lance_descarte(leilao, fmt_brl),
+            "",
+            "Conta do investimento (pagando o valor mínimo):",
+            f"  Custos antes da venda (arrematação + {texto_percentual(CUSTOS_ANTES_DA_VENDA, 0)}): "
+            f"{fmt_brl(conta['custos_antes_da_venda'])}",
+            f"  Receita da venda (valor de liquidez): {fmt_brl(conta['venda'])}",
+            f"  Corretagem ({texto_percentual(CORRETAGEM, 0)} da venda): {fmt_brl(conta['corretagem'])}",
+            f"  IR ({texto_percentual(ALIQUOTA_IR, 0)} de venda − custos antes da venda): {fmt_brl(conta['ir'])}",
+            f"  Todos os custos: {fmt_brl(conta['custos_totais'])}",
+            f"  Resultado: {fmt_brl(conta['resultado'])}",
+            f"  ROI (resultado ÷ custos antes da venda): {texto_percentual(conta['roi'])}",
         ]
         if leilao.get("aviso_zona"):
             linhas.append(f"Atenção: {leilao['aviso_zona']}")

@@ -8,8 +8,12 @@ import sys
 
 sys.path.insert(0, ".")
 
+from datetime import date, datetime
+
 from services.leilao import (
-    FATOR_LUCRO_LEILAO, avaliar_leilao, contar_status_zona, ler_valor_reais, linhas_laudo, texto_aviso_zona,
+    AVISO_DIREITO_PREFERENCIA, MODALIDADES_CAIXA, avaliar_imovel_leilao, esta_ativo, etapa_atual, texto_prazo,
+    ROI_OPORTUNIDADE, ROI_MARGEM_APERTADA, avaliar_leilao, classificar_roi, conta_investimento, contar_status_zona,
+    lance_para_roi, ler_valor_reais, linhas_laudo, texto_aviso_zona,
 )
 
 
@@ -23,24 +27,66 @@ def ag5(status="ok", liquidez=None, usados=None):
     }
 
 
-def test_casa_curitiba_nao_descartar():
+def test_exemplo_do_professor():
+    c = conta_investimento(425000, 1100000)
+    assert round(c["custos_antes_da_venda"], 2) == 565250.00
+    assert round(c["corretagem"], 2) == 55000.00
+    assert round(c["ir"], 2) == 80212.50
+    assert round(c["custos_totais"], 2) == 700462.50
+    assert round(c["resultado"], 2) == 399537.50
+    assert round(c["roi"] * 100, 2) == 70.68
+
+
+def test_lance_para_roi_desfaz_a_conta():
+    roi = conta_investimento(425000, 1100000)["roi"]
+    assert round(lance_para_roi(1100000, roi), 2) == 425000.00
+    for alvo in (ROI_MARGEM_APERTADA, ROI_OPORTUNIDADE):
+        assert abs(conta_investimento(lance_para_roi(500000, alvo), 500000)["roi"] - alvo) < 1e-12
+
+
+def test_faixas_do_roi_com_os_limites():
+    assert classificar_roi(0.1499) == "Descartar"
+    assert classificar_roi(0.15) == "Margem apertada"
+    assert classificar_roi(0.2999) == "Margem apertada"
+    assert classificar_roi(0.30) == "Oportunidade"
+    assert classificar_roi(-0.2) == "Descartar"
+    # Lance exatamente no limite (com arredondamento de ponto flutuante) fica na faixa de cima.
+    assert avaliar_leilao(ag5(liquidez=500000), lance_para_roi(500000, 0.30))["decisao"] == "Oportunidade"
+    assert avaliar_leilao(ag5(liquidez=500000), lance_para_roi(500000, 0.15))["decisao"] == "Margem apertada"
+
+
+def test_ir_nao_fica_negativo_no_prejuizo():
+    c = conta_investimento(500000, 300000)
+    assert c["ir"] == 0 and c["resultado"] < 0 and c["roi"] < 0
+
+
+def test_casa_curitiba_em_analise():
     r = avaliar_leilao(ag5(liquidez=644432), 323158)
-    assert r["decisao"] == "Não descartar", r
-    assert round(r["lance_maximo"]) == 415763, r["lance_maximo"]
-    assert round(r["sobra"]) == 92605, r["sobra"]
+    assert r["decisao"] == "Oportunidade", r
+    assert round(r["roi"], 4) == 0.3495, r["roi"]
+    assert round(r["lance_maximo"]) == 337068, r["lance_maximo"]
+    assert round(r["lance_limite_descarte"]) == 387628, r["lance_limite_descarte"]
+    assert round(r["sobra"]) == 13910, r["sobra"]
+
+
+def test_pre_analise():
+    r = avaliar_leilao(ag5(liquidez=644432), 360000)
+    assert r["decisao"] == "Margem apertada", r
+    assert 0.15 <= r["roi"] < 0.30 and r["sobra"] < 0
 
 
 def test_apto_sao_paulo_descartar():
     r = avaliar_leilao(ag5(liquidez=314986), 217368)
     assert r["decisao"] == "Descartar", r
-    assert round(r["lance_maximo"]) == 203217, r["lance_maximo"]
-    assert round(r["sobra"]) == -14151, r["sobra"]
+    assert round(r["roi"], 4) == 0.0216, r["roi"]
+    assert round(r["lance_maximo"]) == 164752, r["lance_maximo"]
+    assert round(r["sobra"]) == -52616, r["sobra"]
 
 
 def test_casa_rio_verde_sem_estimativa():
     r = avaliar_leilao(ag5(status="amostra_insuficiente", liquidez=500000), 391948)
     assert r["decisao"] == "Sem estimativa", r
-    assert r["lance_maximo"] is None and r["sobra"] is None
+    assert r["lance_maximo"] is None and r["sobra"] is None and r["roi"] is None
     assert r["status_agente5"] == "amostra_insuficiente"
 
 
@@ -61,9 +107,9 @@ def test_sem_valor_minimo_nao_ha_bloco():
         assert avaliar_leilao(ag5(liquidez=644432), vm) is None, vm
 
 
-def test_sobra_zero_nao_descarta():
-    r = avaliar_leilao(ag5(liquidez=155000), 100000)
-    assert abs(r["sobra"]) < 1e-6 and r["decisao"] == "Não descartar", r
+def test_sobra_zero_fica_em_analise():
+    r = avaliar_leilao(ag5(liquidez=500000), lance_para_roi(500000, ROI_OPORTUNIDADE))
+    assert abs(r["sobra"]) < 1e-6 and r["decisao"] == "Oportunidade", r
 
 
 def test_valor_avaliacao_e_so_informativo():
@@ -80,7 +126,7 @@ def test_conta_comparaveis_fora_da_regiao():
     }
     r = avaliar_leilao(ag5(liquidez=644432, usados=usados), 323158)
     assert r["comparaveis_fora_da_regiao"] == 3, r
-    assert r["decisao"] == "Não descartar"   # o aviso nao muda a decisao
+    assert r["decisao"] == "Oportunidade"   # o aviso nao muda a decisao
 
 
 def _brl(v):
@@ -89,16 +135,18 @@ def _brl(v):
 
 def test_laudo_curitiba():
     linhas = linhas_laudo(avaliar_leilao(ag5(liquidez=644432), 323158, 410000), _brl)
-    assert linhas[0] == "Decisão: Não descartar", linhas
-    assert "Lance máximo: R$ 415.763" in linhas
+    assert linhas[0] == "Decisão: Oportunidade", linhas
+    assert "ROI pagando o valor mínimo: 34,95%" in linhas
     assert "Valor mínimo CAIXA: R$ 323.158" in linhas
-    assert "Sobra: R$ 92.605" in linhas
+    assert "Lance até R$ 337.068 para continuar Oportunidade" in linhas
+    assert "Acima de R$ 387.628, descartar" in linhas
+    assert "  Custos antes da venda (arrematação + 33%): R$ 429.800" in linhas
     assert "Valor de avaliação CAIXA (informativo): R$ 410.000" in linhas
 
 
-def test_laudo_sao_paulo_mostra_falta():
+def test_laudo_sao_paulo_descartar():
     linhas = linhas_laudo(avaliar_leilao(ag5(liquidez=314986), 217368), _brl)
-    assert "Falta: R$ 14.151" in linhas, linhas
+    assert linhas[0] == "Decisão: Descartar" and "ROI pagando o valor mínimo: 2,16%" in linhas, linhas
 
 
 def test_laudo_sem_estimativa_nao_tem_lance():
@@ -136,7 +184,7 @@ def test_laudo_avisa_endereco_nao_localizado():
     leilao = avaliar_leilao(ag5(liquidez=644432), 323158)
     leilao["alvo_sem_localizacao"] = True
     linhas = linhas_laudo(leilao, _brl)
-    assert linhas[0] == "Decisão: Não descartar" and linhas[1].startswith("Atenção: endereço não localizado"), linhas
+    assert linhas[0] == "Decisão: Oportunidade" and linhas[1].startswith("Atenção: endereço não localizado"), linhas
     leilao["alvo_sem_localizacao"] = False
     assert not any("não localizado" in l for l in linhas_laudo(leilao, _brl))
 
@@ -198,8 +246,109 @@ def test_laudo_usa_o_texto_novo_do_aviso():
     assert "Atenção: Só 2 dos 5 comparáveis foram confirmados perto do imóvel" in " | ".join(linhas), linhas
     assert not any("fora da região exata" in l for l in linhas)
 
-def test_fator_unico():
-    assert FATOR_LUCRO_LEILAO == 1.55
+def test_faixas_unicas():
+    assert (ROI_MARGEM_APERTADA, ROI_OPORTUNIDADE) == (0.15, 0.30)
+
+
+# ---------------------------------------------------------------- modalidades e etapa
+# Exemplo real do site da CAIXA: no 2o leilao o minimo e a divida, e pode ser MAIOR.
+SFI = {"modalidade": "Leilão SFI",
+       "data_1_leilao": datetime(2026, 11, 10, 10, 0), "valor_minimo_1": 224000.00,
+       "data_2_leilao": datetime(2026, 11, 24, 10, 0), "valor_minimo_2": 296523.50}
+LIQ = 450000
+
+
+def test_modalidades_com_os_nomes_do_site():
+    assert MODALIDADES_CAIXA == ["Leilão SFI", "Licitação Aberta", "Venda Online", "Compra Direta"]
+
+
+def test_sfi_antes_do_1o_leilao():
+    r = avaliar_imovel_leilao(ag5(liquidez=LIQ), SFI, agora=datetime(2026, 11, 1, 9, 0))
+    assert r["etapa"] == 1 and r["valor_minimo"] == 224000.00 and not r["encerrado"] and r["ativo"]
+    assert r["encerramento"] == SFI["data_1_leilao"]
+    assert r["prazo"] == "Encerra em 9 dias e 1 h (10/11/2026 10:00)"
+    assert r["outra_etapa"] == 2 and r["valor_minimo_outra_etapa"] == 296523.50
+    # O 2o e mais caro: o ROI da outra etapa e MENOR que o da atual.
+    assert r["roi_outra_etapa"] < r["roi"]
+    assert r["decisao"] == "Oportunidade" and r["aviso_direito_preferencia"] == AVISO_DIREITO_PREFERENCIA
+
+
+def test_sfi_na_hora_exata_do_1o_ainda_e_1o():
+    assert etapa_atual(SFI, datetime(2026, 11, 10, 10, 0))["etapa"] == 1
+
+
+def test_sfi_entre_o_1o_e_o_2o_usa_o_valor_maior_do_2o():
+    r = avaliar_imovel_leilao(ag5(liquidez=LIQ), SFI, agora=datetime(2026, 11, 10, 10, 1))
+    assert r["etapa"] == 2 and r["valor_minimo"] == 296523.50 and not r["encerrado"] and r["ativo"]
+    assert r["outra_etapa"] == 1 and r["valor_minimo_outra_etapa"] == 224000.00
+    assert r["roi"] < r["roi_outra_etapa"]
+    esperado = conta_investimento(296523.50, LIQ)["roi"]
+    assert abs(r["roi"] - esperado) < 1e-12 and r["decisao"] == classificar_roi(esperado)
+    assert r["sobra"] == r["lance_maximo"] - 296523.50
+
+
+def test_sfi_depois_do_2o_esta_encerrado():
+    r = avaliar_imovel_leilao(ag5(liquidez=LIQ), SFI, agora=datetime(2026, 11, 24, 10, 1))
+    assert r["etapa"] == 2 and r["encerrado"] and not r["ativo"]
+    assert r["valor_minimo"] == 296523.50
+    assert r["prazo"] == "Encerrado em 24/11/2026 10:00"
+
+
+def test_sfi_sem_datas_usa_o_1o():
+    sem_datas = {**SFI, "data_1_leilao": None, "data_2_leilao": None}
+    e = etapa_atual(sem_datas, datetime(2026, 11, 1))
+    assert e["etapa"] == 1 and e["valor_minimo"] == 224000.00 and e["encerramento"] is None and not e["encerrado"]
+    so_o_2o = {**sem_datas, "valor_minimo_1": None}
+    assert etapa_atual(so_o_2o, datetime(2026, 11, 1))["valor_minimo"] == 296523.50
+
+
+def test_data_sem_hora_vale_ate_o_fim_do_dia():
+    venda = {"modalidade": "Venda Online", "valor_minimo": 200000, "data_encerramento": date(2026, 11, 5)}
+    assert not etapa_atual(venda, datetime(2026, 11, 5, 23, 0))["encerrado"]
+    assert etapa_atual(venda, datetime(2026, 11, 6, 0, 0))["encerrado"]
+
+
+def test_licitacao_aberta_e_venda_online():
+    for modalidade in ("Licitação Aberta", "Venda Online"):
+        dados = {"modalidade": modalidade, "valor_minimo": 200000, "data_encerramento": datetime(2026, 11, 5, 18, 0)}
+        r = avaliar_imovel_leilao(ag5(liquidez=LIQ), dados, agora=datetime(2026, 11, 5, 6, 30))
+        assert r["etapa"] is None and r["valor_minimo"] == 200000 and r["ativo"]
+        assert r["prazo"] == "Encerra em 11 h (05/11/2026 18:00)"
+        assert r["outra_etapa"] is None and r["roi_outra_etapa"] is None and r["aviso_direito_preferencia"] is None
+    assert avaliar_imovel_leilao(ag5(liquidez=LIQ), {**dados, "modalidade": "Licitação Aberta"},
+                                 agora=datetime(2026, 11, 1))["comissao_leiloeiro"] == 0.05
+    assert avaliar_imovel_leilao(ag5(liquidez=LIQ), dados, agora=datetime(2026, 11, 1))["comissao_leiloeiro"] is None
+
+
+def test_compra_direta_sem_data_depende_so_da_situacao():
+    dados = {"modalidade": "Compra Direta", "valor_minimo": 200000}
+    r = avaliar_imovel_leilao(ag5(liquidez=LIQ), dados, agora=datetime(2030, 1, 1))
+    assert r["encerramento"] is None and r["prazo"] is None and not r["encerrado"] and r["ativo"]
+    assert r["comissao_leiloeiro"] is None
+    vendido = avaliar_imovel_leilao(ag5(liquidez=LIQ), {**dados, "situacao": "vendido"}, agora=datetime(2030, 1, 1))
+    assert not vendido["ativo"] and vendido["situacao"] == "vendido"
+
+
+def test_ativo_pela_situacao_e_pelo_prazo():
+    assert esta_ativo(None, False) and esta_ativo("ativo", False)
+    assert not esta_ativo("ativo", True) and not esta_ativo("retirado", False)
+
+
+def test_texto_prazo_singular_e_menos_de_uma_hora():
+    fim = datetime(2026, 11, 5, 18, 0)
+    assert texto_prazo(fim, datetime(2026, 11, 4, 15, 0)) == "Encerra em 1 dia e 3 h (05/11/2026 18:00)"
+    assert texto_prazo(fim, datetime(2026, 11, 5, 17, 30)) == "Encerra em menos de 1 h (05/11/2026 18:00)"
+    assert texto_prazo(None, fim) is None
+
+
+def test_sem_estimativa_mantem_etapa_e_prazo():
+    r = avaliar_imovel_leilao(ag5(status="amostra_insuficiente", liquidez=LIQ), SFI, agora=datetime(2026, 11, 1))
+    assert r["decisao"] == "Sem estimativa" and r["etapa"] == 1 and r["roi"] is None and r["roi_outra_etapa"] is None
+
+
+def test_sem_valor_minimo_da_etapa_nao_avalia():
+    so_1o = {**SFI, "valor_minimo_2": None}
+    assert avaliar_imovel_leilao(ag5(liquidez=LIQ), so_1o, agora=datetime(2026, 11, 20)) is None
 
 
 if __name__ == "__main__":
