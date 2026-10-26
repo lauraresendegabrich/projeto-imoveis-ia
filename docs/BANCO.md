@@ -209,3 +209,44 @@ WHERE v->>'ok' = 'false'
 GROUP BY 1, 2
 ORDER BY falhas DESC;
 ```
+
+## Imóveis de leilão e leilões ativos (migração 005)
+
+Rodar `db/migracoes/005_imoveis_leilao.sql` no SQL Editor do Neon **antes** de colocar
+no ar o código que grava a tabela e as colunas novas (sem elas, a gravação falha e as
+avaliações deixam de ser registradas; o app continua funcionando). **Ainda não rodada.**
+
+- **`imoveis_leilao`**: uma linha por imóvel (banco + código). O código é o número do
+  imóvel só com os dígitos e sem zeros à esquerda (`855552271653-1` e o link
+  `...hdnimovel=8555522716531` dão o mesmo imóvel). Avaliar de novo atualiza a linha
+  sem apagar o que a nova avaliação não trouxe e sem mexer na `situacao`
+  (`ativo` / `vendido` / `retirado` / `suspenso`, só manual). O imóvel só é gravado com
+  o código e uma das 4 modalidades do site; sem isso, a execução é gravada sem ele.
+- **`execucoes`**: ganha `id_imovel_leilao`, `etapa_avaliada` (1 ou 2 no Leilão SFI),
+  `roi` (pagando o valor mínimo da etapa) e `lance_limite_descarte` (acima dele, ROI
+  abaixo de 15%). `decisao` passa a ser Oportunidade / Margem apertada / Descartar /
+  Sem estimativa; avaliações antigas continuam com "Não descartar".
+- **`vw_leiloes`**: cada imóvel com a etapa atual, o próximo encerramento, se está
+  ativo e a última avaliação. "Ativo" é calculado (situação `ativo` e prazo não
+  encerrado), com a mesma regra de `services/leilao.py`. Datas no horário de Brasília.
+  `etapa_mudou = true` quando a última avaliação foi feita em outra etapa (ex.: no 1º
+  leilão, que já passou): o ROI gravado não vale para o valor mínimo atual.
+- **`vw_leiloes_ativos`**: só os ativos, do encerramento mais próximo ao mais distante
+  (Compra Direta, sem data, no fim).
+
+```sql
+-- Leilões ativos com a última avaliação
+SELECT numero_imovel, modalidade, etapa_atual, encerramento, cidade, bairro,
+       valor_minimo_atual, decisao, roi, lance_maximo, etapa_mudou
+FROM vw_leiloes_ativos;
+
+-- Marcar um imóvel como vendido (sai dos ativos)
+UPDATE imoveis_leilao SET situacao = 'vendido', atualizado_em = now()
+WHERE banco = 'CAIXA' AND codigo = '8555522716531';
+
+-- Histórico de avaliações de um imóvel
+SELECT e.data_hora, e.etapa_avaliada, e.valor_minimo, e.liquidez, e.roi, e.decisao
+FROM execucoes e JOIN imoveis_leilao i ON i.id = e.id_imovel_leilao
+WHERE i.codigo = '8555522716531'
+ORDER BY e.data_hora DESC;
+```

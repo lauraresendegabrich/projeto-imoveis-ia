@@ -11,7 +11,9 @@ import time
 
 sys.path.insert(0, ".")
 
-from services.banco import COLUNAS_COMPARAVEIS, COLUNAS_EXECUCOES, gravar_execucao
+from services.banco import (
+    COLUNAS_COMPARAVEIS, COLUNAS_EXECUCOES, COLUNAS_IMOVEIS_LEILAO, gravar_execucao, sql_gravar_imovel_leilao,
+)
 from services.leilao import avaliar_leilao
 from services.registro_execucao import montar_registro, versao_codigo
 
@@ -259,6 +261,146 @@ def test_migracao_002_cria_as_colunas_novas():
                    "data_leilao", "formas_pagamento", "regras_despesas"):
         assert f"ADD COLUMN IF NOT EXISTS {coluna}" in sql, coluna
         assert coluna in COLUNAS_EXECUCOES, coluna
+
+
+# ---------------------------------------------------------------- imoveis_leilao (migracao 005)
+def _colunas_da_tabela(sql, tabela):
+    corpo = re.search(rf"CREATE TABLE IF NOT EXISTS {tabela} \((.*?)\n\);", sql, re.S).group(1)
+    nomes = set()
+    for linha in corpo.splitlines():
+        m = re.match(r"([a-z_0-9]+)\s+[A-Z]", linha.split("--")[0].strip())
+        if m:
+            nomes.add(m.group(1))
+    return nomes
+
+
+def test_imoveis_leilao_bate_com_schema_e_migracao():
+    automaticas = {"id", "situacao", "criado_em", "atualizado_em"}
+    for arquivo in ("db/schema.sql", "db/migracoes/005_imoveis_leilao.sql"):
+        sql = open(arquivo, encoding="utf-8").read()
+        assert _colunas_da_tabela(sql, "imoveis_leilao") - automaticas == set(COLUNAS_IMOVEIS_LEILAO), arquivo
+        assert "UNIQUE (banco, codigo)" in sql and "CREATE OR REPLACE VIEW vw_leiloes_ativos" in sql, arquivo
+    migracao = open("db/migracoes/005_imoveis_leilao.sql", encoding="utf-8").read()
+    for coluna in ("id_imovel_leilao", "etapa_avaliada", "roi", "lance_limite_descarte"):
+        assert f"ADD COLUMN IF NOT EXISTS {coluna}" in migracao and coluna in COLUNAS_EXECUCOES, coluna
+
+
+def test_codigo_do_imovel_igual_no_numero_e_no_link():
+    from services.registro_execucao import codigo_imovel
+    assert codigo_imovel("855552271653-1") == codigo_imovel(None, "https://x/detalhe-imovel.asp?hdnimovel=8555522716531")
+    assert codigo_imovel("000001015142-0") == "10151420" == codigo_imovel("", "https://x?hdnimovel=10151420")
+    assert codigo_imovel(None) is None and codigo_imovel("", "https://x/sem-codigo") is None
+
+
+def test_execucao_traz_roi_e_o_imovel_de_leilao():
+    e, _ = _registro()
+    assert round(e["roi"], 4) == 0.3495 and round(e["lance_limite_descarte"]) == 387629
+    assert e["etapa_avaliada"] is None and e["id_imovel_leilao"] is None   # o id vem na gravacao
+    imovel = e["_imovel_leilao"]
+    assert set(imovel) == set(COLUNAS_IMOVEIS_LEILAO)
+    assert imovel["codigo"] == "1444400000000" and imovel["modalidade"] == "Venda Online"
+    assert imovel["valor_minimo"] == 323158 and imovel["cidade"] == "Curitiba" and imovel["uf"] == "PR"
+    assert imovel["valor_minimo_1"] is None and imovel["gravame"] is None   # nada inventado
+
+
+def test_data_sem_hora_vale_ate_o_fim_do_dia():
+    from datetime import date, datetime, time
+    entrada = {"modalidade": "Licitação Aberta", "codigo_caixa": "178770097494-1", "data_leilao": date(2026, 11, 4)}
+    e, _ = _registro(leilao_entrada=entrada)
+    assert e["_imovel_leilao"]["data_encerramento"] == datetime.combine(date(2026, 11, 4), time.max)
+
+
+def test_leilao_sfi_com_as_duas_etapas():
+    from datetime import datetime
+    entrada = {"modalidade": "Leilão SFI", "numero_imovel": "855552271653-1",
+               "valor_minimo_1": 224000.00, "data_1_leilao": datetime(2026, 11, 30, 10, 0),
+               "valor_minimo_2": 296523.50, "data_2_leilao": datetime(2026, 12, 4, 10, 0),
+               "edital": "0052/0226 - CPA/RE", "numero_item": "25", "gravame": False}
+    imovel = _registro(leilao_entrada=entrada)[0]["_imovel_leilao"]
+    assert imovel["codigo"] == "8555522716531" and imovel["numero_imovel"] == "855552271653-1"
+    assert (imovel["valor_minimo_1"], imovel["valor_minimo_2"]) == (224000.00, 296523.50)
+    assert imovel["data_2_leilao"] == datetime(2026, 12, 4, 10, 0) and imovel["data_encerramento"] is None
+    assert imovel["edital"] == "0052/0226 - CPA/RE" and imovel["gravame"] is False
+
+
+def test_sem_codigo_ou_modalidade_antiga_nao_grava_o_imovel():
+    for entrada in ({"modalidade": "Venda Online"}, {"modalidade": "Outra", "codigo_caixa": "123"},
+                    {"modalidade": None, "codigo_caixa": "123"}, None):
+        assert _registro(leilao_entrada=entrada)[0]["_imovel_leilao"] is None, entrada
+
+
+def test_sql_do_imovel_nao_apaga_dados_nem_a_situacao():
+    sql = sql_gravar_imovel_leilao()
+    assert "ON CONFLICT (banco, codigo) DO UPDATE" in sql and "RETURNING id" in sql
+    assert "modalidade = COALESCE(EXCLUDED.modalidade, imoveis_leilao.modalidade)" in sql
+    assert "situacao" not in sql and "codigo = " not in sql
+
+
+class _CursorFalso:
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, parametros=None):
+        self.log.append((sql.split()[0] + " " + sql.split()[2], parametros))
+
+    def executemany(self, sql, linhas):
+        self.log.append(("INSERT comparaveis", linhas))
+
+    def fetchone(self):
+        return (42,)
+
+
+class _ConexaoFalsa:
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def transaction(self):
+        return self
+
+    def cursor(self):
+        return _CursorFalso(self.log)
+
+
+def test_grava_o_imovel_antes_e_liga_a_execucao_pelo_id():
+    import psycopg
+    log = []
+    original = psycopg.connect
+    psycopg.connect = lambda *a, **k: _ConexaoFalsa(log)
+    try:
+        e, linhas = _registro()
+        assert gravar_execucao(e, linhas, database_url="postgresql://falso") is True
+    finally:
+        psycopg.connect = original
+    comandos = [c for c, _ in log if not c.startswith("SET")]
+    assert comandos == ["INSERT imoveis_leilao", "INSERT execucoes", "INSERT comparaveis"], comandos
+    parametros_execucao = next(p for c, p in log if c == "INSERT execucoes")
+    assert parametros_execucao[COLUNAS_EXECUCOES.index("id_imovel_leilao")] == 42
+    assert e["id_imovel_leilao"] is None   # o dict original nao e alterado
+
+
+def test_sem_imovel_de_leilao_grava_so_a_execucao():
+    import psycopg
+    log = []
+    original = psycopg.connect
+    psycopg.connect = lambda *a, **k: _ConexaoFalsa(log)
+    try:
+        e, linhas = _registro(leilao_entrada={"modalidade": "Venda Online"})
+        assert gravar_execucao(e, linhas, database_url="postgresql://falso") is True
+    finally:
+        psycopg.connect = original
+    assert [c for c, _ in log if not c.startswith("SET")] == ["INSERT execucoes", "INSERT comparaveis"]
 
 
 def test_versao_codigo_do_git():

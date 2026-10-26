@@ -10,7 +10,10 @@ Regras:
     alguns segundos de atraso: timeout de conexao de TIMEOUT_CONEXAO_S.
   - A gravacao NUNCA quebra o app nem faz a tela esperar: roda em segundo plano e
     qualquer erro so vira um aviso no log.
-  - As duas tabelas sao gravadas numa unica transacao (entra tudo ou nada).
+  - As tabelas sao gravadas numa unica transacao (entra tudo ou nada).
+  - Imovel de leilao (imoveis_leilao): uma linha por banco + codigo. Avaliar de novo
+    atualiza a linha, sem apagar o que a nova avaliacao nao trouxe (COALESCE) e sem
+    mexer na situacao manual (vendido, retirado...).
 """
 from __future__ import annotations
 
@@ -35,11 +38,21 @@ COLUNAS_EXECUCOES = (
     "status_agente5", "qtd_comparaveis_construcao", "qtd_terrenos",
     "lance_maximo", "sobra", "decisao", "tempo_venda", "alertas",
     "entrada_usuario", "checagem_anuncio_alvo", "verificacoes",
+    "id_imovel_leilao", "etapa_avaliada", "roi", "lance_limite_descarte",
 )
 COLUNAS_JSON = {
     "parametros", "fontes", "modelos_ia", "falhas", "campos_presumidos", "alertas", "formas_pagamento",
     "entrada_usuario", "checagem_anuncio_alvo", "verificacoes",
 }
+COLUNAS_IMOVEIS_LEILAO = (
+    "banco", "codigo", "numero_imovel", "link", "modalidade",
+    "data_1_leilao", "valor_minimo_1", "data_2_leilao", "valor_minimo_2",
+    "valor_minimo", "data_encerramento", "valor_avaliacao",
+    "tipo", "endereco", "bairro", "cidade", "uf",
+    "edital", "numero_item", "leiloeiro", "matricula", "averbacao_leiloes_negativos",
+    "gravame", "gravame_texto", "formas_pagamento", "regras_despesas",
+)
+COLUNAS_JSON_IMOVEIS_LEILAO = {"formas_pagamento"}
 COLUNAS_COMPARAVEIS = (
     "id_execucao", "tipo", "preco", "area", "valor_m2", "endereco", "bairro",
     "portal", "link", "status_zona", "entrou_no_calculo",
@@ -58,9 +71,22 @@ def obter_database_url() -> str:
     return os.getenv("DATABASE_URL", "")
 
 
+def sql_gravar_imovel_leilao() -> str:
+    """INSERT ... ON CONFLICT (banco, codigo): atualiza sem apagar o que ja havia."""
+    atualizar = [c for c in COLUNAS_IMOVEIS_LEILAO if c not in ("banco", "codigo")]
+    return (
+        f"INSERT INTO imoveis_leilao ({', '.join(COLUNAS_IMOVEIS_LEILAO)}) "
+        f"VALUES ({', '.join(['%s'] * len(COLUNAS_IMOVEIS_LEILAO))}) "
+        f"ON CONFLICT (banco, codigo) DO UPDATE SET "
+        + ", ".join(f"{c} = COALESCE(EXCLUDED.{c}, imoveis_leilao.{c})" for c in atualizar)
+        + ", atualizado_em = now() RETURNING id"
+    )
+
+
 def gravar_execucao(execucao: dict, comparaveis: list[dict], database_url: str | None = None) -> bool:
     """
     Grava uma execucao e seus comparaveis numa transacao. Retorna True se gravou.
+    Com execucao["_imovel_leilao"], grava antes o imovel e liga a execucao a ele.
     Nunca levanta excecao: falha vira aviso no log.
     """
     url = database_url if database_url is not None else obter_database_url()
@@ -71,10 +97,11 @@ def gravar_execucao(execucao: dict, comparaveis: list[dict], database_url: str |
         import psycopg
         from psycopg.types.json import Jsonb
 
-        linha = [
-            Jsonb(execucao.get(c)) if c in COLUNAS_JSON and execucao.get(c) is not None else execucao.get(c)
-            for c in COLUNAS_EXECUCOES
-        ]
+        imovel = execucao.get("_imovel_leilao")
+        linha_imovel = [
+            Jsonb(imovel.get(c)) if c in COLUNAS_JSON_IMOVEIS_LEILAO and imovel.get(c) is not None else imovel.get(c)
+            for c in COLUNAS_IMOVEIS_LEILAO
+        ] if imovel else None
         sql_execucao = (
             f"INSERT INTO execucoes ({', '.join(COLUNAS_EXECUCOES)}) "
             f"VALUES ({', '.join(['%s'] * len(COLUNAS_EXECUCOES))})"
@@ -88,6 +115,14 @@ def gravar_execucao(execucao: dict, comparaveis: list[dict], database_url: str |
         with psycopg.connect(url, connect_timeout=TIMEOUT_CONEXAO_S, prepare_threshold=None) as conexao:
             with conexao.transaction(), conexao.cursor() as cursor:
                 cursor.execute(f"SET LOCAL statement_timeout = {int(TIMEOUT_COMANDO_MS)}")
+                execucao = dict(execucao)
+                if linha_imovel:
+                    cursor.execute(sql_gravar_imovel_leilao(), linha_imovel)
+                    execucao["id_imovel_leilao"] = cursor.fetchone()[0]
+                linha = [
+                    Jsonb(execucao.get(c)) if c in COLUNAS_JSON and execucao.get(c) is not None else execucao.get(c)
+                    for c in COLUNAS_EXECUCOES
+                ]
                 cursor.execute(sql_execucao, linha)
                 if comparaveis:
                     cursor.executemany(

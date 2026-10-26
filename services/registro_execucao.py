@@ -6,6 +6,7 @@ ver db/schema.sql) a partir do que a avaliacao ja produziu: formulario, Agentes
 from __future__ import annotations
 
 import os
+import re
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -13,8 +14,8 @@ from pathlib import Path
 from services.alertas import calcular_alertas
 from services.leilao import texto_aviso_lancamento, texto_aviso_raio
 from services.leilao import (
-    ALIQUOTA_IR, CORRETAGEM, CUSTOS_ANTES_DA_VENDA, ORIGEM_CAIXA, ROI_OPORTUNIDADE, ROI_MARGEM_APERTADA,
-    conta_investimento,
+    ALIQUOTA_IR, CORRETAGEM, CUSTOS_ANTES_DA_VENDA, MODALIDADE_SFI, MODALIDADES_CAIXA, ORIGEM_CAIXA,
+    ROI_OPORTUNIDADE, ROI_MARGEM_APERTADA, como_datahora, conta_investimento,
 )
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -269,6 +270,11 @@ def montar_registro(
         "lance_maximo": _num(leilao.get("lance_maximo")),
         "sobra": _num(leilao.get("sobra")),
         "decisao": leilao.get("decisao"),
+        "roi": round(leilao["roi"], 4) if leilao.get("roi") is not None else None,
+        "lance_limite_descarte": _num(leilao.get("lance_limite_descarte")),
+        "etapa_avaliada": leilao.get("etapa"),
+        # Preenchido pela gravacao (services/banco.py), depois de gravar o imovel.
+        "id_imovel_leilao": None,
         "tempo_venda": (ag5.get("liquidez_experimental") or {}).get("tempo_estimado") if confiavel else None,
     }
     execucao["alertas"] = calcular_alertas(execucao, ag5, falhas)
@@ -280,8 +286,73 @@ def montar_registro(
     # Verificacoes automaticas (services/verificacoes.py): a interface preenche depois
     # de montar o resultado completo.
     execucao["verificacoes"] = None
+    # Imovel de leilao (tabela imoveis_leilao). Nao e coluna de execucoes: a gravacao
+    # usa esta chave para gravar o imovel e ligar a execucao a ele.
+    execucao["_imovel_leilao"] = montar_imovel_leilao(leilao_entrada, execucao)
     return execucao, _linhas_comparaveis(id_execucao, ag5)
 
+
+def codigo_imovel(numero_imovel: str | None, link: str | None = None) -> str | None:
+    """
+    Chave do imovel na CAIXA: so os digitos, sem zeros a esquerda. "855552271653-1" e o
+    link "...hdnimovel=8555522716531" dao o mesmo codigo; "000001015142-0" e
+    "...hdnimovel=10151420" tambem. Sem numero, tenta o hdnimovel do link.
+    """
+    digitos = re.sub(r"\D", "", str(numero_imovel or ""))
+    if not digitos and link:
+        m = re.search(r"hdnimovel=(\d+)", link, re.I)
+        digitos = m.group(1) if m else ""
+    return digitos.lstrip("0") or None
+
+
+def montar_imovel_leilao(leilao_entrada: dict | None, execucao: dict) -> dict | None:
+    """
+    Linha de imoveis_leilao a partir da entrada do formulario (e da pagina da CAIXA).
+    None sem codigo do imovel ou sem uma das 4 modalidades do site: nao da para saber
+    qual imovel e. Nada e inventado: campo nao informado fica None (e a gravacao nao
+    apaga o que ja estava no banco).
+
+    No Leilao SFI os valores e datas de cada etapa vem em valor_minimo_1/2 e
+    data_1/2_leilao. Nas outras, valor_minimo e data_encerramento (ou a data_leilao do
+    formulario antigo). Data sem hora vale ate o fim do dia.
+    """
+    entrada = leilao_entrada or {}
+    modalidade = entrada.get("modalidade")
+    numero = entrada.get("numero_imovel") or entrada.get("codigo_caixa")
+    codigo = codigo_imovel(numero, entrada.get("link"))
+    if not codigo or modalidade not in MODALIDADES_CAIXA:
+        return None
+    data_encerramento = entrada.get("data_encerramento")
+    if data_encerramento is None and modalidade != MODALIDADE_SFI:
+        data_encerramento = entrada.get("data_leilao")
+    return {
+        "banco": entrada.get("origem") or ORIGEM_CAIXA,
+        "codigo": codigo,
+        "numero_imovel": numero,
+        "link": entrada.get("link"),
+        "modalidade": modalidade,
+        "data_1_leilao": como_datahora(entrada.get("data_1_leilao")),
+        "valor_minimo_1": _num(entrada.get("valor_minimo_1")),
+        "data_2_leilao": como_datahora(entrada.get("data_2_leilao")),
+        "valor_minimo_2": _num(entrada.get("valor_minimo_2")),
+        "valor_minimo": _num(entrada.get("valor_minimo")),
+        "data_encerramento": como_datahora(data_encerramento),
+        "valor_avaliacao": _num(entrada.get("valor_avaliacao")),
+        "tipo": execucao.get("tipo"),
+        "endereco": execucao.get("endereco"),
+        "bairro": execucao.get("bairro"),
+        "cidade": execucao.get("cidade"),
+        "uf": execucao.get("uf"),
+        "edital": entrada.get("edital"),
+        "numero_item": entrada.get("numero_item"),
+        "leiloeiro": entrada.get("leiloeiro"),
+        "matricula": entrada.get("matricula"),
+        "averbacao_leiloes_negativos": entrada.get("averbacao_leiloes_negativos"),
+        "gravame": entrada.get("gravame"),
+        "gravame_texto": entrada.get("gravame_texto"),
+        "formas_pagamento": list(entrada.get("formas_pagamento") or []) or None,
+        "regras_despesas": entrada.get("regras_despesas"),
+    }
 
 
 # =============================================================================
