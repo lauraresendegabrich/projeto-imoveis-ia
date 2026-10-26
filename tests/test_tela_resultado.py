@@ -13,7 +13,7 @@ logging.disable(logging.CRITICAL)
 from streamlit.testing.v1 import AppTest
 
 from agents.price_liquidity import executar_agente5
-from services.textos_tela import motivo_sem_valor, texto_comparaveis_na_zona
+from services.textos_tela import DISTANCIA_MAX_IMOBILIARIA_M, motivo_sem_valor, texto_comparaveis_na_zona
 from tests.test_tela_amostra_concentrada import _laudo
 
 
@@ -213,14 +213,48 @@ def test_j_formulario_vagas_vazias_uf_e_aviso_do_terreno():
 
 
 # ---------------------------------------------------------------- (k) imobiliaria
-def test_k_sem_imobiliaria_mais_proxima():
+def _com_imobiliaria(**imob):
     r = resultado_sem_valor()
     r["infraestrutura"] = {"scores": {"score_final": 0.7, "classificacao_infraestrutura": "boa"},
-                           "imobiliaria_proxima": {"encontrada": True, "nome": "Imob X", "telefone": "1"}}
-    at = _tela(r)
-    textos = " ".join(m.value for m in at.markdown)
-    assert "Imobiliária mais próxima" not in textos and "Imob X" not in textos
-    assert "Imob X" not in _laudo(at)
+                           "imobiliaria_proxima": {"encontrada": True, "nome": "Imob X", "telefone": "11 9999",
+                                                   "endereco": "Rua A, 10", **imob}}
+    return r
+
+
+def _textos_tela(at):
+    return " ".join(m.value for m in at.markdown) + " " + " ".join(c.value for c in at.caption)
+
+
+def test_k_imobiliaria_ate_3_km_aparece_na_tela_e_no_laudo():
+    at = _tela(_com_imobiliaria(distancia_metros=DISTANCIA_MAX_IMOBILIARIA_M))
+    textos = _textos_tela(at)
+    assert "Imobiliária mais próxima" in textos and "Imob X" in textos and "11 9999" in textos
+    assert "Rua A, 10 (3000 m)" in textos
+    laudo = _laudo(at)
+    assert "IMOBILIÁRIA MAIS PRÓXIMA" in laudo and "Imob X" in laudo and "Telefone: 11 9999" in laudo
+    assert "(3.000 m do imóvel)" in laudo
+
+
+def test_k_imobiliaria_acima_de_3_km_nao_aparece():
+    at = _tela(_com_imobiliaria(distancia_metros=DISTANCIA_MAX_IMOBILIARIA_M + 1))
+    textos = _textos_tela(at)
+    assert "Imobiliária mais próxima" in textos and "Imob X" not in textos
+    assert "Nenhuma imobiliária encontrada a até 3 km" in textos
+    laudo = _laudo(at)
+    assert "Imob X" not in laudo and "Nenhuma imobiliária encontrada a até 3 km." in laudo
+
+
+def test_k_imobiliaria_sem_distancia_ou_nao_encontrada():
+    from services.textos_tela import imobiliaria_proxima
+    assert imobiliaria_proxima({"imobiliaria_proxima": {"encontrada": True, "distancia_metros": None}}) is None
+    assert imobiliaria_proxima({"imobiliaria_proxima": {"encontrada": False, "distancia_metros": 100}}) is None
+    assert imobiliaria_proxima({}) is None
+    assert imobiliaria_proxima({"imobiliaria_proxima": {"encontrada": True, "distancia_metros": "850"}})
+
+
+def test_k_sem_infraestrutura_o_laudo_nao_tem_o_bloco():
+    at = _tela(resultado_sem_valor())
+    assert "IMOBILIÁRIA MAIS PRÓXIMA" not in _laudo(at)
 
 
 # ---------------------------------------------------------------- motivo do terreno no passo a passo

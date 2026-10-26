@@ -9,6 +9,10 @@ from agents.price_liquidity import MIN_AMOSTRAS_CONFIAVEL
 
 TIPOS_TERRENO = ("terrenos", "terreno", "lote", "residential_allotment_land", "allotment_land")
 
+# A imobiliaria mais proxima so aparece (tela e laudo) ate esta distancia do imovel.
+# O Agente 4 procura num raio maior (RAIO_IMOBILIARIA); acima disso ela nao e mostrada.
+DISTANCIA_MAX_IMOBILIARIA_M = 3000
+
 
 def contagem(n, singular: str, plural: str) -> str:
     """'1 imóvel', '3 imóveis'."""
@@ -209,6 +213,40 @@ def motivo_terreno_fora(preco: dict) -> str:
     if preco.get("aviso_terreno") or 0 < n < MIN_AMOSTRAS_CONFIAVEL:
         return f"só {contagem(n, 'terreno', 'terrenos')} à venda na região (mínimo de {MIN_AMOSTRAS_CONFIAVEL})"
     return "não há terrenos comparáveis na zona"
+
+
+def imobiliaria_proxima(infra: dict) -> dict | None:
+    """A imobiliaria do Agente 4, so se estiver a ate DISTANCIA_MAX_IMOBILIARIA_M.
+    Sem distancia conhecida tambem fica de fora (nao da para garantir os 3 km)."""
+    imob = (infra or {}).get("imobiliaria_proxima") or {}
+    if not imob.get("encontrada"):
+        return None
+    try:
+        dist = float(imob.get("distancia_metros"))
+    except (TypeError, ValueError):
+        return None
+    return imob if dist <= DISTANCIA_MAX_IMOBILIARIA_M else None
+
+
+def texto_sem_imobiliaria() -> str:
+    """'Nenhuma imobiliária encontrada a até 3 km'."""
+    km = DISTANCIA_MAX_IMOBILIARIA_M / 1000
+    return f"Nenhuma imobiliária encontrada a até {km:g} km".replace(".", ",")
+
+
+def linhas_laudo_imobiliaria(infra: dict) -> list[str]:
+    """Linhas do bloco 'Imobiliária mais próxima' no laudo TXT."""
+    imob = imobiliaria_proxima(infra)
+    if not imob:
+        return [texto_sem_imobiliaria() + "."]
+    linhas = [imob.get("nome") or "?"]
+    for rotulo, campo in (("Telefone", "telefone"), ("E-mail", "email"), ("Site", "website"),
+                          ("Horário", "opening_hours")):
+        if imob.get(campo):
+            linhas.append(f"{rotulo}: {imob[campo]}")
+    endereco = imob.get("endereco") or "endereço não informado"
+    linhas.append(f"Endereço: {endereco} ({_metros(float(imob['distancia_metros']))} m do imóvel)")
+    return linhas
 
 
 def linhas_referencia(resultado: dict) -> list[dict]:

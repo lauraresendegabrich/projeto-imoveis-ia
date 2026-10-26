@@ -19,8 +19,9 @@ from services.cep import buscar_cep, limpar_cep
 from services.formatos import ler_numero_br
 from services.verificacoes import resumo_conferencia, verificar_execucao
 from services.textos_tela import (
-    anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, linhas_referencia, motivo_sem_valor,
-    motivo_terreno_fora, suspeitos_do_proprio_imovel,
+    anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, imobiliaria_proxima,
+    linhas_laudo_imobiliaria, linhas_referencia, motivo_sem_valor,
+    motivo_terreno_fora, suspeitos_do_proprio_imovel, texto_sem_imobiliaria,
     nota_anuncio_do_alvo, texto_comparaveis_na_zona,
 )
 from services.leilao import (
@@ -1544,6 +1545,30 @@ with area_principal.container():
                             total_all = total_pois_faixa + total_transporte
                             st.caption(f"Total: {total_all} pontos de interesse mapeados até 1500m")
 
+                        # Imobiliária mais próxima (só até DISTANCIA_MAX_IMOBILIARIA_M do imóvel)
+                        st.markdown("---")
+                        st.markdown("**📞 Imobiliária mais próxima**")
+                        imob = imobiliaria_proxima(infra_full)
+                        if imob:
+                            st.markdown(f"**{imob.get('nome') or '?'}**")
+                            infos_imob = []
+                            if imob.get("telefone"):
+                                infos_imob.append(f"📱 {imob['telefone']}")
+                            if imob.get("email"):
+                                infos_imob.append(f"✉️ {imob['email']}")
+                            if imob.get("website"):
+                                infos_imob.append(f"🌐 [{imob['website']}]({imob['website']})")
+                            if infos_imob:
+                                st.markdown(" | ".join(infos_imob))
+                            st.caption(
+                                f"📍 {imob.get('endereco') or 'endereço não informado'} "
+                                f"({int(float(imob['distancia_metros']))} m)"
+                            )
+                            if imob.get("opening_hours"):
+                                st.caption(f"🕐 {imob['opening_hours']}")
+                        else:
+                            st.caption(f"{texto_sem_imobiliaria()}.")
+
 
             # Ag.5
             m2_ref = calc_constr.get("valor_m2_referencia", 0) or 0
@@ -1820,6 +1845,12 @@ with area_principal.container():
                 ["", "AVALIAÇÃO DE LEILÃO (CAIXA)", "-" * 50] + linhas_leilao + [""]
             ) if linhas_leilao else ""
 
+            # Imobiliaria mais proxima: so quando o Agente 4 avaliou o entorno.
+            infra_laudo = resultado.get("infraestrutura") or {}
+            bloco_imobiliaria = "\n".join(
+                ["", "IMOBILIÁRIA MAIS PRÓXIMA", "-" * 50] + linhas_laudo_imobiliaria(infra_laudo) + [""]
+            ) if infra_laudo and infra_laudo.get("status") != "endereco_nao_localizado" else ""
+
             laudo_texto = f"""LAUDO DE AVALIAÇÃO IMOBILIÁRIA
 {'='*50}
 
@@ -1830,7 +1861,7 @@ Quartos: {quartos} | Banheiros: {banheiros} | Vagas: {vagas if vagas is not None
 RESULTADO DA AVALIAÇÃO
 {'-'*50}
 {bloco_resultado}
-{bloco_leilao}
+{bloco_leilao}{bloco_imobiliaria}
 MÉTODO
 {'-'*50}
 {preco.get('metodo_estatistico', '?')}
