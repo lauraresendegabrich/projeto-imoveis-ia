@@ -233,7 +233,7 @@ avaliações deixam de ser registradas; o app continua funcionando). **Rodada no
   leilão, que já passou): o ROI gravado não vale para o valor mínimo atual.
 - **`vw_leiloes_ativos`**: só os ativos, do encerramento mais próximo ao mais distante
   (Compra Direta, sem data, no fim).
-- **Na interface**: página "Leilões ativos" (`app/pages/1_Leilões_ativos.py`), com
+- **Na interface**: página "Leilões ativos" (`app/paginas/leiloes_ativos.py`), com
   cronômetro, filtros (resposta, modalidade, UF) e a mudança da situação. Quando a etapa
   mudou desde a avaliação, a resposta é refeita com o valor mínimo da etapa atual e a
   mesma liquidez (`services/leiloes_ativos.py`).

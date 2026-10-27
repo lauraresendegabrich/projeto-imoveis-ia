@@ -5,7 +5,7 @@ Funil dos anuncios (modo conferencia)
 Mostra, para cada anuncio da avaliacao, em que agente ele saiu e por que (ou se
 entrou no calculo). Serve para conferir as avaliacoes durante os testes; para
 desligar, defina MOSTRAR_FUNIL=0 no .env / Secrets do Streamlit Cloud, e para tirar
-de vez basta apagar este arquivo e a chamada em app/interface.py.
+de vez basta apagar este arquivo e a chamada em app/paginas/avaliacao.py.
 
 Nao muda nenhum calculo: so le o que os agentes ja gravam no resultado.
 """

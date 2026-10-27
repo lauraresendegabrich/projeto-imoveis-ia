@@ -52,7 +52,7 @@ GOOGLE_MAPS_KEY = "token_google_maps"
 ```
 
 ### Adaptação no código
-Para que o app funcione tanto localmente (com `.env`) quanto no cloud (com `st.secrets`), foi adicionado no início de `app/interface.py`:
+Para que o app funcione tanto localmente (com `.env`) quanto no cloud (com `st.secrets`), foi adicionado no início de `app/paginas/avaliacao.py` (página de avaliação; `app/interface.py` só declara as páginas):
 
 ```python
 # Streamlit Cloud: carrega secrets como variáveis de ambiente

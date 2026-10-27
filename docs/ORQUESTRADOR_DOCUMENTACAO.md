@@ -97,7 +97,7 @@ Isso é implementado com `ThreadPoolExecutor(max_workers=2)` para o paralelismo.
 
 ## Interface Web
 
-Arquivo: `app/interface.py`
+Arquivo: `app/interface.py` (declara as páginas) e `app/paginas/avaliacao.py` (avaliação)
 
 A interface Streamlit executa o mesmo fluxo do orquestrador, mas com:
 - Formulário para o usuário inserir os dados do imóvel

@@ -1,5 +1,5 @@
 """
-Pagina "Leiloes ativos" (app/pages/1_Leilões_ativos.py) e services/leiloes_ativos.py.
+Pagina "Leiloes ativos" (app/paginas/leiloes_ativos.py) e services/leiloes_ativos.py.
 Banco simulado: nenhum teste le ou grava no Neon.
 
     .venv/Scripts/python.exe -m tests.test_leiloes_ativos
@@ -19,7 +19,7 @@ import services.banco
 from services import leiloes_ativos
 from services.leilao import agora_brasilia, conta_investimento
 
-PAGINA = "app/pages/1_Leilões_ativos.py"
+PAGINA = "app/paginas/leiloes_ativos.py"
 
 
 def linha(**extra):
@@ -232,6 +232,19 @@ def test_sem_banco_ou_banco_fora_do_ar():
         assert any("Não foi possível ler os leilões" in e.value for e in at.error)
     finally:
         at._restaurar()
+
+
+def test_menu_leva_da_avaliacao_aos_leiloes():
+    original = services.banco.obter_database_url
+    services.banco.obter_database_url = lambda: ""
+    try:
+        at = AppTest.from_file("app/interface.py", default_timeout=60).run()
+        assert "📊 Precificação Imobiliária com IA" in [t.value for t in at.title]   # pagina inicial
+        at.switch_page("paginas/leiloes_ativos.py").run()
+        assert not at.exception, [e.value for e in at.exception]
+        assert "🔨 Leilões ativos" in [t.value for t in at.title]
+    finally:
+        services.banco.obter_database_url = original
 
 
 def test_lista_vazia_explica_como_aparecer():
