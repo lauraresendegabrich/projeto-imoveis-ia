@@ -32,6 +32,7 @@ from services.leilao import (
     campos_da_modalidade, ler_formulario_leilao, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
     MODALIDADE_LICITACAO, MODALIDADE_SFI, MODALIDADE_VENDA_ONLINE, TEXTO_GRAVAME, texto_cabecalho,
     texto_comissao, texto_gravame, texto_roi_outra_etapa, html_decisao, texto_conta_linha,
+    CORES_DECISAO, ROI_OPORTUNIDADE, faixas_de_lance,
 )
 from services.caixa_pagina import ler_pagina_caixa, valores_para_formulario
 from app.cronometro import mostrar_cronometro
@@ -194,11 +195,21 @@ def mostrar_avaliacao_leilao(leilao):
         with col2:
             st.metric(rotulo_minimo, fmt_brl(leilao["valor_minimo"]))
         with col3:
-            st.metric("Lance máximo", fmt_brl(leilao["lance_maximo"]))
+            st.metric(f"Lance máximo (ROI {texto_percentual(ROI_OPORTUNIDADE, 0)})", fmt_brl(leilao["lance_maximo"]),
+                      help="Maior lance que ainda dá ROI de 30% (Oportunidade). Quanto maior o lance, menor o ROI.")
         # A conta numa linha, logo abaixo do ROI ($ escapado: no markdown vira formula).
         st.caption(texto_conta_linha(leilao["conta"]).replace("R$", "R\\$"))
         st.markdown(f"**{texto_lance_maximo(leilao, fmt_brl)}**")
         st.caption(texto_lance_descarte(leilao, fmt_brl))
+        # Tabela das faixas de lance: o ROI cai conforme o lance sobe.
+        st.markdown("**Quanto dar de lance**")
+        st.markdown(pd.DataFrame([
+            {"Lance": f["lance"], "ROI": f["roi"],
+             "Resposta": f"{CORES_DECISAO[f['decisao']][2]} {f['decisao']}",
+             "": ("← o valor mínimo está aqui" if f["minimo_aqui"]
+                  else "abaixo do mínimo: não dá" if f["abaixo_do_minimo"] else "")}
+            for f in faixas_de_lance(leilao, fmt_brl)
+        ]).to_markdown(index=False))
         if texto_roi_outra_etapa(leilao, fmt_brl):
             st.caption(texto_roi_outra_etapa(leilao, fmt_brl))
         conta = leilao["conta"]

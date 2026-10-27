@@ -74,6 +74,20 @@ def test_venda_menor_que_custos_descarta():
     assert r["conta"]["ir"] == 0 and r["roi"] < 0 and r["decisao"] == "Descartar", r
 
 
+def test_faixas_de_lance_e_onde_cai_o_minimo():
+    from services.leilao import faixas_de_lance
+    def onde(liquidez, minimo):
+        faixas = faixas_de_lance(avaliar_leilao(ag5(liquidez=liquidez), minimo), _brl)
+        return [f["decisao"] for f in faixas if f["minimo_aqui"]], [f["decisao"] for f in faixas if f["abaixo_do_minimo"]]
+    assert onde(548408.93, 196185.55) == (["Oportunidade"], [])
+    assert onde(548408.93, 300000) == (["Margem apertada"], ["Oportunidade"])
+    assert onde(314986, 217368) == (["Descartar"], ["Oportunidade", "Margem apertada"])
+    faixas = faixas_de_lance(avaliar_leilao(ag5(liquidez=548408.93), 196185.55), _brl)
+    assert [(f["lance"], f["roi"]) for f in faixas] == [
+        ("até R$ 286.844", "30% ou mais"), ("de R$ 286.844 a R$ 329.870", "de 15% a 30%"),
+        ("acima de R$ 329.870", "menos de 15%")]
+
+
 def test_conta_numa_linha():
     from services.leilao import texto_conta_linha
     assert texto_conta_linha(conta_investimento(425000, 1100000)) == (

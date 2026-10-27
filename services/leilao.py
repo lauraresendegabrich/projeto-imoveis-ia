@@ -612,6 +612,30 @@ def texto_conta_linha(conta: dict) -> str:
     )
 
 
+def faixas_de_lance(leilao: dict, fmt_brl) -> list[dict]:
+    """
+    Tabela "quanto dar de lance": as 3 faixas de lance com o ROI e a resposta de cada
+    uma. `minimo_aqui` marca a faixa onde cai o valor minimo; faixa toda abaixo do
+    minimo nao da para usar (o lance nao pode ser menor que o minimo).
+    """
+    oportunidade, descarte = leilao["lance_maximo"], leilao["lance_limite_descarte"]
+    minimo = _minimo(leilao)
+    faixas = [
+        {"lance": f"até {fmt_brl(oportunidade)}", "roi": f"{texto_percentual(ROI_OPORTUNIDADE, 0)} ou mais",
+         "decisao": DECISAO_OPORTUNIDADE, "de": None, "ate": oportunidade},
+        {"lance": f"de {fmt_brl(oportunidade)} a {fmt_brl(descarte)}",
+         "roi": f"de {texto_percentual(ROI_MARGEM_APERTADA, 0)} a {texto_percentual(ROI_OPORTUNIDADE, 0)}",
+         "decisao": DECISAO_MARGEM_APERTADA, "de": oportunidade, "ate": descarte},
+        {"lance": f"acima de {fmt_brl(descarte)}", "roi": f"menos de {texto_percentual(ROI_MARGEM_APERTADA, 0)}",
+         "decisao": DECISAO_DESCARTAR, "de": descarte, "ate": None},
+    ]
+    for f in faixas:
+        f["abaixo_do_minimo"] = f["ate"] is not None and minimo is not None and f["ate"] < minimo
+        f["minimo_aqui"] = minimo is not None and (f["de"] is None or minimo > f["de"]) and (
+            f["ate"] is None or minimo <= f["ate"])
+    return faixas
+
+
 def _minimo(leilao: dict):
     """Valor minimo da etapa (no cartao: valor_minimo; na lista de leiloes: valor_minimo_atual)."""
     return leilao.get("valor_minimo") or leilao.get("valor_minimo_atual")
