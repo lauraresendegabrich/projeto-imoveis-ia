@@ -21,7 +21,7 @@ from html.parser import HTMLParser
 from services.formatos import ler_numero_br
 from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADE_COMPRA_DIRETA, MODALIDADE_LICITACAO, MODALIDADE_SFI,
-    MODALIDADE_VENDA_ONLINE, MODALIDADES_CAIXA,
+    MODALIDADE_VENDA_ONLINE, MODALIDADES_CAIXA, texto_data_hora,
 )
 
 UF_POR_ESTADO = {
@@ -269,3 +269,61 @@ def ler_pagina_caixa(conteudo: str) -> dict:
     esperados = CAMPOS_GERAIS + CAMPOS_POR_MODALIDADE.get(campos["modalidade"], ())
     nao_encontrados = [NOMES_CAMPOS[c] for c in esperados if campos.get(c) in (None, "", [])]
     return {"ok": True, "erro": None, "campos": campos, "nao_encontrados": nao_encontrados, "avisos": avisos}
+
+
+def _reais_br(valor: float | None) -> str:
+    """224000.0 -> '224.000,00' (como o formulario aceita)."""
+    if valor is None:
+        return ""
+    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _area_br(valor: float | None) -> str:
+    """54.68 -> '54,68'; 300.0 -> '300'."""
+    if valor is None:
+        return ""
+    return f"{valor:g}".replace(".", ",") if valor != int(valor) else str(int(valor))
+
+
+def valores_para_formulario(campos: dict) -> dict:
+    """
+    Campos lidos da pagina -> valores dos campos do formulario (chave do widget ->
+    valor), no formato que o formulario aceita ("224.000,00", "30/11/2026 10:00").
+    Campo nao lido nao entra: o que a pessoa ja digitou fica como esta.
+    Area construida = area privativa (ou a total, se a pagina so tiver ela); terreno
+    so para casa.
+    """
+    area = campos.get("area_privativa") or campos.get("area_total")
+    valores = {
+        "f_rua": campos.get("rua"),
+        "f_numero": campos.get("numero"),
+        "f_bairro": campos.get("bairro"),
+        "f_cidade": campos.get("cidade"),
+        "f_uf": campos.get("uf"),
+        "f_tipo": campos.get("tipo"),
+        "f_area": _area_br(area) or None,
+        "f_terreno": _area_br(campos.get("area_terreno")) if campos.get("tipo") == "Casa" else None,
+        "f_quartos": campos.get("quartos"),
+        "f_vagas": campos.get("vagas"),
+        "f_descricao": campos.get("descricao"),
+        "f_modalidade": campos.get("modalidade"),
+        "f_valor_minimo": _reais_br(campos.get("valor_minimo")) or None,
+        "f_valor_minimo_1": _reais_br(campos.get("valor_minimo_1")) or None,
+        "f_data_1_leilao": texto_data_hora(campos.get("data_1_leilao")) or None,
+        "f_valor_minimo_2": _reais_br(campos.get("valor_minimo_2")) or None,
+        "f_data_2_leilao": texto_data_hora(campos.get("data_2_leilao")) or None,
+        "f_data_encerramento": texto_data_hora(campos.get("data_encerramento")) or None,
+        "f_valor_avaliacao": _reais_br(campos.get("valor_avaliacao")) or None,
+        "f_numero_imovel": campos.get("numero_imovel"),
+        "f_link_caixa": campos.get("link"),
+        "f_edital": campos.get("edital"),
+        "f_numero_item": campos.get("numero_item"),
+        "f_leiloeiro": campos.get("leiloeiro"),
+        "f_matricula": campos.get("matricula"),
+        "f_averbacao": campos.get("averbacao_leiloes_negativos"),
+        "f_gravame": campos.get("gravame"),
+        "f_gravame_texto": campos.get("gravame_texto"),
+        "f_formas_pagamento": campos.get("formas_pagamento"),
+        "f_regras_despesas": campos.get("regras_despesas"),
+    }
+    return {chave: valor for chave, valor in valores.items() if valor not in (None, "", [])}

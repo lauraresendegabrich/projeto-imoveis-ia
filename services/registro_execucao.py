@@ -238,9 +238,11 @@ def montar_registro(
         "banheiros": _int(imovel_alvo.get("bathrooms")),
         # O formulario exige quartos/area; nada e presumido por enquanto.
         "campos_presumidos": [],
-        "valor_minimo": _num(leilao_entrada.get("valor_minimo")),
+        # Valor minimo e data da etapa avaliada (no Leilao SFI, a do 1o ou do 2o leilao).
+        "valor_minimo": _num(leilao.get("valor_minimo") or leilao_entrada.get("valor_minimo")),
         "valor_avaliacao": _num(leilao_entrada.get("valor_avaliacao")),
-        "data_leilao": leilao_entrada.get("data_leilao"),
+        "data_leilao": (leilao["encerramento"].date() if leilao.get("encerramento")
+                        else leilao_entrada.get("data_leilao")),
         "formas_pagamento": list(leilao_entrada.get("formas_pagamento") or []) or None,
         "regras_despesas": leilao_entrada.get("regras_despesas") or None,
 

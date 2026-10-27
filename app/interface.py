@@ -26,9 +26,13 @@ from services.textos_tela import (
 )
 from services.leilao import (
     ALIQUOTA_IR, CORRETAGEM, CUSTOS_ANTES_DA_VENDA, texto_lance_descarte, texto_lance_maximo, texto_percentual,
-    FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_leilao, contar_status_zona,
-    ler_data_br, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
+    FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_imovel_leilao, contar_status_zona,
+    campos_da_modalidade, ler_formulario_leilao, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
+    MODALIDADE_LICITACAO, MODALIDADE_SFI, MODALIDADE_VENDA_ONLINE, TEXTO_GRAVAME, texto_cabecalho,
+    texto_comissao, texto_gravame, texto_roi_outra_etapa,
 )
+from services.caixa_pagina import ler_pagina_caixa, valores_para_formulario
+from app.cronometro import mostrar_cronometro
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
 from dotenv import load_dotenv
@@ -160,10 +164,12 @@ def mostrar_alertas_na_tela(resultado):
 
 def mostrar_avaliacao_leilao(leilao):
     """
-    Bloco "Avaliação de leilão" (services/leilao.py). So aparece quando o valor
-    minimo CAIXA foi informado. Sem estimativa confiavel do Agente 5, mostra apenas a
-    decisao, sem lance maximo e sem detalhes tecnicos.
+    Cartao do leilao, no topo do resultado (services/leilao.py): banco, modalidade e
+    etapa, cronometro ate a proxima data, aviso de gravame, a resposta (4 cores), ROI,
+    lances e a conta. So aparece quando ha valor minimo da etapa. Sem estimativa
+    confiavel do Agente 5, mostra a resposta sem lance maximo.
     """
+    import pandas as pd
     if not leilao:
         return
     decisao = leilao["decisao"]
@@ -175,7 +181,12 @@ def mostrar_avaliacao_leilao(leilao):
         "Sem estimativa": ("#ececec", "#4a4a4a", "⚪"),
     }
     fundo, texto, icone = cores.get(decisao, cores["Sem estimativa"])
-    st.markdown("#### 🔨 Avaliação de leilão (CAIXA)")
+    st.markdown("#### 🔨 Avaliação de leilão")
+    if leilao.get("modalidade"):
+        st.markdown(f"**{texto_cabecalho(leilao)}**")
+        mostrar_cronometro(leilao)
+    if texto_gravame(leilao):
+        st.error(f"⚠️ {texto_gravame(leilao)}")
     st.markdown(
         f'<div style="background:{fundo};color:{texto};padding:12px 18px;border-radius:8px;'
         f'font-size:1.35rem;font-weight:700;">{icone} {decisao}</div>',
@@ -186,34 +197,118 @@ def mostrar_avaliacao_leilao(leilao):
             "⚠️ Endereço não localizado no mapa com precisão de rua ou bairro: a distância "
             "dos comparáveis até o imóvel não foi verificada. Confira antes de decidir."
         )
-    if leilao.get("lance_maximo") is None:
-        return
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("ROI pagando o valor mínimo", texto_percentual(leilao["roi"]))
-    with col2:
-        st.metric("Valor mínimo CAIXA", fmt_brl(leilao["valor_minimo"]))
-    with col3:
-        st.metric("Lance máximo", fmt_brl(leilao["lance_maximo"]))
-    st.markdown(f"**{texto_lance_maximo(leilao, fmt_brl)}**")
-    st.caption(texto_lance_descarte(leilao, fmt_brl))
-    conta = leilao["conta"]
-    with st.expander("Conta do investimento (pagando o valor mínimo)"):
-        st.markdown(pd.DataFrame([
-            ("Arrematação (valor mínimo)", fmt_brl(conta["arrematacao"])),
-            (f"Custos antes da venda (arrematação + {texto_percentual(CUSTOS_ANTES_DA_VENDA, 0)})",
-             fmt_brl(conta["custos_antes_da_venda"])),
-            ("Receita da venda (valor de liquidez)", fmt_brl(conta["venda"])),
-            (f"Corretagem ({texto_percentual(CORRETAGEM, 0)} da venda)", fmt_brl(conta["corretagem"])),
-            (f"IR ({texto_percentual(ALIQUOTA_IR, 0)} de venda − custos antes da venda)", fmt_brl(conta["ir"])),
-            ("Todos os custos", fmt_brl(conta["custos_totais"])),
-            ("Resultado", fmt_brl(conta["resultado"])),
-            ("ROI (resultado ÷ custos antes da venda)", texto_percentual(conta["roi"])),
-        ], columns=["", "Valor"]).to_markdown(index=False))
+    rotulo_minimo = f"Valor mínimo ({leilao['etapa']}º leilão)" if leilao.get("etapa") else "Valor mínimo"
+    if leilao.get("lance_maximo") is not None:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("ROI pagando o valor mínimo", texto_percentual(leilao["roi"]))
+        with col2:
+            st.metric(rotulo_minimo, fmt_brl(leilao["valor_minimo"]))
+        with col3:
+            st.metric("Lance máximo", fmt_brl(leilao["lance_maximo"]))
+        st.markdown(f"**{texto_lance_maximo(leilao, fmt_brl)}**")
+        st.caption(texto_lance_descarte(leilao, fmt_brl))
+        if texto_roi_outra_etapa(leilao, fmt_brl):
+            st.caption(texto_roi_outra_etapa(leilao, fmt_brl))
+        conta = leilao["conta"]
+        with st.expander("Conta do investimento (pagando o valor mínimo)"):
+            st.markdown(pd.DataFrame([
+                ("Arrematação (valor mínimo)", fmt_brl(conta["arrematacao"])),
+                (f"Custos antes da venda (arrematação + {texto_percentual(CUSTOS_ANTES_DA_VENDA, 0)})",
+                 fmt_brl(conta["custos_antes_da_venda"])),
+                ("Receita da venda (valor de liquidez)", fmt_brl(conta["venda"])),
+                (f"Corretagem ({texto_percentual(CORRETAGEM, 0)} da venda)", fmt_brl(conta["corretagem"])),
+                (f"IR ({texto_percentual(ALIQUOTA_IR, 0)} de venda − custos antes da venda)", fmt_brl(conta["ir"])),
+                ("Todos os custos", fmt_brl(conta["custos_totais"])),
+                ("Resultado", fmt_brl(conta["resultado"])),
+                ("ROI (resultado ÷ custos antes da venda)", texto_percentual(conta["roi"])),
+            ], columns=["", "Valor"]).to_markdown(index=False))
+    else:
+        st.caption(f"{rotulo_minimo}: {fmt_brl(leilao['valor_minimo'])}")
     if leilao.get("valor_avaliacao"):
-        st.caption(f"Valor de avaliação CAIXA (informativo): {fmt_brl(leilao['valor_avaliacao'])}")
+        st.caption(f"Valor de avaliação (informativo): {fmt_brl(leilao['valor_avaliacao'])}")
+    if texto_comissao(leilao):
+        st.caption(texto_comissao(leilao))
+    if leilao.get("aviso_direito_preferencia"):
+        st.caption(f"ℹ️ {leilao['aviso_direito_preferencia']}")
+    dados = [f"{rotulo}: {leilao[campo]}" for rotulo, campo in (
+        ("Nº do imóvel", "numero_imovel"), ("Edital", "edital"), ("Item", "numero_item"),
+        ("Leiloeiro(a)", "leiloeiro"), ("Matrícula", "matricula"),
+        ("Averbação dos leilões negativos", "averbacao_leiloes_negativos"),
+    ) if leilao.get(campo)]
+    if dados:
+        st.caption(" · ".join(dados))
     if leilao.get("aviso_zona"):
         st.warning(f"⚠️ {leilao['aviso_zona']}")
+
+
+ESTADOS_BR = ["", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE",
+              "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
+BANCOS_LEILAO = [ORIGEM_CAIXA]
+
+# Campos do formulario (chave no session_state -> valor inicial). O CEP e a pagina da
+# CAIXA preenchem escrevendo nessas chaves.
+VALORES_INICIAIS_FORMULARIO = {
+    "f_cep": "", "f_rua": "", "f_numero": "", "f_bairro": "", "f_cidade": "", "f_uf": "",
+    "f_tipo": "Casa", "f_area": "", "f_quartos": 0, "f_vagas": None, "f_terreno": "", "f_banheiros": 0,
+    "f_preco": "", "f_descricao": "", "f_fotos": "", "f_link_anuncio": "",
+    "f_banco": ORIGEM_CAIXA, "f_modalidade": "",
+    "f_valor_minimo": "", "f_valor_minimo_1": "", "f_data_1_leilao": "", "f_valor_minimo_2": "",
+    "f_data_2_leilao": "", "f_data_encerramento": "", "f_valor_avaliacao": "", "f_numero_imovel": "",
+    "f_link_caixa": "", "f_edital": "", "f_numero_item": "", "f_leiloeiro": "", "f_matricula": "",
+    "f_averbacao": "", "f_gravame": False, "f_gravame_texto": "", "f_formas_pagamento": [],
+    "f_regras_despesas": "",
+}
+
+
+def ler_dados_caixa():
+    """
+    Botao "Ler dados" (callback: roda antes de a tela ser montada, entao pode
+    preencher os campos). Le a pagina salva ou o texto colado e preenche o
+    formulario. Antes, limpa os campos: nada de um imovel anterior fica misturado.
+    """
+    arquivo = st.session_state.get("caixa_arquivo")
+    if arquivo is not None:
+        bruto = arquivo.getvalue()
+        try:
+            conteudo = bruto.decode("utf-8")
+        except UnicodeDecodeError:
+            conteudo = bruto.decode("latin-1")
+    else:
+        conteudo = st.session_state.get("caixa_texto") or ""
+    if not conteudo.strip():
+        st.session_state["caixa_lida"] = {"ok": False, "erro": "Envie a página salva ou cole o texto da página."}
+        return
+    lida = ler_pagina_caixa(conteudo)
+    if lida["ok"]:
+        for chave, inicial in VALORES_INICIAIS_FORMULARIO.items():
+            st.session_state[chave] = list(inicial) if isinstance(inicial, list) else inicial
+        valores = valores_para_formulario(lida["campos"])
+        for chave, valor in valores.items():
+            st.session_state[chave] = valor
+        cep = limpar_cep(lida["campos"].get("cep") or "")
+        if cep:
+            # O CEP da pagina nao deve sobrescrever o endereco lido da CAIXA.
+            st.session_state["f_cep"] = lida["campos"]["cep"]
+            st.session_state["_cep_aplicado"] = cep
+        lida["preenchidos"] = len(valores)
+    st.session_state["caixa_lida"] = lida
+
+
+def mostrar_resumo_caixa(lida):
+    """Resumo do que foi lido da pagina da CAIXA: o que faltou e os avisos."""
+    if not lida:
+        return
+    if not lida["ok"]:
+        st.error(lida["erro"])
+        return
+    st.success(f"Dados lidos da CAIXA — confira antes de avaliar ({lida.get('preenchidos', 0)} campos preenchidos).")
+    if lida["nao_encontrados"]:
+        st.warning("Não encontrado na página (preencha à mão, se tiver): " + ", ".join(lida["nao_encontrados"]) + ".")
+    for aviso in lida["avisos"]:
+        st.warning(aviso)
+    if lida["campos"].get("gravame"):
+        st.error(f"⚠️ {lida['campos'].get('gravame_texto') or TEXTO_GRAVAME}")
 
 
 # Streamlit Cloud: carrega secrets como variáveis de ambiente
@@ -243,13 +338,30 @@ with st.sidebar:
     st.title("🏠 Avaliação de Imóvel")
     st.caption("Preencha os dados do imóvel que deseja avaliar")
 
+    # Valores iniciais dos campos (chaves no session_state): o CEP e a pagina da CAIXA
+    # preenchem os campos escrevendo nessas chaves.
+    for _chave, _inicial in VALORES_INICIAIS_FORMULARIO.items():
+        st.session_state.setdefault(_chave, _inicial)
+
+    # ── PAGINA DA CAIXA (fora do formulario: preenche os campos antes de avaliar) ──
+    # O site da CAIXA bloqueia acesso automatico (CAPTCHA): a pessoa salva a pagina
+    # ou copia o texto dela no navegador (services/caixa_pagina.py).
+    with st.expander("📄 Preencher com a página da CAIXA", expanded=bool(st.session_state.get("caixa_lida"))):
+        st.caption(
+            "Abra a página do imóvel no site da CAIXA e salve (Ctrl+S) ou copie o texto "
+            "(Ctrl+A, Ctrl+C). O app não abre o link: o site da CAIXA bloqueia acesso automático."
+        )
+        st.file_uploader("Página salva (.html)", type=["html", "htm"], key="caixa_arquivo")
+        st.text_area("ou cole o texto da página", key="caixa_texto", height=80)
+        st.button("Ler dados", on_click=ler_dados_caixa, use_container_width=True)
+        mostrar_resumo_caixa(st.session_state.get("caixa_lida"))
+
     # ── BUSCA POR CEP ─────────────────────────────────────────
     st.markdown("**🔎 Buscar por CEP:**")
     cep_input = st.text_input(
-        "CEP (opcional)", value="", max_chars=10, placeholder="13015-100",
+        "CEP (opcional)", max_chars=10, placeholder="13015-100", key="f_cep",
         help="Digite o CEP e aperte Enter para preencher rua, bairro, cidade e UF.",
     )
-    preset = {}
     if cep_input.strip():
         cep_limpo = limpar_cep(cep_input)
         if not cep_limpo:
@@ -257,93 +369,119 @@ with st.sidebar:
         else:
             endereco_cep, situacao_cep = buscar_cep_cache(cep_limpo)
             if endereco_cep:
-                preset = endereco_cep
-                st.success(f"✅ {preset['rua']}, {preset['bairro']}, {preset['cidade']}/{preset['estado']}")
+                # So preenche quando o CEP muda: nao apaga o que a pessoa (ou a pagina
+                # da CAIXA) ja colocou nos campos.
+                if st.session_state.get("_cep_aplicado") != cep_limpo:
+                    for _campo, _chave in (("rua", "f_rua"), ("bairro", "f_bairro"), ("cidade", "f_cidade"),
+                                           ("estado", "f_uf")):
+                        if endereco_cep.get(_campo):
+                            st.session_state[_chave] = endereco_cep[_campo]
+                    st.session_state["_cep_aplicado"] = cep_limpo
+                st.success(f"✅ {endereco_cep['rua']}, {endereco_cep['bairro']}, "
+                           f"{endereco_cep['cidade']}/{endereco_cep['estado']}")
             elif situacao_cep == "nao_encontrado":
                 st.warning("CEP não encontrado.")
             else:
                 st.warning("Não foi possível consultar o CEP agora. Preencha o endereço manualmente.")
 
+    # ── LEILAO: banco e modalidade (fora do formulario: os campos do leilao mudam
+    # conforme a modalidade, e dentro do st.form so mudariam depois do envio) ──
+    st.markdown("**🔨 Leilão** (opcional)")
+    banco_leilao = st.selectbox("Banco", BANCOS_LEILAO, key="f_banco")
+    modalidade_caixa = st.selectbox(
+        "Modalidade", [""] + MODALIDADES_CAIXA, key="f_modalidade",
+        format_func=lambda m: m or "Não é leilão",
+    )
+
     st.divider()
 
     with st.form("imovel_form"):
         st.markdown("**📍 Localização**")
-        rua = st.text_input("Rua", value=preset.get("rua", ""))
-        numero = st.text_input("Número", value=preset.get("numero", ""))
-        bairro = st.text_input("Bairro", value=preset.get("bairro", ""))
-        cidade = st.text_input("Cidade", value=preset.get("cidade", ""))
+        rua = st.text_input("Rua", key="f_rua")
+        numero = st.text_input("Número", key="f_numero")
+        bairro = st.text_input("Bairro", key="f_bairro")
+        cidade = st.text_input("Cidade", key="f_cidade")
         # UF em linha propria (antes ao lado da cidade): legivel com a barra lateral estreita.
-        estados_br = ["", "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
-        estado_default = preset.get("estado", "")
-        estado_idx = estados_br.index(estado_default) if estado_default in estados_br else 0
-        estado = st.selectbox("UF", estados_br, index=estado_idx)
+        estado = st.selectbox("UF", ESTADOS_BR, key="f_uf")
 
         st.markdown("**🏗️ Características**")
-        tipo = st.selectbox("Tipo", ["Casa", "Apartamento"], index=["Casa", "Apartamento"].index(preset.get("tipo", "Casa")))
+        tipo = st.selectbox("Tipo", ["Casa", "Apartamento"], key="f_tipo")
         col_a, col_b = st.columns(2)
         with col_a:
             # Campo de texto (e nao number_input) para aceitar o jeito brasileiro:
             # "179", "179,5", "1.250,75". Lido depois do envio por ler_numero_br.
-            texto_area = st.text_input("Área construída (m²)", value="", placeholder="Ex.: 179,50")
-            quartos = st.number_input("Quartos", min_value=0, value=preset.get("quartos", 0))
+            texto_area = st.text_input("Área construída (m²)", placeholder="Ex.: 179,50", key="f_area")
+            quartos = st.number_input("Quartos", min_value=0, key="f_quartos")
             # Comeca vazio: vazio = nao informado, 0 = sem vaga (a checagem do proprio
             # anuncio so compara vagas quando foram informadas).
-            vagas = st.number_input("Vagas", min_value=0, value=preset.get("vagas"), placeholder="Não informado")
+            vagas = st.number_input("Vagas", min_value=0, placeholder="Não informado", key="f_vagas")
         with col_b:
             texto_area_terreno = st.text_input(
-                "Terreno (m²)", value="", placeholder="Ex.: 300" if tipo == "Casa" else "Apartamento: deixe vazio",
+                "Terreno (m²)", placeholder="Ex.: 300" if tipo == "Casa" else "Apartamento: deixe vazio",
+                key="f_terreno",
             )
-            banheiros = st.number_input("Banheiros", min_value=0, value=preset.get("banheiros", 0))
+            banheiros = st.number_input("Banheiros", min_value=0, key="f_banheiros")
             # Texto (e nao number_input) para aceitar "1.200.000" e "1.200.000,00".
-            texto_preco_anunciado = st.text_input("Preço (R$, opcional)", value="", placeholder="Ex.: 1.200.000")
+            texto_preco_anunciado = st.text_input("Preço (R$, opcional)", placeholder="Ex.: 1.200.000",
+                                                  key="f_preco")
         st.caption("Casa: sem a área do terreno, o cálculo usa só o m² total das casas e fica menos preciso.")
 
         st.markdown("**📝 Descrição** (opcional)")
-        descricao = st.text_area("Descrição do imóvel", value="", height=80)
+        descricao = st.text_area("Descrição do imóvel", height=80, key="f_descricao")
 
         st.markdown("**📸 Fotos do imóvel** (opcional, máx. 8)")
         st.caption("Cole os links diretos das fotos, um por linha")
-        fotos_texto = st.text_area("Links das fotos", value="", height=80, help="Cole até 8 URLs de imagens (uma por linha). Ex: https://...imovel.jpg")
+        fotos_texto = st.text_area("Links das fotos", height=80, key="f_fotos",
+                                   help="Cole até 8 URLs de imagens (uma por linha). Ex: https://...imovel.jpg")
         # So para reconhecer o anuncio do proprio imovel entre os comparaveis (Ag2):
         # nao entra em nenhum prompt.
         link_anuncio = st.text_input(
-            "Link do anúncio deste imóvel (se tiver)", value="",
+            "Link do anúncio deste imóvel (se tiver)", key="f_link_anuncio",
             placeholder="Ex.: https://www.vivareal.com.br/imovel/...-id-2903862416/",
             help="Se o imóvel estiver anunciado num portal, o anúncio dele fica fora da comparação.",
         )
 
-        # Leilao CAIXA: estes valores NAO entram no imovel_alvo nem em nenhum agente
-        # (preco de leilao fica bem abaixo do mercado e distorceria os comparaveis).
-        # So sao usados depois do Agente 5, em services/leilao.py.
-        st.markdown("**🔨 Leilão CAIXA** (opcional)")
-        # Campo de texto (e nao number_input) para aceitar o jeito brasileiro de
-        # escrever valores: "323.158,50", "323158", "R$ 323.158". Lido depois do
-        # envio por ler_valor_reais (services/leilao.py).
-        texto_valor_minimo_caixa = st.text_input(
-            "Valor mínimo de venda (R$)", value="", placeholder="Ex.: 323.158,00",
-            help="Valor mínimo de venda que aparece no site da CAIXA.",
-        )
-        texto_valor_avaliacao_caixa = st.text_input(
-            "Valor de avaliação CAIXA (R$)", value="", placeholder="Ex.: 410.000,00",
-            help="Só informativo: não entra em nenhum cálculo.",
-        )
-        modalidade_caixa = st.selectbox("Modalidade", [""] + MODALIDADES_CAIXA)
-        codigo_caixa = st.text_input("Código do imóvel na CAIXA", value="")
-        link_caixa = st.text_input("Link do imóvel na CAIXA", value="")
-        # So registrados (banco e Excel): nao entram em nenhum calculo.
-        texto_data_leilao = st.text_input(
-            "Data do leilão / da venda", value="", placeholder="Ex.: 25/11/2026",
-            help="Data que aparece na página do imóvel na CAIXA. Só é registrada.",
-        )
-        formas_pagamento_caixa = st.multiselect(
-            "Formas de pagamento aceitas", FORMAS_PAGAMENTO_CAIXA,
-            help="Conforme a página do imóvel na CAIXA. Só é registrado.",
-        )
-        regras_despesas_caixa = st.text_area(
-            "Regras de despesas (condomínio, tributos)", value="", height=80,
-            placeholder="Cole o texto da CAIXA. Ex.: Condomínio: sob responsabilidade do comprador...",
-            help="Só é registrado.",
-        )
+        # Leilao: estes valores NAO entram no imovel_alvo nem em nenhum agente (preco
+        # de leilao fica bem abaixo do mercado e distorceria os comparaveis). So sao
+        # usados depois do Agente 5, em services/leilao.py. Valores e datas como texto
+        # para aceitar o jeito brasileiro ("323.158,50", "30/11/2026 10:00").
+        if modalidade_caixa:
+            st.markdown(f"**🔨 {banco_leilao} · {modalidade_caixa}**")
+            if modalidade_caixa == MODALIDADE_SFI:
+                st.text_input("Valor mínimo do 1º leilão (R$)", placeholder="Ex.: 224.000,00", key="f_valor_minimo_1")
+                st.text_input("Data e hora do 1º leilão", placeholder="Ex.: 30/11/2026 10:00", key="f_data_1_leilao")
+                st.text_input("Valor mínimo do 2º leilão (R$)", placeholder="Ex.: 296.523,50", key="f_valor_minimo_2",
+                              help="No 2º leilão o mínimo é a dívida: pode ser maior que o do 1º.")
+                st.text_input("Data e hora do 2º leilão", placeholder="Ex.: 04/12/2026 10:00", key="f_data_2_leilao")
+            else:
+                st.text_input("Valor mínimo de venda (R$)", placeholder="Ex.: 323.158,00", key="f_valor_minimo",
+                              help="Valor mínimo de venda que aparece no site da CAIXA.")
+                if modalidade_caixa == MODALIDADE_LICITACAO:
+                    st.text_input("Data e hora da licitação", placeholder="Ex.: 04/11/2026 10:00",
+                                  key="f_data_encerramento")
+                elif modalidade_caixa == MODALIDADE_VENDA_ONLINE:
+                    st.text_input("Data e hora do encerramento", placeholder="Ex.: 26/10/2026 18:00",
+                                  key="f_data_encerramento", help="É a data do cronômetro no site da CAIXA.")
+                else:
+                    st.caption("Compra Direta: sem data de encerramento (a primeira proposta vence).")
+            st.text_input("Valor de avaliação (R$)", placeholder="Ex.: 410.000,00", key="f_valor_avaliacao",
+                          help="Só informativo: não entra em nenhum cálculo.")
+            st.text_input("Número do imóvel", placeholder="Ex.: 855552271653-1", key="f_numero_imovel")
+            st.text_input("Link do imóvel no site do banco", key="f_link_caixa")
+            if modalidade_caixa in (MODALIDADE_SFI, MODALIDADE_LICITACAO):
+                st.text_input("Edital", placeholder="Ex.: 0052/0226 - CPA/RE", key="f_edital")
+                st.text_input("Número do item", key="f_numero_item")
+                st.text_input("Leiloeiro(a)", key="f_leiloeiro")
+            st.text_input("Matrícula", key="f_matricula")
+            st.text_input("Averbação dos leilões negativos", placeholder="Ex.: Averbado", key="f_averbacao")
+            st.checkbox("Imóvel com gravame/penhora/indisponibilidade na matrícula", key="f_gravame")
+            st.text_area("Aviso de gravame (texto da CAIXA)", height=68, key="f_gravame_texto")
+            # So registrados (banco e Excel): nao entram em nenhum calculo.
+            st.multiselect("Formas de pagamento aceitas", FORMAS_PAGAMENTO_CAIXA, key="f_formas_pagamento",
+                           help="Conforme a página do imóvel. Só é registrado.")
+            st.text_area("Regras de despesas (condomínio, tributos)", height=80, key="f_regras_despesas",
+                         placeholder="Cole o texto da CAIXA. Ex.: Condomínio: sob responsabilidade do comprador...",
+                         help="Só é registrado.")
 
         submitted = st.form_submit_button("🚀 Avaliar Imóvel", use_container_width=True)
 
@@ -420,28 +558,24 @@ with area_principal.container():
         if quartos <= 0:
             erros_validacao.append("Número de quartos deve ser maior que zero")
 
-        # Valores do leilao CAIXA digitados como texto (aceita "323.158,50").
-        valor_minimo_caixa = valor_avaliacao_caixa = None
-        try:
-            valor_minimo_caixa = ler_valor_reais(texto_valor_minimo_caixa)
-        except ValueError:
-            erros_validacao.append(
-                f"Valor mínimo de venda inválido: \"{texto_valor_minimo_caixa}\" (use, por exemplo, 323.158,00)"
+        # Leilao: so os campos da modalidade escolhida, lidos do jeito brasileiro
+        # ("296.523,50", "30/11/2026 10:00"). Os nomes dos campos do formulario (f_...)
+        # viram os nomes de services/leilao.py.
+        textos_leilao = {
+            campo: st.session_state.get(chave) for campo, chave in (
+                ("valor_minimo", "f_valor_minimo"), ("valor_minimo_1", "f_valor_minimo_1"),
+                ("valor_minimo_2", "f_valor_minimo_2"), ("valor_avaliacao", "f_valor_avaliacao"),
+                ("data_1_leilao", "f_data_1_leilao"), ("data_2_leilao", "f_data_2_leilao"),
+                ("data_encerramento", "f_data_encerramento"), ("numero_imovel", "f_numero_imovel"),
+                ("link", "f_link_caixa"), ("edital", "f_edital"), ("numero_item", "f_numero_item"),
+                ("leiloeiro", "f_leiloeiro"), ("matricula", "f_matricula"),
+                ("averbacao_leiloes_negativos", "f_averbacao"), ("gravame", "f_gravame"),
+                ("gravame_texto", "f_gravame_texto"), ("formas_pagamento", "f_formas_pagamento"),
+                ("regras_despesas", "f_regras_despesas"),
             )
-        try:
-            valor_avaliacao_caixa = ler_valor_reais(texto_valor_avaliacao_caixa)
-        except ValueError:
-            erros_validacao.append(
-                f"Valor de avaliação CAIXA inválido: \"{texto_valor_avaliacao_caixa}\" (use, por exemplo, 410.000,00)"
-            )
-
-        data_leilao_caixa = None
-        try:
-            data_leilao_caixa = ler_data_br(texto_data_leilao)
-        except ValueError:
-            erros_validacao.append(
-                f"Data do leilão inválida: \"{texto_data_leilao}\" (use, por exemplo, 25/11/2026)"
-            )
+        }
+        dados_leilao, erros_leilao = ler_formulario_leilao(textos_leilao, banco_leilao, modalidade_caixa)
+        erros_validacao += erros_leilao
 
         if erros_validacao:
             st.error("❌ **Corrija os campos abaixo para iniciar a avaliação:**")
@@ -464,14 +598,11 @@ with area_principal.container():
             "fotos": [l.strip() for l in (fotos_texto or "").splitlines() if l.strip()],
             "link_anuncio": link_anuncio.strip() or None,
             "leilao": {
-                "valor_minimo_digitado": texto_valor_minimo_caixa,
-                "valor_avaliacao_digitado": texto_valor_avaliacao_caixa,
+                "banco": banco_leilao,
                 "modalidade": modalidade_caixa or None,
-                "codigo": codigo_caixa or None,
-                "link": link_caixa or None,
-                "data_digitada": texto_data_leilao,
-                "formas_pagamento": list(formas_pagamento_caixa or []),
-                "regras_despesas": regras_despesas_caixa or None,
+                "digitado": {campo: texto for campo, texto in textos_leilao.items()
+                             if campo in campos_da_modalidade(modalidade_caixa)} if modalidade_caixa else None,
+                "lido_da_pagina_caixa": bool((st.session_state.get("caixa_lida") or {}).get("ok")),
             },
         }
 
@@ -947,19 +1078,12 @@ with area_principal.container():
         resumo["duplicatas_descartadas"] = len(duplicatas_descartadas)
 
         # Avaliacao de leilao: so depois do Agente 5, com os valores do formulario
-        # (nunca passaram por nenhum agente).
-        leilao_entrada = {
-            "origem": ORIGEM_CAIXA,
-            "valor_minimo": valor_minimo_caixa or None,
-            "valor_avaliacao": valor_avaliacao_caixa or None,
-            "modalidade": modalidade_caixa or None,
-            "codigo_caixa": codigo_caixa.strip() or None,
-            "link": link_caixa.strip() or None,
-            "data_leilao": data_leilao_caixa,
-            "formas_pagamento": formas_pagamento_caixa or None,
-            "regras_despesas": regras_despesas_caixa.strip() or None,
-        }
-        leilao = avaliar_leilao(resultado_ag5, valor_minimo_caixa, valor_avaliacao_caixa)
+        # (nunca passaram por nenhum agente). A etapa atual (1o/2o leilao) sai pela data.
+        leilao_entrada = leilao = None
+        if dados_leilao:
+            leilao_entrada = {**dados_leilao, "origem": dados_leilao["banco"],
+                              "codigo_caixa": dados_leilao.get("numero_imovel")}
+            leilao = avaliar_imovel_leilao(resultado_ag5, dados_leilao)
         if leilao is not None:
             leilao["aviso_zona"] = aviso_zona
             # Endereco nao localizado com precisao de rua/bairro: o calculo segue, mas o
@@ -1047,6 +1171,9 @@ with area_principal.container():
         # Preço estimado
         preco = resultado.get("preco_estimado", {})
         if preco and isinstance(preco, dict):
+            # Cartao do leilao no topo: banco, modalidade, etapa, cronometro e a resposta.
+            mostrar_avaliacao_leilao(resultado.get("leilao"))
+
             avaliacao = preco.get("avaliacao_planilha") or preco.get("avaliacao", {})
             liquidez_info = preco.get("liquidez_experimental") or preco.get("liquidez", {})
 
@@ -1133,8 +1260,6 @@ with area_principal.container():
             mostrar_alertas_na_tela(resultado)
             if resultado.get("aviso_zona"):
                 st.warning(f"⚠️ {resultado['aviso_zona']}")
-
-            mostrar_avaliacao_leilao(resultado.get("leilao"))
 
             # ==============================================================
             # COMO CHEGAMOS NESTE VALOR

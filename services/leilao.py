@@ -39,7 +39,8 @@ comparaveis. O valor de avaliacao CAIXA e so informativo.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time
+import re
+from datetime import date, datetime, time, timedelta, timezone
 
 from services.formatos import ler_numero_br
 
@@ -70,6 +71,16 @@ MODALIDADES_COM_LEILOEIRO = (MODALIDADE_SFI, MODALIDADE_LICITACAO)
 
 # Exercicio do Direito de Preferencia nao e modalidade: so um aviso no Leilao SFI.
 AVISO_DIREITO_PREFERENCIA = "O antigo dono pode recomprar até a data do leilão."
+
+# Aviso de gravame/penhora como aparece na pagina da CAIXA (quando so foi marcado sim/nao).
+TEXTO_GRAVAME = ("Imóvel com gravame/penhora/indisponibilidade averbada na matrícula. "
+                 "Regularização por conta do adquirente.")
+
+# Dados da pagina da CAIXA que so sao mostrados (cartao, laudo) e gravados.
+CAMPOS_INFORMATIVOS = (
+    "banco", "numero_imovel", "link", "edital", "numero_item", "leiloeiro", "matricula",
+    "averbacao_leiloes_negativos", "gravame", "gravame_texto",
+)
 
 # Situacao manual do imovel. "Ativo" = situacao ativa e prazo nao encerrado.
 SITUACAO_ATIVO = "ativo"
@@ -155,6 +166,106 @@ def ler_data_br(texto) -> date | None:
         except ValueError:
             continue
     raise ValueError(texto)
+
+
+def ler_data_hora_br(texto) -> date | datetime | None:
+    """
+    Data e hora digitadas no formulario (ou lidas da pagina da CAIXA):
+    "30/11/2026 10:00", "30/11/2026 - 10h00", "30/11/2026 10h" -> datetime;
+    so a data ("30/11/2026") -> date (vale ate o fim do dia). Vazio -> None;
+    invalido -> ValueError.
+    """
+    texto = str(texto or "").strip()
+    if not texto:
+        return None
+    m = re.fullmatch(r"(\d{1,2}/\d{1,2}/\d{2,4})(?:\s*(?:-|às|as)?\s*(\d{1,2})\s*[h:]\s*(\d{2})?\s*h?)?", texto, re.I)
+    if not m:
+        raise ValueError(texto)
+    dia = ler_data_br(m.group(1))
+    if m.group(2) is None:
+        return dia
+    hora, minuto = int(m.group(2)), int(m.group(3) or 0)
+    if hora > 23 or minuto > 59:
+        raise ValueError(texto)
+    return datetime.combine(dia, time(hora, minuto))
+
+
+def texto_data_hora(valor) -> str:
+    """datetime -> '30/11/2026 10:00'; date -> '30/11/2026'; None -> ''."""
+    if valor is None:
+        return ""
+    if isinstance(valor, datetime):
+        return valor.strftime("%d/%m/%Y %H:%M")
+    return valor.strftime("%d/%m/%Y")
+
+
+# Campos do formulario do leilao: (rotulo no aviso de erro, exemplo).
+CAMPOS_VALOR_LEILAO = {
+    "valor_minimo": ("Valor mínimo de venda", "323.158,00"),
+    "valor_minimo_1": ("Valor mínimo do 1º leilão", "224.000,00"),
+    "valor_minimo_2": ("Valor mínimo do 2º leilão", "296.523,50"),
+    "valor_avaliacao": ("Valor de avaliação", "410.000,00"),
+}
+CAMPOS_DATA_LEILAO = {
+    "data_1_leilao": "Data do 1º leilão",
+    "data_2_leilao": "Data do 2º leilão",
+    "data_encerramento": "Data de encerramento",
+}
+CAMPOS_TEXTO_LEILAO = (
+    "numero_imovel", "link", "edital", "numero_item", "leiloeiro", "matricula",
+    "averbacao_leiloes_negativos", "gravame_texto", "regras_despesas",
+)
+
+
+def campos_da_modalidade(modalidade: str) -> set:
+    """Campos do formulario que valem para a modalidade (os outros sao ignorados)."""
+    campos = {"valor_avaliacao", "numero_imovel", "link", "matricula", "averbacao_leiloes_negativos",
+              "gravame", "gravame_texto", "formas_pagamento", "regras_despesas"}
+    if modalidade == MODALIDADE_SFI:
+        campos |= {"valor_minimo_1", "data_1_leilao", "valor_minimo_2", "data_2_leilao"}
+    else:
+        campos.add("valor_minimo")
+        if modalidade in (MODALIDADE_LICITACAO, MODALIDADE_VENDA_ONLINE):
+            campos.add("data_encerramento")
+    if modalidade in MODALIDADES_COM_LEILOEIRO:
+        campos |= {"edital", "numero_item", "leiloeiro"}
+    return campos
+
+
+def ler_formulario_leilao(textos: dict, banco: str, modalidade: str) -> tuple[dict | None, list[str]]:
+    """
+    Campos do leilao como foram digitados -> (dados para avaliar_imovel_leilao, erros).
+    Sem modalidade: (None, []), nao e leilao. So os campos da modalidade sao lidos.
+    Valores e datas no jeito brasileiro ("296.523,50", "30/11/2026 10:00").
+    gravame: marcado, ou com o texto do aviso preenchido.
+    """
+    if not modalidade:
+        return None, []
+    validos = campos_da_modalidade(modalidade)
+    dados: dict = {"banco": banco or ORIGEM_CAIXA, "modalidade": modalidade}
+    erros: list[str] = []
+    for campo, (rotulo, exemplo) in CAMPOS_VALOR_LEILAO.items():
+        if campo not in validos:
+            continue
+        texto = textos.get(campo) or ""
+        try:
+            dados[campo] = ler_valor_reais(texto)
+        except ValueError:
+            erros.append(f"{rotulo} inválido: \"{texto}\" (use, por exemplo, {exemplo})")
+    for campo, rotulo in CAMPOS_DATA_LEILAO.items():
+        if campo not in validos:
+            continue
+        texto = textos.get(campo) or ""
+        try:
+            dados[campo] = ler_data_hora_br(texto)
+        except ValueError:
+            erros.append(f"{rotulo} inválida: \"{texto}\" (use, por exemplo, 30/11/2026 10:00)")
+    for campo in CAMPOS_TEXTO_LEILAO:
+        if campo in validos:
+            dados[campo] = str(textos.get(campo) or "").strip() or None
+    dados["gravame"] = bool(textos.get("gravame")) or bool(dados.get("gravame_texto"))
+    dados["formas_pagamento"] = list(textos.get("formas_pagamento") or []) or None
+    return dados, erros
 
 
 def contar_status_zona(resultado_ag5: dict | None) -> dict:
@@ -339,6 +450,15 @@ def avaliar_leilao(
     }
 
 
+def agora_brasilia() -> datetime:
+    """
+    Hora de Brasilia (UTC-3, sem horario de verao desde 2019), sem fuso, para comparar
+    com as datas do site da CAIXA. No Streamlit Cloud o servidor roda em UTC: usar
+    datetime.now() erraria a etapa e o "encerrado" em 3 horas.
+    """
+    return (datetime.now(timezone.utc) - timedelta(hours=3)).replace(tzinfo=None)
+
+
 def como_datahora(valor) -> datetime | None:
     """Data sem hora vale ate o fim do dia; None continua None."""
     if valor is None or isinstance(valor, datetime):
@@ -424,7 +544,7 @@ def avaliar_imovel_leilao(resultado_ag5: dict | None, leilao: dict, agora: datet
     aviso_direito_preferencia e, no SFI, outra_etapa, valor_minimo_outra_etapa e
     roi_outra_etapa. None sem valor minimo da etapa.
     """
-    agora = agora or datetime.now()
+    agora = agora or agora_brasilia()
     modalidade = leilao.get("modalidade")
     etapa = etapa_atual(leilao, agora)
     avaliacao = avaliar_leilao(resultado_ag5, etapa["valor_minimo"], leilao.get("valor_avaliacao"))
@@ -445,7 +565,9 @@ def avaliar_imovel_leilao(resultado_ag5: dict | None, leilao: dict, agora: datet
         "outra_etapa": None,
         "valor_minimo_outra_etapa": None,
         "roi_outra_etapa": None,
+        **{campo: leilao.get(campo) for campo in CAMPOS_INFORMATIVOS},
     })
+    avaliacao["banco"] = avaliacao["banco"] or ORIGEM_CAIXA
     if modalidade == MODALIDADE_SFI and etapa["valor_minimo_outra_etapa"] is not None:
         avaliacao["outra_etapa"] = etapa["outra_etapa"]
         avaliacao["valor_minimo_outra_etapa"] = etapa["valor_minimo_outra_etapa"]
@@ -465,6 +587,38 @@ def texto_lance_descarte(leilao: dict, fmt_brl) -> str:
     return f"Acima de {fmt_brl(leilao['lance_limite_descarte'])}, descartar"
 
 
+def texto_cabecalho(leilao: dict) -> str:
+    """'CAIXA · Leilão SFI · 2º leilão' (a etapa so no Leilao SFI)."""
+    partes = [leilao.get("banco") or ORIGEM_CAIXA, leilao.get("modalidade")]
+    if leilao.get("etapa"):
+        partes.append(f"{leilao['etapa']}º leilão")
+    return " · ".join(p for p in partes if p)
+
+
+def texto_roi_outra_etapa(leilao: dict, fmt_brl) -> str | None:
+    """'No 1º leilão (mínimo R$ 224.000), o ROI seria 70,68%.' (so Leilao SFI)."""
+    if leilao.get("roi_outra_etapa") is None:
+        return None
+    return (f"No {leilao['outra_etapa']}º leilão (mínimo {fmt_brl(leilao['valor_minimo_outra_etapa'])}), "
+            f"o ROI seria {texto_percentual(leilao['roi_outra_etapa'])}.")
+
+
+def texto_comissao(leilao: dict) -> str | None:
+    """Quem paga a comissao (so registrado: nao entra na conta)."""
+    if not leilao.get("modalidade"):
+        return None
+    if leilao.get("comissao_leiloeiro"):
+        return (f"Comissão do leiloeiro: {texto_percentual(leilao['comissao_leiloeiro'], 0)} do lance, "
+                f"paga pelo comprador (não entra na conta do ROI).")
+    return "Corretagem por conta da CAIXA."
+
+
+def texto_gravame(leilao: dict) -> str | None:
+    if not leilao.get("gravame"):
+        return None
+    return leilao.get("gravame_texto") or TEXTO_GRAVAME
+
+
 def linhas_laudo(leilao: dict | None, fmt_brl) -> list[str]:
     """
     Linhas da secao "AVALIACAO DE LEILAO (CAIXA)" do laudo TXT. `fmt_brl` formata
@@ -473,6 +627,12 @@ def linhas_laudo(leilao: dict | None, fmt_brl) -> list[str]:
     if not leilao:
         return []
     linhas = [f"Decisão: {leilao['decisao']}"]
+    if leilao.get("modalidade"):
+        linhas.append(texto_cabecalho(leilao))
+    if leilao.get("prazo"):
+        linhas.append(leilao["prazo"])
+    if texto_gravame(leilao):
+        linhas.append(f"Atenção: {texto_gravame(leilao)}")
     if leilao.get("alvo_sem_localizacao"):
         linhas.append(
             "Atenção: endereço não localizado no mapa com precisão de rua ou bairro; "
@@ -500,6 +660,17 @@ def linhas_laudo(leilao: dict | None, fmt_brl) -> list[str]:
             linhas.append(f"Atenção: {leilao['aviso_zona']}")
     else:
         linhas.append(f"Valor mínimo CAIXA: {fmt_brl(leilao['valor_minimo'])}")
+    if texto_roi_outra_etapa(leilao, fmt_brl):
+        linhas.append(texto_roi_outra_etapa(leilao, fmt_brl))
     if leilao.get("valor_avaliacao"):
         linhas.append(f"Valor de avaliação CAIXA (informativo): {fmt_brl(leilao['valor_avaliacao'])}")
+    if texto_comissao(leilao):
+        linhas.append(texto_comissao(leilao))
+    if leilao.get("aviso_direito_preferencia"):
+        linhas.append(leilao["aviso_direito_preferencia"])
+    for rotulo, campo in (("Número do imóvel", "numero_imovel"), ("Edital", "edital"), ("Item", "numero_item"),
+                          ("Leiloeiro(a)", "leiloeiro"), ("Matrícula", "matricula"),
+                          ("Averbação dos leilões negativos", "averbacao_leiloes_negativos")):
+        if leilao.get(campo):
+            linhas.append(f"{rotulo}: {leilao[campo]}")
     return linhas

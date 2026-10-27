@@ -94,7 +94,7 @@ def test_preco_invalido_aparece_como_erro_na_tela():
     preco = next(w for w in at.sidebar.text_input if w.label.startswith("Preço"))
     assert preco.placeholder == "Ex.: 1.200.000"
     preco.input("1.2.3")
-    at.sidebar.button[0].click().run()
+    next(b for b in at.sidebar.button if "Avaliar" in b.label).click().run()
     erros = [w.value for w in at.warning if "Preço inválido" in w.value]
     assert erros and "1.200.000 ou 1.200.000,00" in erros[0], erros
 

@@ -323,6 +323,18 @@ def test_leilao_sfi_com_as_duas_etapas():
     assert imovel["edital"] == "0052/0226 - CPA/RE" and imovel["gravame"] is False
 
 
+
+def test_execucao_grava_o_valor_e_a_data_da_etapa_avaliada():
+    from datetime import date, datetime
+    from services.leilao import avaliar_imovel_leilao
+    entrada = {"modalidade": "Leilão SFI", "numero_imovel": "855552271653-1",
+               "valor_minimo_1": 224000.00, "data_1_leilao": datetime(2026, 11, 30, 10, 0),
+               "valor_minimo_2": 296523.50, "data_2_leilao": datetime(2026, 12, 4, 10, 0)}
+    leilao = avaliar_imovel_leilao(_ag5(), entrada, agora=datetime(2026, 12, 1, 9, 0))
+    e, _ = _registro(leilao_entrada=entrada, leilao=leilao)
+    assert e["etapa_avaliada"] == 2 and e["valor_minimo"] == 296523.50
+    assert e["data_leilao"] == date(2026, 12, 4) and e["decisao"] == leilao["decisao"]
+
 def test_sem_codigo_ou_modalidade_antiga_nao_grava_o_imovel():
     for entrada in ({"modalidade": "Venda Online"}, {"modalidade": "Outra", "codigo_caixa": "123"},
                     {"modalidade": None, "codigo_caixa": "123"}, None):
