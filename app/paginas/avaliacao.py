@@ -32,7 +32,7 @@ from services.leilao import (
     campos_da_modalidade, ler_formulario_leilao, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
     MODALIDADE_LICITACAO, MODALIDADE_SFI, MODALIDADE_VENDA_ONLINE, TEXTO_GRAVAME, texto_cabecalho,
     texto_comissao, texto_gravame, texto_roi_outra_etapa, html_decisao, texto_conta_linha,
-    CORES_DECISAO, ROI_OPORTUNIDADE, faixas_de_lance,
+    CORES_DECISAO, faixas_de_lance, lance_em_destaque,
 )
 from services.caixa_pagina import ler_pagina_caixa, valores_para_formulario
 from app.cronometro import mostrar_cronometro
@@ -195,8 +195,12 @@ def mostrar_avaliacao_leilao(leilao):
         with col2:
             st.metric(rotulo_minimo, fmt_brl(leilao["valor_minimo"]))
         with col3:
-            st.metric(f"Lance máximo (ROI {texto_percentual(ROI_OPORTUNIDADE, 0)})", fmt_brl(leilao["lance_maximo"]),
-                      help="Maior lance que ainda dá ROI de 30% (Oportunidade). Quanto maior o lance, menor o ROI.")
+            # Oportunidade: lance de 30%; Margem apertada: de 15% (o de 30% fica abaixo do
+            # minimo); Descartar: nenhum lance da 15%.
+            rotulo_lance, lance = lance_em_destaque(leilao)
+            st.metric(rotulo_lance, fmt_brl(lance) if lance is not None else "—",
+                      help="Maior lance que ainda dá o ROI indicado. Quanto maior o lance, menor o ROI. "
+                           "Veja as faixas em \"Quanto dar de lance\".")
         # A conta numa linha, logo abaixo do ROI ($ escapado: no markdown vira formula).
         st.caption(texto_conta_linha(leilao["conta"]).replace("R$", "R\\$"))
         st.markdown(f"**{texto_lance_maximo(leilao, fmt_brl)}**")

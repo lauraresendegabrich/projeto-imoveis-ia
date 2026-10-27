@@ -148,7 +148,8 @@ def test_cartao_sfi_no_2o_leilao():
     assert any("antigo dono pode recomprar" in c for c in captions)
     assert any("Edital: 0052/0226 - CPA/RE" in c for c in captions)
     assert any(m.label == "Valor mínimo (2º leilão)" for m in at.metric)
-    assert any(m.label == "Lance máximo (ROI 30%)" for m in at.metric)
+    # No 2o leilao (R$ 296.523,50) da Descartar: nenhum lance serve, o destaque e "—".
+    assert any(m.label == "Lance máximo" and m.value == "—" for m in at.metric)
     tabela = next(m.value for m in at.markdown if m.value.startswith("| Lance"))
     assert "30% ou mais" in tabela and "← o valor mínimo está aqui" in tabela
     assert any(c.startswith("Compra R\\$ 296.523,50 + custos 33% → R\\$ 394.376,26") for c in captions), captions

@@ -641,28 +641,56 @@ def _minimo(leilao: dict):
     return leilao.get("valor_minimo") or leilao.get("valor_minimo_atual")
 
 
+def lance_em_destaque(leilao: dict) -> tuple[str, float | None]:
+    """
+    O lance que faz sentido destacar, conforme a resposta (o lance nunca pode ser
+    menor que o minimo):
+      Oportunidade    -> ('Lance máximo (ROI 30%)', lance de 30%)
+      Margem apertada -> ('Lance máximo (ROI 15%)', lance de 15%): o de 30% ja fica
+                         abaixo do minimo
+      Descartar       -> ('Lance máximo', None): nenhum lance da 15%
+    """
+    if leilao.get("decisao") == DECISAO_OPORTUNIDADE:
+        return f"Lance máximo (ROI {texto_percentual(ROI_OPORTUNIDADE, 0)})", leilao["lance_maximo"]
+    if leilao.get("decisao") == DECISAO_MARGEM_APERTADA:
+        return f"Lance máximo (ROI {texto_percentual(ROI_MARGEM_APERTADA, 0)})", leilao["lance_limite_descarte"]
+    return "Lance máximo", None
+
+
 def texto_lance_maximo(leilao: dict, fmt_brl) -> str:
     """
-    Lance com ROI de 30%. Oportunidade: 'Lance até R$ X para continuar Oportunidade'.
-    Nas outras respostas o lance de 30% fica abaixo do minimo (nao da para "continuar"):
-    'Para ser Oportunidade, o lance teria de ser até R$ X, abaixo do mínimo de R$ M'.
+    Frase em destaque do lance, conforme a resposta:
+      Oportunidade    -> 'Lance até R$ X para continuar Oportunidade' (ROI de 30%)
+      Margem apertada -> 'Lance até R$ Y para não descartar (ROI de 15%)'
+      Descartar       -> 'Mesmo pagando o mínimo, o ROI fica abaixo de 15%: descartar'
     """
-    lance = fmt_brl(leilao["lance_maximo"])
-    if leilao.get("decisao") == DECISAO_OPORTUNIDADE:
-        return f"Lance até {lance} para continuar {DECISAO_OPORTUNIDADE}"
-    return f"Para ser {DECISAO_OPORTUNIDADE}, o lance teria de ser até {lance}, abaixo do mínimo de {fmt_brl(_minimo(leilao))}"
+    decisao = leilao.get("decisao")
+    if decisao == DECISAO_OPORTUNIDADE:
+        return f"Lance até {fmt_brl(leilao['lance_maximo'])} para continuar {DECISAO_OPORTUNIDADE}"
+    if decisao == DECISAO_MARGEM_APERTADA:
+        return (f"Lance até {fmt_brl(leilao['lance_limite_descarte'])} para não descartar "
+                f"(ROI de {texto_percentual(ROI_MARGEM_APERTADA, 0)})")
+    return f"Mesmo pagando o mínimo, o ROI fica abaixo de {texto_percentual(ROI_MARGEM_APERTADA, 0)}: descartar"
 
 
 def texto_lance_descarte(leilao: dict, fmt_brl) -> str:
     """
-    Lance com ROI de 15%: 'Acima de R$ Y, descartar'. Ja descartado (o minimo passa
-    desse limite): 'Mesmo pagando o mínimo, o ROI fica abaixo de 15% (o limite seria R$ Y)'.
+    Linha menor, conforme a resposta:
+      Oportunidade    -> 'Acima de R$ Y, descartar' (ROI de 15%)
+      Margem apertada -> 'Oportunidade (ROI 30%) só com lance até R$ X, abaixo do
+                         mínimo de R$ M: não dá nesta etapa'
+      Descartar       -> 'Para ROI de 15%, o lance teria de ser até R$ Y, abaixo do
+                         mínimo de R$ M'
     """
-    limite = fmt_brl(leilao["lance_limite_descarte"])
-    if leilao.get("decisao") == DECISAO_DESCARTAR:
-        return (f"Mesmo pagando o mínimo, o ROI fica abaixo de {texto_percentual(ROI_MARGEM_APERTADA, 0)} "
-                f"(o limite seria {limite})")
-    return f"Acima de {limite}, descartar"
+    decisao = leilao.get("decisao")
+    minimo = fmt_brl(_minimo(leilao))
+    if decisao == DECISAO_OPORTUNIDADE:
+        return f"Acima de {fmt_brl(leilao['lance_limite_descarte'])}, descartar"
+    if decisao == DECISAO_MARGEM_APERTADA:
+        return (f"{DECISAO_OPORTUNIDADE} (ROI {texto_percentual(ROI_OPORTUNIDADE, 0)}) só com lance até "
+                f"{fmt_brl(leilao['lance_maximo'])}, abaixo do mínimo de {minimo}: não dá nesta etapa")
+    return (f"Para ROI de {texto_percentual(ROI_MARGEM_APERTADA, 0)}, o lance teria de ser até "
+            f"{fmt_brl(leilao['lance_limite_descarte'])}, abaixo do mínimo de {minimo}")
 
 
 def texto_cabecalho(leilao: dict) -> str:
