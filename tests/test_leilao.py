@@ -60,6 +60,27 @@ def test_ir_nao_fica_negativo_no_prejuizo():
     assert c["ir"] == 0 and c["resultado"] < 0 and c["roi"] < 0
 
 
+def test_lances_do_exemplo_do_professor():
+    assert round(lance_para_roi(1100000, ROI_OPORTUNIDADE)) == 575351
+    assert round(lance_para_roi(1100000, ROI_MARGEM_APERTADA)) == 661654
+    # Mesma formula do documento: 0,80 x venda / (1,33 x (ROI_alvo + 0,85)).
+    for alvo in (ROI_OPORTUNIDADE, ROI_MARGEM_APERTADA):
+        assert abs(lance_para_roi(1100000, alvo) - 0.80 * 1100000 / (1.33 * (alvo + 0.85))) < 1e-6
+
+
+def test_venda_menor_que_custos_descarta():
+    # Venda (liquidez) R$ 300.000 abaixo dos custos antes da venda (R$ 500.000 x 1,33).
+    r = avaliar_leilao(ag5(liquidez=300000), 500000)
+    assert r["conta"]["ir"] == 0 and r["roi"] < 0 and r["decisao"] == "Descartar", r
+
+
+def test_conta_numa_linha():
+    from services.leilao import texto_conta_linha
+    assert texto_conta_linha(conta_investimento(425000, 1100000)) == (
+        "Compra R$ 425.000 + custos 33% → R$ 565.250 · venda R$ 1.100.000 − corretagem 5% − IR 15% "
+        "→ resultado R$ 399.537,50")
+
+
 def test_casa_curitiba_em_analise():
     r = avaliar_leilao(ag5(liquidez=644432), 323158)
     assert r["decisao"] == "Oportunidade", r

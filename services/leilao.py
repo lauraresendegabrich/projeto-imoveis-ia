@@ -593,6 +593,25 @@ def avaliar_imovel_leilao(resultado_ag5: dict | None, leilao: dict, agora: datet
     return avaliacao
 
 
+def _reais_txt(valor: float) -> str:
+    """425000 -> 'R$ 425.000'; 399537.5 -> 'R$ 399.537,50' (centavos so quando ha)."""
+    casas = 0 if round(valor, 2) == round(valor) else 2
+    return "R$ " + f"{valor:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def texto_conta_linha(conta: dict) -> str:
+    """
+    A conta numa linha, abaixo do ROI: 'Compra R$ 425.000 + custos 33% → R$ 565.250 ·
+    venda R$ 1.100.000 − corretagem 5% − IR 15% → resultado R$ 399.537,50'.
+    """
+    return (
+        f"Compra {_reais_txt(conta['arrematacao'])} + custos {texto_percentual(CUSTOS_ANTES_DA_VENDA, 0)} "
+        f"→ {_reais_txt(conta['custos_antes_da_venda'])} · venda {_reais_txt(conta['venda'])} "
+        f"− corretagem {texto_percentual(CORRETAGEM, 0)} − IR {texto_percentual(ALIQUOTA_IR, 0)} "
+        f"→ resultado {_reais_txt(conta['resultado'])}"
+    )
+
+
 def _minimo(leilao: dict):
     """Valor minimo da etapa (no cartao: valor_minimo; na lista de leiloes: valor_minimo_atual)."""
     return leilao.get("valor_minimo") or leilao.get("valor_minimo_atual")

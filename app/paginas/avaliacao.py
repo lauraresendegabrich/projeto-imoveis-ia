@@ -31,7 +31,7 @@ from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_imovel_leilao, contar_status_zona,
     campos_da_modalidade, ler_formulario_leilao, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
     MODALIDADE_LICITACAO, MODALIDADE_SFI, MODALIDADE_VENDA_ONLINE, TEXTO_GRAVAME, texto_cabecalho,
-    texto_comissao, texto_gravame, texto_roi_outra_etapa, html_decisao,
+    texto_comissao, texto_gravame, texto_roi_outra_etapa, html_decisao, texto_conta_linha,
 )
 from services.caixa_pagina import ler_pagina_caixa, valores_para_formulario
 from app.cronometro import mostrar_cronometro
@@ -195,6 +195,8 @@ def mostrar_avaliacao_leilao(leilao):
             st.metric(rotulo_minimo, fmt_brl(leilao["valor_minimo"]))
         with col3:
             st.metric("Lance máximo", fmt_brl(leilao["lance_maximo"]))
+        # A conta numa linha, logo abaixo do ROI ($ escapado: no markdown vira formula).
+        st.caption(texto_conta_linha(leilao["conta"]).replace("R$", "R\\$"))
         st.markdown(f"**{texto_lance_maximo(leilao, fmt_brl)}**")
         st.caption(texto_lance_descarte(leilao, fmt_brl))
         if texto_roi_outra_etapa(leilao, fmt_brl):

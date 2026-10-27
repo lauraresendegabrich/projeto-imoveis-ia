@@ -148,6 +148,7 @@ def test_cartao_sfi_no_2o_leilao():
     assert any("antigo dono pode recomprar" in c for c in captions)
     assert any("Edital: 0052/0226 - CPA/RE" in c for c in captions)
     assert any(m.label == "Valor mínimo (2º leilão)" for m in at.metric)
+    assert any(c.startswith("Compra R\\$ 296.523,50 + custos 33% → R\\$ 394.376,26") for c in captions), captions
     assert at.get("iframe"), "cronometro"
 
 
