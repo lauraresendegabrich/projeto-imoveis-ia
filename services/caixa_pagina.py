@@ -248,26 +248,40 @@ def ler_pagina_caixa(conteudo: str) -> dict:
 
     endereco = _linhas_depois("Endereço:", linhas, ("Baixar", "Descrição:"))
     campos.update(_endereco(endereco[0] if endereco else None))
+    sem_numero = (campos["numero"] or "").upper().replace("/", "") == "SN"
+    if sem_numero:
+        # "N. SN" = sem numero: nao e o numero do imovel.
+        campos["numero"] = None
+        avisos.append("Endereço sem número na CAIXA (S/N): o número fica vazio.")
     descricao = _linhas_depois("Descrição:", linhas, ("FORMAS DE PAGAMENTO", "REGRAS PARA PAGAMENTO"))
     campos["descricao"] = " ".join(descricao).strip(" .") or None
 
     formas = _linhas_depois("FORMAS DE PAGAMENTO ACEITAS:", linhas, ("REGRAS PARA PAGAMENTO",))
     campos["formas_pagamento_texto"] = formas or None
     campos["formas_pagamento"] = _formas_pagamento(formas) or None
+    # Aviso de gravame/penhora: a CAIXA so mostra quando existe, no meio do bloco das
+    # despesas e em duas linhas ("Imovel com gravame..." e "Regularizacao por conta do
+    # adquirente."). Sai das regras de despesas e vira o aviso inteiro.
+    i_gravame = next((i for i, l in enumerate(linhas) if re.search(r"gravame|penhora|indisponibilidade", l, re.I)),
+                     None)
+    linhas_gravame = []
+    if i_gravame is not None:
+        linhas_gravame = [linhas[i_gravame]]
+        if i_gravame + 1 < len(linhas) and re.match(r"Regulariza[cç][aã]o", linhas[i_gravame + 1], re.I):
+            linhas_gravame.append(linhas[i_gravame + 1])
+    campos["gravame"] = bool(linhas_gravame)
+    campos["gravame_texto"] = " ".join(linhas_gravame) or None
+
     regras = _linhas_depois("REGRAS PARA PAGAMENTO DAS DESPESAS", linhas,
                             ("Corretores credenciados", "Regras da Venda Online", "Baixar edital", "Galeria"))
-    campos["regras_despesas"] = "\n".join(regras) or None
-
-    # Aviso de gravame/penhora: a CAIXA so mostra quando existe.
-    gravame = next((l for l in linhas if re.search(r"gravame|penhora|indisponibilidade", l, re.I)), None)
-    campos["gravame"] = gravame is not None
-    campos["gravame_texto"] = gravame
+    campos["regras_despesas"] = "\n".join(l for l in regras if l not in linhas_gravame) or None
 
     link = _achar(r"saved from url=\(\d+\)(https?://\S+?)\s*-->", conteudo)
     campos["link"] = link
 
     esperados = CAMPOS_GERAIS + CAMPOS_POR_MODALIDADE.get(campos["modalidade"], ())
-    nao_encontrados = [NOMES_CAMPOS[c] for c in esperados if campos.get(c) in (None, "", [])]
+    nao_encontrados = [NOMES_CAMPOS[c] for c in esperados
+                       if campos.get(c) in (None, "", []) and not (c == "numero" and sem_numero)]
     return {"ok": True, "erro": None, "campos": campos, "nao_encontrados": nao_encontrados, "avisos": avisos}
 
 

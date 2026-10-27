@@ -114,13 +114,34 @@ def test_texto_colado_da_venda_online_em_andamento_avisa_a_data():
     assert "Data de encerramento" in r["nao_encontrados"]
 
 
-def test_gravame_vira_sim_com_o_texto():
-    aviso = ("Imóvel com gravame/penhora/indisponibilidade averbada na matrícula. "
-             "Regularização por conta do adquirente")
-    html = pagina("licitacao_aberta").replace("<p>FORMAS DE PAGAMENTO ACEITAS:", f"<p>{aviso}</p><p>FORMAS DE PAGAMENTO ACEITAS:")
-    c = ler_pagina_caixa(html)["campos"]
-    assert c["gravame"] is True and c["gravame_texto"] == aviso
-    assert ler("licitacao_aberta")["campos"]["gravame"] is False
+def test_venda_online_em_andamento_com_gravame_pagina_real():
+    r = ler("venda_online_gravame")
+    c = r["campos"]
+    assert c["modalidade"] == "Venda Online" and c["valor_minimo"] == 177348.56
+    # Em andamento: a data so esta no script do cronometro ("28/10/2026 18:00:00").
+    assert c["data_encerramento"] == datetime(2026, 10, 28, 18, 0)
+    # O aviso tem duas linhas no site e fica no meio das regras de despesas.
+    assert c["gravame"] is True
+    assert c["gravame_texto"] == ("Imóvel com gravame/penhora/indisponibilidade averbada na matrícula. "
+                                  "Regularização por conta do adquirente.")
+    assert "gravame" not in c["regras_despesas"] and "Regularização" not in c["regras_despesas"]
+    assert c["regras_despesas"].startswith("Condomínio:") and c["regras_despesas"].count("\n") == 1
+    assert c["formas_pagamento"] == ["Recursos próprios (à vista)"]   # "Exclusivamente à vista"
+    assert (c["tipo"], c["area_privativa"], c["area_terreno"]) == ("Casa", 98.95, 300.00)
+
+
+def test_endereco_sem_numero_nao_vira_numero():
+    r = ler("venda_online_gravame")
+    c = r["campos"]
+    assert (c["rua"], c["numero"], c["complemento"]) == ("RUA EMA", None, "LT 11 QD 38A")
+    assert "Endereço sem número na CAIXA (S/N): o número fica vazio." in r["avisos"]
+    assert "Número" not in r["nao_encontrados"]
+
+
+def test_sem_aviso_de_gravame_fica_nao():
+    for nome in ("leilao_sfi", "licitacao_aberta", "venda_online", "compra_direta"):
+        c = ler(nome)["campos"]
+        assert c["gravame"] is False and c["gravame_texto"] is None, nome
 
 
 def test_pagina_errada_ou_captcha():
