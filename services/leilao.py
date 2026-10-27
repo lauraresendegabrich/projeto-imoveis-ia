@@ -100,6 +100,22 @@ DECISAO_MARGEM_APERTADA = "Margem apertada"
 DECISAO_DESCARTAR = "Descartar"
 DECISAO_SEM_ESTIMATIVA = "Sem estimativa"
 
+# Cor de cada resposta (fundo, texto, icone): fundo e texto explicitos, legiveis com o
+# tema claro ou escuro do Streamlit. Cartao do resultado e pagina de leiloes ativos.
+CORES_DECISAO = {
+    DECISAO_OPORTUNIDADE: ("#e3f4e8", "#1b6b34", "✅"),
+    DECISAO_MARGEM_APERTADA: ("#fdf3d7", "#7a5a00", "🟡"),
+    DECISAO_DESCARTAR: ("#fbe4e2", "#a3261c", "❌"),
+    DECISAO_SEM_ESTIMATIVA: ("#ececec", "#4a4a4a", "⚪"),
+}
+
+
+def html_decisao(decisao: str, tamanho: str = "1.35rem") -> str:
+    """Faixa colorida com a resposta (4 cores)."""
+    fundo, texto, icone = CORES_DECISAO.get(decisao, CORES_DECISAO[DECISAO_SEM_ESTIMATIVA])
+    return (f'<div style="background:{fundo};color:{texto};padding:10px 16px;border-radius:8px;'
+            f'font-size:{tamanho};font-weight:700;">{icone} {decisao}</div>')
+
 
 def conta_investimento(arrematacao: float, venda: float) -> dict:
     """A conta do professor, linha a linha (tela, laudo e testes usam a mesma)."""

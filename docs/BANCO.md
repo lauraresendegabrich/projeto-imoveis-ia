@@ -214,7 +214,7 @@ ORDER BY falhas DESC;
 
 Rodar `db/migracoes/005_imoveis_leilao.sql` no SQL Editor do Neon **antes** de colocar
 no ar o código que grava a tabela e as colunas novas (sem elas, a gravação falha e as
-avaliações deixam de ser registradas; o app continua funcionando). **Ainda não rodada.**
+avaliações deixam de ser registradas; o app continua funcionando). **Rodada no Neon** (conferido em 26/10/2026).
 
 - **`imoveis_leilao`**: uma linha por imóvel (banco + código). O código é o número do
   imóvel só com os dígitos e sem zeros à esquerda (`855552271653-1` e o link
@@ -233,6 +233,10 @@ avaliações deixam de ser registradas; o app continua funcionando). **Ainda nã
   leilão, que já passou): o ROI gravado não vale para o valor mínimo atual.
 - **`vw_leiloes_ativos`**: só os ativos, do encerramento mais próximo ao mais distante
   (Compra Direta, sem data, no fim).
+- **Na interface**: página "Leilões ativos" (`app/pages/1_Leilões_ativos.py`), com
+  cronômetro, filtros (resposta, modalidade, UF) e a mudança da situação. Quando a etapa
+  mudou desde a avaliação, a resposta é refeita com o valor mínimo da etapa atual e a
+  mesma liquidez (`services/leiloes_ativos.py`).
 
 ```sql
 -- Leilões ativos com a última avaliação

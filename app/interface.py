@@ -29,7 +29,7 @@ from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_imovel_leilao, contar_status_zona,
     campos_da_modalidade, ler_formulario_leilao, ler_valor_reais, texto_aviso_lancamento, texto_aviso_raio, texto_aviso_zona,
     MODALIDADE_LICITACAO, MODALIDADE_SFI, MODALIDADE_VENDA_ONLINE, TEXTO_GRAVAME, texto_cabecalho,
-    texto_comissao, texto_gravame, texto_roi_outra_etapa,
+    texto_comissao, texto_gravame, texto_roi_outra_etapa, html_decisao,
 )
 from services.caixa_pagina import ler_pagina_caixa, valores_para_formulario
 from app.cronometro import mostrar_cronometro
@@ -172,26 +172,13 @@ def mostrar_avaliacao_leilao(leilao):
     import pandas as pd
     if not leilao:
         return
-    decisao = leilao["decisao"]
-    # Fundo e texto explicitos: legiveis com o tema claro ou escuro do Streamlit.
-    cores = {
-        "Oportunidade": ("#e3f4e8", "#1b6b34", "✅"),
-        "Margem apertada": ("#fdf3d7", "#7a5a00", "🟡"),
-        "Descartar": ("#fbe4e2", "#a3261c", "❌"),
-        "Sem estimativa": ("#ececec", "#4a4a4a", "⚪"),
-    }
-    fundo, texto, icone = cores.get(decisao, cores["Sem estimativa"])
     st.markdown("#### 🔨 Avaliação de leilão")
     if leilao.get("modalidade"):
         st.markdown(f"**{texto_cabecalho(leilao)}**")
         mostrar_cronometro(leilao)
     if texto_gravame(leilao):
         st.error(f"⚠️ {texto_gravame(leilao)}")
-    st.markdown(
-        f'<div style="background:{fundo};color:{texto};padding:12px 18px;border-radius:8px;'
-        f'font-size:1.35rem;font-weight:700;">{icone} {decisao}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(html_decisao(leilao["decisao"]), unsafe_allow_html=True)
     if leilao.get("alvo_sem_localizacao"):
         st.warning(
             "⚠️ Endereço não localizado no mapa com precisão de rua ou bairro: a distância "
