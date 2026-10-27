@@ -59,14 +59,18 @@ def marcar_situacao(database_url: str, id_imovel: int, situacao: str) -> bool:
 def preparar_linha(linha: dict) -> dict:
     """
     Linha da view -> o que a pagina mostra: resposta, ROI e lances no valor minimo da
-    etapa ATUAL. Sem avaliacao (ou sem liquidez: Agente 5 sem valor confiavel) a
-    resposta e a gravada ("Sem estimativa") ou nenhuma.
+    etapa ATUAL. Sem estimativa confiavel na avaliacao (sem lance maximo gravado), a
+    resposta e a gravada ("Sem estimativa"); sem avaliacao, nenhuma.
     `recalculado` = a etapa mudou desde a avaliacao e a conta foi refeita.
     """
     saida = dict(linha)
     liquidez, minimo = linha.get("liquidez"), linha.get("valor_minimo_atual")
-    saida["recalculado"] = bool(linha.get("etapa_mudou"))
-    if liquidez and minimo:
+    # So refaz a conta quando a avaliacao teve estimativa confiavel (lance maximo
+    # gravado). Com "Sem estimativa" o Agente 5 ainda grava uma liquidez, mas ela nao
+    # vale para decidir (ex.: so 3 comparaveis, minimo de 5).
+    confiavel = linha.get("lance_maximo") is not None
+    saida["recalculado"] = bool(linha.get("etapa_mudou")) and confiavel
+    if confiavel and liquidez and minimo:
         conta = conta_investimento(minimo, liquidez)
         saida.update({
             "roi": conta["roi"],

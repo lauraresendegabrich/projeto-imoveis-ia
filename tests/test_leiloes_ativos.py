@@ -62,6 +62,17 @@ def test_sem_liquidez_fica_sem_estimativa_e_sem_avaliacao_fica_vazio():
     assert l["decisao"] is None
 
 
+def test_sem_estimativa_continua_sem_estimativa_mesmo_com_liquidez_gravada():
+    # Caso real (nº 878772092180-9, Maceio): so 3 comparaveis (minimo de 5), "Sem
+    # estimativa". O Agente 5 grava a liquidez (R$ 157.396,26) mesmo assim; a pagina
+    # nao pode refazer a conta com ela (dava ROI de 4,75% e "Descartar").
+    l = leiloes_ativos.preparar_linha(linha(
+        modalidade="Licitação Aberta", etapa_atual=None, valor_minimo_atual=105481.84, liquidez=157396.26,
+        decisao="Sem estimativa", roi=None, lance_maximo=None, lance_limite_descarte=None, etapa_avaliada=None))
+    assert l["decisao"] == "Sem estimativa" and l["roi"] is None and l["lance_maximo"] is None
+    assert not l["recalculado"]
+
+
 def test_filtros():
     linhas = [leiloes_ativos.preparar_linha(l) for l in (
         linha(id=1), linha(id=2, modalidade="Venda Online", uf="SP", valor_minimo_atual=400000.0),
