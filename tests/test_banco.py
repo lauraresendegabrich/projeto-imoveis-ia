@@ -157,7 +157,7 @@ def test_excel_resumo_campo_valor():
     assert resumo["Decisão"] == "Oportunidade" and round(resumo["ROI pagando o valor mínimo"], 4) == 0.3495
     assert round(resumo["Lance máximo (ROI de 30%)"]) == 337068
     assert round(resumo["Sobra até o lance máximo (negativo = falta)"]) == 13910
-    assert resumo["Valor mínimo CAIXA"] == 323158 and resumo["Valor de liquidez (−10%)"] == 644432.4
+    assert resumo["Valor mínimo da etapa avaliada"] == 323158 and resumo["Valor de liquidez (−10%)"] == 644432.4
     assert resumo["Cidade"] == "Curitiba" and resumo["Estimativa confiável"] == "Sim"
     assert resumo["Identificador da avaliação"] == "abc123"
     celula_lance = next(l[1] for l in livro["Resumo"].iter_rows() if l[0].value == "Lance máximo (ROI de 30%)")
@@ -334,6 +334,38 @@ def test_execucao_grava_o_valor_e_a_data_da_etapa_avaliada():
     e, _ = _registro(leilao_entrada=entrada, leilao=leilao)
     assert e["etapa_avaliada"] == 2 and e["valor_minimo"] == 296523.50
     assert e["data_leilao"] == date(2026, 12, 4) and e["decisao"] == leilao["decisao"]
+
+
+def test_excel_traz_as_etapas_o_roi_de_cada_uma_e_o_gravame():
+    import io
+    from datetime import datetime
+    from openpyxl import load_workbook
+    from services.leilao import avaliar_imovel_leilao
+    from services.registro_execucao import excel_resultado
+    entrada = {"modalidade": "Leilão SFI", "numero_imovel": "855552271653-1",
+               "valor_minimo_1": 224000.00, "data_1_leilao": datetime(2026, 11, 30, 10, 0),
+               "valor_minimo_2": 296523.50, "data_2_leilao": datetime(2026, 12, 4, 10, 0),
+               "edital": "0052/0226 - CPA/RE", "leiloeiro": "JONAS", "gravame": True,
+               "gravame_texto": "Imóvel com gravame. Regularização por conta do adquirente."}
+    leilao = avaliar_imovel_leilao(_ag5(), entrada, agora=datetime(2026, 12, 1, 9, 0))
+    e, comps = _registro(leilao_entrada=entrada, leilao=leilao)
+    livro = load_workbook(io.BytesIO(excel_resultado(e, comps)))
+    resumo = {linha[0]: linha[1] for linha in livro["Resumo"].iter_rows(values_only=True)}
+    assert resumo["Etapa avaliada"] == "2º leilão" and resumo["Banco"] == "CAIXA"
+    assert resumo["Valor mínimo do 1º leilão"] == 224000 and resumo["Valor mínimo do 2º leilão"] == 296523.5
+    assert resumo["Data e hora do 2º leilão"] == datetime(2026, 12, 4, 10, 0)
+    assert resumo["ROI no 1º leilão"] > resumo["ROI no 2º leilão"] == resumo["ROI pagando o valor mínimo"]
+    assert resumo["Gravame/penhora na matrícula"] == "Sim: Imóvel com gravame. Regularização por conta do adquirente."
+    assert resumo["Edital"] == "0052/0226 - CPA/RE" and resumo["Leiloeiro(a)"] == "JONAS"
+    assert "Encerramento" not in resumo   # so Licitacao e Venda Online
+
+
+def test_excel_sem_leilao_sfi_nao_mostra_linhas_vazias():
+    livro, _ = _abrir_excel()   # Venda Online, sem etapas nem edital
+    rotulos = [linha[0] for linha in livro["Resumo"].iter_rows(values_only=True)]
+    for ausente in ("Etapa avaliada", "Valor mínimo do 1º leilão", "ROI no 2º leilão", "Edital", "Leiloeiro(a)"):
+        assert ausente not in rotulos, ausente
+    assert "Modalidade" in rotulos and "Banco" in rotulos
 
 def test_sem_codigo_ou_modalidade_antiga_nao_grava_o_imovel():
     for entrada in ({"modalidade": "Venda Online"}, {"modalidade": "Outra", "codigo_caixa": "123"},

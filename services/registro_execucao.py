@@ -15,7 +15,7 @@ from services.alertas import calcular_alertas
 from services.leilao import texto_aviso_lancamento, texto_aviso_raio
 from services.leilao import (
     ALIQUOTA_IR, CORRETAGEM, CUSTOS_ANTES_DA_VENDA, MODALIDADE_SFI, MODALIDADES_CAIXA, ORIGEM_CAIXA,
-    ROI_OPORTUNIDADE, ROI_MARGEM_APERTADA, como_datahora, conta_investimento,
+    ROI_OPORTUNIDADE, ROI_MARGEM_APERTADA, TEXTO_GRAVAME, como_datahora, conta_investimento,
 )
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -368,6 +368,7 @@ FORMATO_AREA = '#,##0.00 "m²"'
 FORMATO_INTEIRO = "#,##0"
 FORMATO_DATA = "DD/MM/YYYY"
 FORMATO_PERCENTUAL = "0.00%"
+FORMATO_DATA_HORA = "DD/MM/YYYY HH:MM"
 
 ROTULOS_LOCALIZACAO = {
     "endereco_completo": "Endereço completo",
@@ -404,19 +405,35 @@ LINHAS_RESUMO = (
     ("Tempo estimado de venda", "tempo_venda", None),
     ("Tempo de venda sem infraestrutura", "_aviso_infraestrutura", None),
     ("Estimativa confiável", "_confiavel", None),
-    ("Leilão CAIXA", None, None),
+    ("Leilão", None, None),
     ("Decisão", "decisao", None),
     ("ROI pagando o valor mínimo", "_roi", FORMATO_PERCENTUAL),
-    ("Valor mínimo CAIXA", "valor_minimo", FORMATO_REAIS),
+    ("Valor mínimo da etapa avaliada", "valor_minimo", FORMATO_REAIS),
     ("Lance máximo (ROI de 30%)", "lance_maximo", FORMATO_REAIS),
     ("Sobra até o lance máximo (negativo = falta)", "sobra", FORMATO_REAIS),
-    ("Valor de avaliação CAIXA (informativo)", "valor_avaliacao", FORMATO_REAIS),
+    ("Lance acima do qual descarta (ROI de 15%)", "lance_limite_descarte", FORMATO_REAIS),
+    ("Valor de avaliação (informativo)", "valor_avaliacao", FORMATO_REAIS),
+    ("Banco", "origem", None),
     ("Modalidade", "modalidade", None),
+    ("Etapa avaliada", "_etapa", None),
     ("Data do leilão", "data_leilao", FORMATO_DATA),
+    ("Data e hora do 1º leilão", "_data_1_leilao", FORMATO_DATA_HORA),
+    ("Valor mínimo do 1º leilão", "_valor_minimo_1", FORMATO_REAIS),
+    ("ROI no 1º leilão", "_roi_1", FORMATO_PERCENTUAL),
+    ("Data e hora do 2º leilão", "_data_2_leilao", FORMATO_DATA_HORA),
+    ("Valor mínimo do 2º leilão", "_valor_minimo_2", FORMATO_REAIS),
+    ("ROI no 2º leilão", "_roi_2", FORMATO_PERCENTUAL),
+    ("Encerramento", "_data_encerramento", FORMATO_DATA_HORA),
+    ("Gravame/penhora na matrícula", "_gravame", None),
+    ("Edital", "_edital", None),
+    ("Número do item", "_numero_item", None),
+    ("Leiloeiro(a)", "_leiloeiro", None),
+    ("Matrícula", "_matricula", None),
+    ("Averbação dos leilões negativos", "_averbacao_leiloes_negativos", None),
     ("Formas de pagamento", "_formas_pagamento", None),
     ("Regras de despesas", "regras_despesas", None),
-    ("Código do imóvel na CAIXA", "codigo_caixa", None),
-    ("Link do imóvel na CAIXA", "link", None),
+    ("Número do imóvel", "codigo_caixa", None),
+    ("Link do imóvel", "link", None),
     ("Como chegamos ao valor", None, None),
     ("Localização do imóvel no mapa", "_localizacao_alvo", None),
     ("Onde os anúncios foram buscados", "_escopo_busca", None),
@@ -464,6 +481,45 @@ ROTULOS_STATUS_ZONA = {
 }
 
 
+# Linhas do leilao que so valem para algumas modalidades: vazias, nao aparecem.
+LINHAS_SO_SE_PREENCHIDAS = {
+    "_etapa", "_data_1_leilao", "_valor_minimo_1", "_roi_1", "_data_2_leilao", "_valor_minimo_2", "_roi_2",
+    "_data_encerramento", "_gravame", "_edital", "_numero_item", "_leiloeiro", "_matricula",
+    "_averbacao_leiloes_negativos", "lance_limite_descarte",
+}
+
+
+def _valores_imovel_leilao(execucao: dict) -> dict:
+    """
+    Linhas do leilao no Resumo a partir do imovel gravado (_imovel_leilao): etapa,
+    1o/2o leilao com o ROI de cada um (mesma conta do leilao, com a liquidez desta
+    avaliacao), encerramento, gravame e os dados da pagina da CAIXA.
+    """
+    imovel = execucao.get("_imovel_leilao") or {}
+    liquidez = execucao.get("liquidez")
+    confiavel = execucao.get("lance_maximo") is not None and liquidez
+
+    def roi(valor):
+        return conta_investimento(valor, liquidez)["roi"] if confiavel and valor else None
+
+    gravame = imovel.get("gravame")
+    valores = {
+        "_etapa": f"{execucao['etapa_avaliada']}º leilão" if execucao.get("etapa_avaliada") else None,
+        "_data_1_leilao": imovel.get("data_1_leilao"),
+        "_valor_minimo_1": imovel.get("valor_minimo_1"),
+        "_roi_1": roi(imovel.get("valor_minimo_1")),
+        "_data_2_leilao": imovel.get("data_2_leilao"),
+        "_valor_minimo_2": imovel.get("valor_minimo_2"),
+        "_roi_2": roi(imovel.get("valor_minimo_2")),
+        "_data_encerramento": imovel.get("data_encerramento"),
+        "_gravame": (f"Sim: {imovel.get('gravame_texto') or TEXTO_GRAVAME}" if gravame
+                     else "Não" if gravame is False else None),
+    }
+    for campo in ("edital", "numero_item", "leiloeiro", "matricula", "averbacao_leiloes_negativos"):
+        valores[f"_{campo}"] = imovel.get(campo)
+    return valores
+
+
 def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] | None = None) -> bytes:
     """
     Arquivo .xlsx com as abas Resumo, Alertas e Comparaveis (e Funil, quando o funil
@@ -496,6 +552,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
         else None
     )
     valores["_formas_pagamento"] = ", ".join(execucao.get("formas_pagamento") or []) or None
+    valores.update(_valores_imovel_leilao(execucao))
     parametros = execucao.get("parametros") or {}
     valores["_raio_ia"] = parametros.get("raio_ia_m", execucao.get("raio_zona_m"))
     valores["_raio_terrenos"] = parametros.get("raio_final_terrenos_m", execucao.get("raio_zona_m"))
@@ -508,6 +565,8 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
     escopo = execucao.get("escopo_busca")
     valores["_escopo_busca"] = ROTULOS_ESCOPO_BUSCA.get(escopo, escopo)
     for rotulo, chave, formato in LINHAS_RESUMO:
+        if chave in LINHAS_SO_SE_PREENCHIDAS and valores.get(chave) is None:
+            continue
         if chave is None:
             resumo.append([rotulo, None])
             for celula in resumo[resumo.max_row]:
@@ -518,7 +577,7 @@ def excel_resultado(execucao: dict, comparaveis: list[dict], funil: list[dict] |
         celula = resumo.cell(row=resumo.max_row, column=2)
         if formato and isinstance(valor, (int, float, date)):
             celula.number_format = formato
-        if chave in ("regras_despesas", "_aviso_raio", "_aviso_terreno", "_aviso_infraestrutura", "_aviso_lancamento") and valor:
+        if chave in ("regras_despesas", "_gravame", "_aviso_raio", "_aviso_terreno", "_aviso_infraestrutura", "_aviso_lancamento") and valor:
             celula.alignment = Alignment(wrap_text=True, vertical="top")
         if chave == "link" and valor:
             celula.hyperlink, celula.font = valor, link
