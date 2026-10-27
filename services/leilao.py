@@ -520,6 +520,7 @@ def etapa_atual(leilao: dict, agora: datetime) -> dict:
         "etapa": etapa, "valor_minimo": valores[etapa],
         "encerramento": datas[etapa], "encerrado": encerrado,
         "outra_etapa": outra, "valor_minimo_outra_etapa": valores[outra],
+        "data_outra_etapa": datas[outra],
     }
 
 
@@ -584,12 +585,17 @@ def avaliar_imovel_leilao(resultado_ag5: dict | None, leilao: dict, agora: datet
         **{campo: leilao.get(campo) for campo in CAMPOS_INFORMATIVOS},
     })
     avaliacao["banco"] = avaliacao["banco"] or ORIGEM_CAIXA
+    avaliacao["estimativa_2o_leilao"] = None
     if modalidade == MODALIDADE_SFI and etapa["valor_minimo_outra_etapa"] is not None:
         avaliacao["outra_etapa"] = etapa["outra_etapa"]
         avaliacao["valor_minimo_outra_etapa"] = etapa["valor_minimo_outra_etapa"]
         if avaliacao["liquidez"] is not None:
             avaliacao["roi_outra_etapa"] = conta_investimento(
                 etapa["valor_minimo_outra_etapa"], avaliacao["liquidez"])["roi"]
+        # No 1o leilao: a estimativa completa do 2o (se nao vender no 1o).
+        if etapa["etapa"] == 1 and not etapa["encerrado"] and avaliacao["lance_maximo"] is not None:
+            avaliacao["estimativa_2o_leilao"] = estimativa_na_etapa(
+                avaliacao["liquidez"], 2, etapa["valor_minimo_outra_etapa"], etapa["data_outra_etapa"])
     return avaliacao
 
 
@@ -702,11 +708,36 @@ def texto_cabecalho(leilao: dict) -> str:
 
 
 def texto_roi_outra_etapa(leilao: dict, fmt_brl) -> str | None:
-    """'No 1º leilão (mínimo R$ 224.000), o ROI seria 70,68%.' (so Leilao SFI)."""
-    if leilao.get("roi_outra_etapa") is None:
+    """
+    'No 2º leilão (mínimo R$ 200.010), o ROI seria 38,81%: Oportunidade.' (so Leilao
+    SFI, com estimativa confiavel). A resposta usa as mesmas faixas de 15% e 30%.
+    """
+    if leilao.get("roi_outra_etapa") is None or leilao.get("lance_maximo") is None:
         return None
     return (f"No {leilao['outra_etapa']}º leilão (mínimo {fmt_brl(leilao['valor_minimo_outra_etapa'])}), "
-            f"o ROI seria {texto_percentual(leilao['roi_outra_etapa'])}.")
+            f"o ROI seria {texto_percentual(leilao['roi_outra_etapa'])}: "
+            f"{classificar_roi(leilao['roi_outra_etapa'])}.")
+
+
+def estimativa_na_etapa(liquidez: float, etapa: int, valor_minimo: float, data) -> dict:
+    """
+    Resposta, ROI e lances pagando o minimo de uma etapa do Leilao SFI, com a mesma
+    liquidez (ex.: o 2o leilao, quando o imovel ainda esta no 1o). Tem as chaves que
+    texto_lance_maximo / texto_lance_descarte / lance_em_destaque usam.
+    """
+    conta = conta_investimento(valor_minimo, liquidez)
+    return {
+        "etapa": etapa, "data": data, "valor_minimo": valor_minimo, "conta": conta, "roi": conta["roi"],
+        "decisao": classificar_roi(conta["roi"]),
+        "lance_maximo": lance_para_roi(liquidez, ROI_OPORTUNIDADE),
+        "lance_limite_descarte": lance_para_roi(liquidez, ROI_MARGEM_APERTADA),
+    }
+
+
+def titulo_estimativa_2o_leilao(estimativa: dict) -> str:
+    """'E no 2º leilão? (15/12/2026 10:00, se não vender no 1º)'."""
+    data = f"{texto_data_hora(estimativa['data'])}, " if estimativa.get("data") else ""
+    return f"E no 2º leilão? ({data}se não vender no 1º)"
 
 
 def texto_comissao(leilao: dict) -> str | None:

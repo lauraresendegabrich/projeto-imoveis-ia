@@ -163,6 +163,31 @@ def test_cartao_vem_antes_do_valor_estimado():
         i for i, t in enumerate(textos) if isinstance(t, str) and "Como chegamos" in t)
 
 
+def test_cartao_no_1o_leilao_mostra_o_2o():
+    # 1o leilao R$ 220.000 (Margem apertada); 2o R$ 200.010,47 (Oportunidade, 38,81%).
+    ag5 = {**AG5_OK, "avaliacao_planilha": {"valor_liquidez": 411691.05}}
+    sfi = {"modalidade": "Leilão SFI", "valor_minimo_1": 220000.0, "data_1_leilao": datetime(2026, 12, 9, 10),
+           "valor_minimo_2": 200010.47, "data_2_leilao": datetime(2026, 12, 15, 10)}
+    leilao = avaliar_imovel_leilao(ag5, sfi, agora=datetime(2026, 10, 27, 15))
+    assert leilao["decisao"] == "Margem apertada" and leilao["estimativa_2o_leilao"]["decisao"] == "Oportunidade"
+    at = _cartao(leilao)
+    textos = " ".join(m.value for m in at.markdown)
+    assert "**E no 2º leilão? (15/12/2026 10:00, se não vender no 1º)**" in textos
+    assert "ROI pagando o mínimo de R\$ 200.010: **38,81%**" in textos
+    assert "Lance até R\$ 215.334 para continuar Oportunidade" in textos
+    laudo = _laudo(at)
+    assert "No 2º leilão (mínimo R$ 200.010), o ROI seria 38,81%: Oportunidade." in laudo
+
+
+def test_no_2o_leilao_ou_sem_estimativa_nao_tem_o_bloco():
+    ag5 = {**AG5_OK, "avaliacao_planilha": {"valor_liquidez": 411691.05}}
+    sfi = {"modalidade": "Leilão SFI", "valor_minimo_1": 220000.0, "data_1_leilao": datetime(2026, 12, 9, 10),
+           "valor_minimo_2": 200010.47, "data_2_leilao": datetime(2026, 12, 15, 10)}
+    assert avaliar_imovel_leilao(ag5, sfi, agora=datetime(2026, 12, 10))["estimativa_2o_leilao"] is None
+    sem = {**ag5, "status_avaliacao": "amostra_insuficiente", "avaliacao_confiavel": False}
+    assert avaliar_imovel_leilao(sem, sfi, agora=datetime(2026, 10, 27))["estimativa_2o_leilao"] is None
+
+
 def test_cartao_compra_direta_sem_cronometro_e_corretagem_da_caixa():
     leilao = avaliar_imovel_leilao(AG5_OK, {"modalidade": "Compra Direta", "valor_minimo": 200000})
     at = _cartao(leilao)

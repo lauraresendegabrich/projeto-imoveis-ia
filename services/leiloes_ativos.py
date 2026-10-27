@@ -15,13 +15,17 @@ from decimal import Decimal
 from services.banco import TIMEOUT_COMANDO_MS, TIMEOUT_CONEXAO_S
 from services.leilao import (
     DECISAO_SEM_ESTIMATIVA, ROI_MARGEM_APERTADA, ROI_OPORTUNIDADE, SITUACOES_LEILAO, classificar_roi,
-    conta_investimento, lance_para_roi,
+    conta_investimento, estimativa_na_etapa, lance_para_roi,
 )
 
 logger = logging.getLogger(__name__)
 
-SQL_ATIVOS = "SELECT * FROM vw_leiloes_ativos"
-SQL_TODOS = "SELECT * FROM vw_leiloes ORDER BY ativo DESC, encerramento NULLS LAST"
+# As views so tem o valor minimo da etapa atual; o do 2o leilao vem da tabela.
+_ETAPAS = "i.valor_minimo_1, i.data_1_leilao, i.valor_minimo_2, i.data_2_leilao"
+SQL_ATIVOS = (f"SELECT v.*, {_ETAPAS} FROM vw_leiloes_ativos v JOIN imoveis_leilao i ON i.id = v.id "
+              f"ORDER BY v.encerramento NULLS LAST")
+SQL_TODOS = (f"SELECT v.*, {_ETAPAS} FROM vw_leiloes v JOIN imoveis_leilao i ON i.id = v.id "
+             f"ORDER BY v.ativo DESC, v.encerramento NULLS LAST")
 SQL_SITUACAO = "UPDATE imoveis_leilao SET situacao = %s, atualizado_em = now() WHERE id = %s"
 
 
@@ -83,6 +87,12 @@ def preparar_linha(linha: dict) -> dict:
                       "lance_maximo": None, "lance_limite_descarte": None})
     # O cronometro e o rotulo usam as chaves de services/leilao.py.
     saida["etapa"] = linha.get("etapa_atual")
+    # Leilao SFI ainda no 1o leilao: a estimativa do 2o, com a mesma liquidez.
+    saida["estimativa_2o_leilao"] = (
+        estimativa_na_etapa(liquidez, 2, linha["valor_minimo_2"], linha.get("data_2_leilao"))
+        if confiavel and liquidez and linha.get("etapa_atual") == 1 and linha.get("valor_minimo_2")
+        and not linha.get("encerrado") else None
+    )
     return saida
 
 

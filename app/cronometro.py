@@ -12,7 +12,7 @@ import html
 from datetime import datetime
 
 FUSO_BRASILIA = "-03:00"
-ALTURA_PX = 46
+ALTURA_PX = 64   # cabe em duas linhas na coluna estreita da pagina de leiloes
 
 # Fundo e texto proprios: legivel com o tema claro ou escuro do Streamlit (o
 # componente roda num iframe e nao herda o tema).
@@ -57,8 +57,8 @@ def html_cronometro(encerramento: datetime, rotulo: str, agora: datetime) -> str
     }}
     var d = Math.floor(falta / 86400), h = Math.floor(falta % 86400 / 3600);
     var m = Math.floor(falta % 3600 / 60), s = falta % 60;
-    el.textContent = "⏱️ {rotulo} em {data_txt} — faltam " + d + (d === 1 ? " dia " : " dias ")
-      + dois(h) + " h " + dois(m) + " min " + dois(s) + " s";
+    el.textContent = "⏱️ {rotulo} em {data_txt} · faltam " + d + (d === 1 ? " dia " : " dias ")
+      + dois(h) + "h " + dois(m) + "min " + dois(s) + "s";
   }}
   var timer = setInterval(atualizar, 1000);
   atualizar();

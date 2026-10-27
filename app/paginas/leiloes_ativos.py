@@ -11,6 +11,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from app.blocos_leilao import mostrar_estimativa_2o_leilao
 from app.cronometro import mostrar_cronometro
 from services import leiloes_ativos
 from services.banco import obter_database_url
@@ -76,6 +77,7 @@ def mostrar_imovel(l: dict) -> None:
                                 f"mínimo {brl(l['valor_minimo_atual'])}")
                     st.markdown(f"**{texto_lance_maximo(l, brl)}**")
                     st.caption(texto_lance_descarte(l, brl))
+                mostrar_estimativa_2o_leilao(l.get("estimativa_2o_leilao"), brl)
                 if l.get("recalculado"):
                     st.caption(f"⚠️ Avaliado no {l['etapa_avaliada']}º leilão: a resposta foi refeita com o valor "
                                f"do {l['etapa']}º leilão (mesma liquidez).")

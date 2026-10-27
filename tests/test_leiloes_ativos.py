@@ -73,6 +73,22 @@ def test_sem_estimativa_continua_sem_estimativa_mesmo_com_liquidez_gravada():
     assert not l["recalculado"]
 
 
+def test_no_1o_leilao_mostra_a_estimativa_do_2o():
+    # Caso real (Arapiraca, nº 144440813103-1): 1o leilao R$ 220.000 -> Margem apertada;
+    # 2o leilao R$ 200.010,47 em 15/12 -> Oportunidade (ROI 38,81%).
+    base = dict(valor_minimo_atual=220000.0, liquidez=411691.05, valor_minimo_1=220000.0,
+                valor_minimo_2=200010.47, data_2_leilao=datetime(2026, 12, 15, 10, 0))
+    l = leiloes_ativos.preparar_linha(linha(**base))
+    assert l["decisao"] == "Margem apertada"
+    e = l["estimativa_2o_leilao"]
+    assert e["decisao"] == "Oportunidade" and round(e["roi"], 4) == 0.3881 and e["data"] == datetime(2026, 12, 15, 10)
+    # No 2o leilao, encerrado ou sem estimativa confiavel: sem o bloco.
+    assert leiloes_ativos.preparar_linha(linha(**{**base, "etapa_atual": 2}))["estimativa_2o_leilao"] is None
+    assert leiloes_ativos.preparar_linha(linha(**{**base, "encerrado": True}))["estimativa_2o_leilao"] is None
+    assert leiloes_ativos.preparar_linha(linha(**{**base, "lance_maximo": None}))["estimativa_2o_leilao"] is None
+    assert leiloes_ativos.preparar_linha(linha(modalidade="Venda Online", etapa_atual=None))["estimativa_2o_leilao"] is None
+
+
 def test_filtros():
     linhas = [leiloes_ativos.preparar_linha(l) for l in (
         linha(id=1), linha(id=2, modalidade="Venda Online", uf="SP", valor_minimo_atual=400000.0),
@@ -131,10 +147,13 @@ def test_listar_converte_decimal_e_escolhe_a_view():
     banco = _Banco([{"id": 1, "valor_minimo_atual": Decimal("224000.00"), "roi": Decimal("0.7068")}])
     linhas = _com_banco_falso(banco, lambda: leiloes_ativos.listar_leiloes("postgresql://falso"))
     assert linhas == [{"id": 1, "valor_minimo_atual": 224000.0, "roi": 0.7068}]
-    assert any(sql == "SELECT * FROM vw_leiloes_ativos" for sql, _ in banco.comandos)
+    assert any(sql == leiloes_ativos.SQL_ATIVOS for sql, _ in banco.comandos)
+    assert "FROM vw_leiloes_ativos v JOIN imoveis_leilao i" in leiloes_ativos.SQL_ATIVOS
+    assert "i.valor_minimo_2" in leiloes_ativos.SQL_ATIVOS   # o 2o leilao vem da tabela
     banco = _Banco([{"id": 1}])
     _com_banco_falso(banco, lambda: leiloes_ativos.listar_leiloes("postgresql://falso", incluir_inativos=True))
-    assert any(sql.startswith("SELECT * FROM vw_leiloes ORDER BY") for sql, _ in banco.comandos)
+    assert any(sql == leiloes_ativos.SQL_TODOS for sql, _ in banco.comandos)
+    assert "FROM vw_leiloes v JOIN" in leiloes_ativos.SQL_TODOS
 
 
 def test_marcar_situacao():
@@ -214,6 +233,18 @@ def test_salvar_situacao_grava_e_avisa():
         _rodar(at)
         assert at.chamadas == [(9, "retirado")]
         assert any('Situação alterada para "retirado"' in s.value for s in at.success)
+    finally:
+        at._restaurar()
+
+
+def test_pagina_mostra_o_bloco_do_2o_leilao():
+    at = _pagina([linha(valor_minimo_atual=220000.0, liquidez=411691.05, decisao="Margem apertada",
+                        valor_minimo_1=220000.0, valor_minimo_2=200010.47, data_2_leilao=datetime(2026, 12, 15, 10))])
+    try:
+        _rodar(at)
+        textos = " ".join(m.value for m in at.markdown)
+        assert "E no 2º leilão? (15/12/2026 10:00, se não vender no 1º)" in textos
+        assert "ROI pagando o mínimo de R\$ 200.010: **38,81%**" in textos
     finally:
         at._restaurar()
 

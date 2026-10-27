@@ -35,6 +35,7 @@ from services.leilao import (
     CORES_DECISAO, faixas_de_lance, lance_em_destaque,
 )
 from services.caixa_pagina import ler_pagina_caixa, valores_para_formulario
+from app.blocos_leilao import mostrar_estimativa_2o_leilao
 from app.cronometro import mostrar_cronometro
 from services.leilao import linhas_laudo as linhas_laudo_leilao
 
@@ -214,7 +215,9 @@ def mostrar_avaliacao_leilao(leilao):
                   else "abaixo do mínimo: não dá" if f["abaixo_do_minimo"] else "")}
             for f in faixas_de_lance(leilao, fmt_brl)
         ]).to_markdown(index=False))
-        if texto_roi_outra_etapa(leilao, fmt_brl):
+        if leilao.get("estimativa_2o_leilao"):
+            mostrar_estimativa_2o_leilao(leilao["estimativa_2o_leilao"], fmt_brl)
+        elif texto_roi_outra_etapa(leilao, fmt_brl):
             st.caption(texto_roi_outra_etapa(leilao, fmt_brl))
         conta = leilao["conta"]
         with st.expander("Conta do investimento (pagando o valor mínimo)"):
