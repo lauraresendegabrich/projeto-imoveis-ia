@@ -13,7 +13,8 @@ Regras:
   - As tabelas sao gravadas numa unica transacao (entra tudo ou nada).
   - Imovel de leilao (imoveis_leilao): uma linha por banco + codigo. Avaliar de novo
     atualiza a linha, sem apagar o que a nova avaliacao nao trouxe (COALESCE) e sem
-    mexer na situacao manual (vendido, retirado...).
+    mexer na situacao manual (vendido, retirado...). Se a modalidade mudou, os campos
+    dela (datas, valores minimos, edital, item, leiloeiro) vem todos da nova.
 """
 from __future__ import annotations
 
@@ -71,14 +72,35 @@ def obter_database_url() -> str:
     return os.getenv("DATABASE_URL", "")
 
 
+# Campos que dependem da modalidade: quando ela muda (ex.: Licitacao deserta que
+# volta como Compra Direta), sao trocados pelos novos MESMO vazios, senao a data da
+# licitacao antiga continuaria la e o imovel apareceria como encerrado.
+COLUNAS_DA_MODALIDADE = (
+    "data_1_leilao", "valor_minimo_1", "data_2_leilao", "valor_minimo_2",
+    "valor_minimo", "data_encerramento", "edital", "numero_item", "leiloeiro",
+)
+
+
 def sql_gravar_imovel_leilao() -> str:
-    """INSERT ... ON CONFLICT (banco, codigo): atualiza sem apagar o que ja havia."""
-    atualizar = [c for c in COLUNAS_IMOVEIS_LEILAO if c not in ("banco", "codigo")]
+    """
+    INSERT ... ON CONFLICT (banco, codigo). Mesma modalidade: atualiza sem apagar o que
+    ja havia (campo vazio na avaliacao nova fica com o valor antigo). Modalidade nova:
+    os campos da modalidade (COLUNAS_DA_MODALIDADE) vem todos da avaliacao nova. No
+    UPDATE, imoveis_leilao.* e a linha antiga.
+    """
+    def atualizar(c):
+        manter = f"COALESCE(EXCLUDED.{c}, imoveis_leilao.{c})"
+        if c in COLUNAS_DA_MODALIDADE:
+            return (f"{c} = CASE WHEN EXCLUDED.modalidade IS DISTINCT FROM imoveis_leilao.modalidade "
+                    f"THEN EXCLUDED.{c} ELSE {manter} END")
+        return f"{c} = {manter}"
+
+    colunas = [c for c in COLUNAS_IMOVEIS_LEILAO if c not in ("banco", "codigo")]
     return (
         f"INSERT INTO imoveis_leilao ({', '.join(COLUNAS_IMOVEIS_LEILAO)}) "
         f"VALUES ({', '.join(['%s'] * len(COLUNAS_IMOVEIS_LEILAO))}) "
         f"ON CONFLICT (banco, codigo) DO UPDATE SET "
-        + ", ".join(f"{c} = COALESCE(EXCLUDED.{c}, imoveis_leilao.{c})" for c in atualizar)
+        + ", ".join(atualizar(c) for c in colunas)
         + ", atualizado_em = now() RETURNING id"
     )
 

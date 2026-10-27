@@ -377,7 +377,19 @@ def test_sql_do_imovel_nao_apaga_dados_nem_a_situacao():
     sql = sql_gravar_imovel_leilao()
     assert "ON CONFLICT (banco, codigo) DO UPDATE" in sql and "RETURNING id" in sql
     assert "modalidade = COALESCE(EXCLUDED.modalidade, imoveis_leilao.modalidade)" in sql
+    assert "matricula = COALESCE(EXCLUDED.matricula, imoveis_leilao.matricula)" in sql
     assert "situacao" not in sql and "codigo = " not in sql
+
+
+def test_sql_troca_os_campos_da_modalidade_quando_ela_muda():
+    # Licitacao deserta que volta como Compra Direta: a data e o edital antigos saem.
+    from services.banco import COLUNAS_DA_MODALIDADE
+    sql = sql_gravar_imovel_leilao()
+    for coluna in ("data_encerramento", "data_1_leilao", "valor_minimo", "edital", "leiloeiro"):
+        assert coluna in COLUNAS_DA_MODALIDADE
+        assert (f"{coluna} = CASE WHEN EXCLUDED.modalidade IS DISTINCT FROM imoveis_leilao.modalidade "
+                f"THEN EXCLUDED.{coluna} ELSE COALESCE(EXCLUDED.{coluna}, imoveis_leilao.{coluna}) END") in sql
+    assert set(COLUNAS_DA_MODALIDADE) <= set(COLUNAS_IMOVEIS_LEILAO)
 
 
 class _CursorFalso:

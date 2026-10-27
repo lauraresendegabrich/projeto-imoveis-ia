@@ -220,7 +220,9 @@ avaliações deixam de ser registradas; o app continua funcionando). **Rodada no
   imóvel só com os dígitos e sem zeros à esquerda (`855552271653-1` e o link
   `...hdnimovel=8555522716531` dão o mesmo imóvel). Avaliar de novo atualiza a linha
   sem apagar o que a nova avaliação não trouxe e sem mexer na `situacao`
-  (`ativo` / `vendido` / `retirado` / `suspenso`, só manual). O imóvel só é gravado com
+  (`ativo` / `vendido` / `retirado` / `suspenso`, só manual). Se a modalidade mudou
+  (ex.: Licitação deserta que volta como Compra Direta), as datas, os valores mínimos,
+  o edital, o item e o leiloeiro vêm todos da avaliação nova. O imóvel só é gravado com
   o código e uma das 4 modalidades do site; sem isso, a execução é gravada sem ele.
 - **`execucoes`**: ganha `id_imovel_leilao`, `etapa_avaliada` (1 ou 2 no Leilão SFI),
   `roi` (pagando o valor mínimo da etapa) e `lance_limite_descarte` (acima dele, ROI
