@@ -87,6 +87,7 @@ def test_ler_pagina_sfi_preenche_o_formulario():
     assert (ss["f_rua"], ss["f_numero"], ss["f_bairro"], ss["f_cidade"], ss["f_uf"]) == (
         "AVENIDA JOSE LEITE", "911", "CAJI", "LAURO DE FREITAS", "BA")
     assert (ss["f_tipo"], ss["f_area"], ss["f_quartos"], ss["f_vagas"]) == ("Apartamento", "54,68", 2, 1)
+    assert ss["f_banheiros"] == 1   # "Wc" na descricao
     assert ss["f_modalidade"] == "Leilão SFI"
     assert (ss["f_valor_minimo_1"], ss["f_data_1_leilao"]) == ("224.000,00", "30/11/2026 10:00")
     assert (ss["f_valor_minimo_2"], ss["f_data_2_leilao"]) == ("296.523,50", "04/12/2026 10:00")

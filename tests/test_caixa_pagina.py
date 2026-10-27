@@ -151,6 +151,35 @@ def test_pagina_errada_ou_captcha():
         assert not r["ok"] and "Não parece a página de um imóvel da CAIXA" in r["erro"] and r["campos"] == {}
 
 
+
+def test_banheiros_vem_da_descricao():
+    # A pagina nao tem campo de banheiros: "Wc" = 1, "2 Wc" = 2, "wc Emp" (empregada) conta.
+    assert ler("leilao_sfi")["campos"]["banheiros"] == 1               # "..., Wc, Sala"
+    assert ler("venda_online")["campos"]["banheiros"] == 4             # "3 Wc, wc Emp"
+    assert ler("venda_online_gravame")["campos"]["banheiros"] == 2     # "2 Wc"
+    r = ler("compra_direta")                                           # gleba, sem descricao
+    assert r["campos"]["banheiros"] is None and "Banheiros" in r["nao_encontrados"]
+
+
+def test_banheiros_regra():
+    from services.caixa_pagina import _banheiros_da_descricao as banheiros
+    assert banheiros("2 Banheiros, Lavabo") == 2        # lavabo nao conta
+    assert banheiros("Suíte, Sala") is None              # suite sozinha nao diz quantos banheiros
+    assert banheiros("Wcx, Sala") is None and banheiros(None) is None
+
+
+def test_texto_colado_real_compra_direta_casa():
+    # Texto copiado (Ctrl+A, Ctrl+C) da pagina de uma casa em Compra Direta.
+    r = ler_pagina_caixa((PASTA / "compra_direta_colada.txt").read_text(encoding="utf-8"))
+    c = r["campos"]
+    assert r["ok"] and r["nao_encontrados"] == [] and r["avisos"] == []
+    assert (c["modalidade"], c["valor_minimo"], c["valor_avaliacao"]) == ("Compra Direta", 105925.98, 190000.00)
+    assert (c["tipo"], c["quartos"], c["banheiros"], c["vagas"]) == ("Casa", 1, 2, 1)
+    assert (c["rua"], c["numero"], c["complemento"]) == ("RUA SERGIPE", "791", "SETOR 03 B QD 295 LT 16")
+    assert (c["bairro"], c["cep"], c["cidade"], c["uf"]) == ("TELEGRAFO", "69980-000", "CRUZEIRO DO SUL", "AC")
+    assert (c["area_privativa"], c["area_terreno"]) == (111.70, 300.00)
+    assert c["numero_imovel"] == "844441120083-7" and c["data_encerramento"] is None
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

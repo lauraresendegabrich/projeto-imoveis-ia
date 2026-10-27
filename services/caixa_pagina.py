@@ -39,7 +39,7 @@ TIPO_FORMULARIO = {"CASA": "Casa", "SOBRADO": "Casa", "APARTAMENTO": "Apartament
 # Nome de cada campo no aviso "nao encontrado".
 NOMES_CAMPOS = {
     "rua": "Rua", "numero": "Número", "bairro": "Bairro", "cidade": "Cidade", "uf": "UF", "cep": "CEP",
-    "tipo": "Tipo", "quartos": "Quartos", "vagas": "Garagem", "area_privativa": "Área privativa",
+    "tipo": "Tipo", "quartos": "Quartos", "banheiros": "Banheiros", "vagas": "Garagem", "area_privativa": "Área privativa",
     "area_total": "Área total", "area_terreno": "Área do terreno", "descricao": "Descrição",
     "modalidade": "Modalidade", "valor_avaliacao": "Valor de avaliação", "valor_minimo": "Valor mínimo de venda",
     "valor_minimo_1": "Valor mínimo do 1º leilão", "valor_minimo_2": "Valor mínimo do 2º leilão",
@@ -50,7 +50,7 @@ NOMES_CAMPOS = {
     "averbacao_leiloes_negativos": "Averbação dos leilões negativos",
 }
 CAMPOS_GERAIS = (
-    "rua", "numero", "bairro", "cidade", "uf", "cep", "tipo", "quartos", "vagas", "area_privativa",
+    "rua", "numero", "bairro", "cidade", "uf", "cep", "tipo", "quartos", "banheiros", "vagas", "area_privativa",
     "area_total", "area_terreno", "descricao", "modalidade", "valor_avaliacao", "numero_imovel", "matricula",
     "formas_pagamento", "regras_despesas", "averbacao_leiloes_negativos",
 )
@@ -178,6 +178,22 @@ def _endereco(linha: str | None) -> dict:
     return campos
 
 
+def _banheiros_da_descricao(descricao: str | None) -> int | None:
+    """
+    A pagina nao tem campo de banheiros: eles aparecem na descricao, como "Wc", "2 Wc"
+    ou "wc Emp" (banheiro de empregada). Soma os itens que comecam com Wc ou Banheiro
+    (com o numero antes, se houver): "3 Wc, wc Emp" -> 4. Lavabo e suite nao contam.
+    Nenhum item assim -> None (nao informado).
+    """
+    total, achou = 0, False
+    for item in (descricao or "").split(","):
+        m = re.match(r"\s*(\d+)?\s*(wc|banheiros?)\b", item, re.I)
+        if m:
+            total += int(m.group(1) or 1)
+            achou = True
+    return total if achou else None
+
+
 def _formas_pagamento(linhas_formas: list[str]) -> list[str]:
     """Textos da CAIXA -> opcoes do formulario (FORMAS_PAGAMENTO_CAIXA), na mesma ordem."""
     texto = _sem_acento(" ".join(linhas_formas)).lower()
@@ -255,6 +271,7 @@ def ler_pagina_caixa(conteudo: str) -> dict:
         avisos.append("Endereço sem número na CAIXA (S/N): o número fica vazio.")
     descricao = _linhas_depois("Descrição:", linhas, ("FORMAS DE PAGAMENTO", "REGRAS PARA PAGAMENTO"))
     campos["descricao"] = " ".join(descricao).strip(" .") or None
+    campos["banheiros"] = _banheiros_da_descricao(campos["descricao"])
 
     formas = _linhas_depois("FORMAS DE PAGAMENTO ACEITAS:", linhas, ("REGRAS PARA PAGAMENTO",))
     campos["formas_pagamento_texto"] = formas or None
@@ -318,6 +335,7 @@ def valores_para_formulario(campos: dict) -> dict:
         "f_area": _area_br(area) or None,
         "f_terreno": _area_br(campos.get("area_terreno")) if campos.get("tipo") == "Casa" else None,
         "f_quartos": campos.get("quartos"),
+        "f_banheiros": campos.get("banheiros"),
         "f_vagas": campos.get("vagas"),
         "f_descricao": campos.get("descricao"),
         "f_modalidade": campos.get("modalidade"),
