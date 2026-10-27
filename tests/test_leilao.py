@@ -75,6 +75,23 @@ def test_pre_analise():
     assert 0.15 <= r["roi"] < 0.30 and r["sobra"] < 0
 
 
+def test_frases_do_lance_conforme_a_resposta():
+    from services.leilao import texto_lance_descarte, texto_lance_maximo
+    oportunidade = avaliar_leilao(ag5(liquidez=644432), 323158)
+    assert texto_lance_maximo(oportunidade, _brl) == "Lance até R$ 337.068 para continuar Oportunidade"
+    assert texto_lance_descarte(oportunidade, _brl) == "Acima de R$ 387.628, descartar"
+    apertada = avaliar_leilao(ag5(liquidez=644432), 360000)
+    assert texto_lance_maximo(apertada, _brl) == (
+        "Para ser Oportunidade, o lance teria de ser até R$ 337.068, abaixo do mínimo de R$ 360.000")
+    assert texto_lance_descarte(apertada, _brl) == "Acima de R$ 387.628, descartar"
+    descartar = avaliar_leilao(ag5(liquidez=314986), 217368)
+    assert texto_lance_maximo(descartar, _brl).startswith("Para ser Oportunidade, o lance teria de ser até R$ 164.752")
+    assert texto_lance_descarte(descartar, _brl) == "Mesmo pagando o mínimo, o ROI fica abaixo de 15% (o limite seria R$ 189.465)"
+    # Na lista de leiloes ativos o minimo vem como valor_minimo_atual.
+    linha = {**apertada, "valor_minimo_atual": apertada.pop("valor_minimo")}
+    assert texto_lance_maximo(linha, _brl).endswith("abaixo do mínimo de R$ 360.000")
+
+
 def test_apto_sao_paulo_descartar():
     r = avaliar_leilao(ag5(liquidez=314986), 217368)
     assert r["decisao"] == "Descartar", r

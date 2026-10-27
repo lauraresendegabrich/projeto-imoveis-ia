@@ -593,14 +593,33 @@ def avaliar_imovel_leilao(resultado_ag5: dict | None, leilao: dict, agora: datet
     return avaliacao
 
 
+def _minimo(leilao: dict):
+    """Valor minimo da etapa (no cartao: valor_minimo; na lista de leiloes: valor_minimo_atual)."""
+    return leilao.get("valor_minimo") or leilao.get("valor_minimo_atual")
+
+
 def texto_lance_maximo(leilao: dict, fmt_brl) -> str:
-    """'Lance até R$ X para continuar Oportunidade' (ROI de 30%)."""
-    return f"Lance até {fmt_brl(leilao['lance_maximo'])} para continuar {DECISAO_OPORTUNIDADE}"
+    """
+    Lance com ROI de 30%. Oportunidade: 'Lance até R$ X para continuar Oportunidade'.
+    Nas outras respostas o lance de 30% fica abaixo do minimo (nao da para "continuar"):
+    'Para ser Oportunidade, o lance teria de ser até R$ X, abaixo do mínimo de R$ M'.
+    """
+    lance = fmt_brl(leilao["lance_maximo"])
+    if leilao.get("decisao") == DECISAO_OPORTUNIDADE:
+        return f"Lance até {lance} para continuar {DECISAO_OPORTUNIDADE}"
+    return f"Para ser {DECISAO_OPORTUNIDADE}, o lance teria de ser até {lance}, abaixo do mínimo de {fmt_brl(_minimo(leilao))}"
 
 
 def texto_lance_descarte(leilao: dict, fmt_brl) -> str:
-    """'Acima de R$ Y, descartar' (ROI de 15%)."""
-    return f"Acima de {fmt_brl(leilao['lance_limite_descarte'])}, descartar"
+    """
+    Lance com ROI de 15%: 'Acima de R$ Y, descartar'. Ja descartado (o minimo passa
+    desse limite): 'Mesmo pagando o mínimo, o ROI fica abaixo de 15% (o limite seria R$ Y)'.
+    """
+    limite = fmt_brl(leilao["lance_limite_descarte"])
+    if leilao.get("decisao") == DECISAO_DESCARTAR:
+        return (f"Mesmo pagando o mínimo, o ROI fica abaixo de {texto_percentual(ROI_MARGEM_APERTADA, 0)} "
+                f"(o limite seria {limite})")
+    return f"Acima de {limite}, descartar"
 
 
 def texto_cabecalho(leilao: dict) -> str:
