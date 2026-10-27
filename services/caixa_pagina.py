@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from html.parser import HTMLParser
 
 from services.formatos import ler_numero_br
 from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADE_COMPRA_DIRETA, MODALIDADE_LICITACAO, MODALIDADE_SFI,
-    MODALIDADE_VENDA_ONLINE, MODALIDADES_CAIXA, texto_data_hora,
+    MODALIDADE_VENDA_ONLINE, MODALIDADES_CAIXA, agora_brasilia, texto_data_hora,
 )
 
 UF_POR_ESTADO = {
@@ -32,6 +32,11 @@ UF_POR_ESTADO = {
     "RIO GRANDE DO NORTE": "RN", "RIO GRANDE DO SUL": "RS", "RONDONIA": "RO", "RORAIMA": "RR",
     "SANTA CATARINA": "SC", "SAO PAULO": "SP", "SERGIPE": "SE", "TOCANTINS": "TO",
 }
+
+# Area menor que isso e erro de cadastro (ex.: "Area do terreno = 0,01m2" numa casa).
+AREA_MINIMA_M2 = 10
+# Encerramento da Venda Online calculado pelo tempo restante: arredonda para 5 minutos.
+ARREDONDAR_ENCERRAMENTO_MIN = 5
 
 # Tipo da CAIXA -> tipo do formulario (o sistema so avalia casa e apartamento).
 TIPO_FORMULARIO = {"CASA": "Casa", "SOBRADO": "Casa", "APARTAMENTO": "Apartamento"}
@@ -201,9 +206,32 @@ def _formas_pagamento(linhas_formas: list[str]) -> list[str]:
     return [forma for forma, chave in zip(FORMAS_PAGAMENTO_CAIXA, chaves) if chave in texto]
 
 
-def ler_pagina_caixa(conteudo: str) -> dict:
+def _encerramento_pelo_tempo_restante(texto: str, agora: datetime) -> datetime | None:
     """
-    Le a pagina do imovel (HTML salvo ou texto colado).
+    "Tempo restante: 01 DIAS 03 HORAS 03 MINUTOS 02 SEGUNDOS" -> agora + tempo restante,
+    arredondado para os 5 minutos mais proximos: o relogio do site continua andando
+    entre copiar e ler, e os encerramentos da CAIXA caem em horarios redondos (18:00).
+    Tudo zero (pagina salva depois do fim ou sem o contador) -> None.
+    """
+    m = re.search(r"Tempo restante:?\s*(\d+)\s*DIAS?\s*(\d+)\s*HORAS?\s*(\d+)\s*MINUTOS?\s*(\d+)\s*SEGUNDOS?",
+                  texto, re.I)
+    if not m:
+        return None
+    dias, horas, minutos, segundos = (int(g) for g in m.groups())
+    restante = timedelta(days=dias, hours=horas, minutes=minutos, seconds=segundos)
+    if not restante:
+        return None
+    fim = agora + restante
+    passo = ARREDONDAR_ENCERRAMENTO_MIN * 60
+    segundos_do_dia = fim.hour * 3600 + fim.minute * 60 + fim.second
+    arredondado = round(segundos_do_dia / passo) * passo
+    return fim.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(seconds=arredondado)
+
+
+def ler_pagina_caixa(conteudo: str, agora: datetime | None = None) -> dict:
+    """
+    Le a pagina do imovel (HTML salvo ou texto colado). `agora` (hora de Brasilia) so
+    serve para calcular o encerramento da Venda Online pelo tempo restante.
 
     Retorna {"ok", "erro", "campos", "nao_encontrados", "avisos"}. `campos` usa os nomes do
     formulario e de services/leilao.py (valor_minimo_1, data_1_leilao, data_encerramento...).
@@ -211,6 +239,7 @@ def ler_pagina_caixa(conteudo: str) -> dict:
     nao foram achados.
     """
     conteudo = conteudo or ""
+    agora = agora or agora_brasilia()
     texto = texto_da_pagina(conteudo)
     if not re.search(r"Valor m[ií]nimo de venda", texto, re.I) or not re.search(r"N[uú]mero do im[oó]vel", texto, re.I):
         return {"ok": False, "erro": "Não parece a página de um imóvel da CAIXA (faltam o valor mínimo de "
@@ -246,6 +275,13 @@ def ler_pagina_caixa(conteudo: str) -> dict:
     campos["area_total"] = _area(r"[ÁA]rea total", texto)
     campos["area_privativa"] = _area(r"[ÁA]rea privativa", texto)
     campos["area_terreno"] = _area(r"[ÁA]rea do terreno", texto)
+    for campo, nome in (("area_total", "total"), ("area_privativa", "privativa"), ("area_terreno", "do terreno")):
+        # Erro de cadastro da CAIXA (ex.: "Área do terreno = 0,01m2" numa casa): nao entra
+        # no calculo; fica vazio para preencher a mao.
+        if campos[campo] is not None and campos[campo] < AREA_MINIMA_M2:
+            avisos.append(f"Área {nome} na CAIXA ({_area_br(campos[campo])} m²) parece errada: "
+                          f"não foi preenchida. Confira na matrícula.")
+            campos[campo] = None
 
     campos["edital"] = _achar(r"^Edital:\s*(.+)$", texto)
     campos["numero_item"] = _achar(r"^N[uú]mero do item:\s*(.+)$", texto)
@@ -255,12 +291,20 @@ def ler_pagina_caixa(conteudo: str) -> dict:
     campos["data_2_leilao"] = _data_hora(_achar(r"^Data do 2[º°o] Leil[aã]o\s*-\s*(.+)$", texto))
     campos["data_encerramento"] = _data_hora(_achar(r"^Data da Licita[cç][aã]o Aberta\s*-\s*(.+)$", texto))
     if campos["modalidade"] == MODALIDADE_VENDA_ONLINE:
-        # Encerrada: o texto traz a data. Em andamento: a data so esta no script do
-        # cronometro da pagina salva ("1@@" + "26/10/2026 18:00:00").
+        # Encerrada: o texto traz a data. Em andamento: a data exata so esta no script do
+        # cronometro da pagina salva ("1@@" + "26/10/2026 18:00:00"). No texto colado so
+        # vem o tempo restante: a data e calculada (agora + tempo restante) e avisada.
         campos["data_encerramento"] = (
             _data_hora(_achar(r"Venda online encerrada em\s*(.+)$", texto))
             or _data_hora(_achar(r'"1@@"\s*\+\s*"([^"]+)"', conteudo))
         )
+        if campos["data_encerramento"] is None:
+            campos["data_encerramento"] = _encerramento_pelo_tempo_restante(texto, agora)
+            if campos["data_encerramento"] is not None:
+                avisos.append(
+                    "Data de encerramento calculada pelo tempo restante do site: "
+                    f"{texto_data_hora(campos['data_encerramento'])}. Confira no site da CAIXA."
+                )
 
     endereco = _linhas_depois("Endereço:", linhas, ("Baixar", "Descrição:"))
     campos.update(_endereco(endereco[0] if endereco else None))

@@ -180,6 +180,41 @@ def test_texto_colado_real_compra_direta_casa():
     assert (c["area_privativa"], c["area_terreno"]) == (111.70, 300.00)
     assert c["numero_imovel"] == "844441120083-7" and c["data_encerramento"] is None
 
+
+def _venda_online_colada(agora):
+    return ler_pagina_caixa((PASTA / "venda_online_colada.txt").read_text(encoding="utf-8"), agora=agora)
+
+
+def test_texto_colado_venda_online_calcula_o_encerramento_pelo_tempo_restante():
+    # Texto copiado com "Tempo restante: 01 DIAS 03 HORAS 03 MINUTOS 02 SEGUNDOS".
+    r = _venda_online_colada(datetime(2026, 10, 27, 14, 57, 0))
+    assert r["campos"]["data_encerramento"] == datetime(2026, 10, 28, 18, 0)
+    assert ("Data de encerramento calculada pelo tempo restante do site: 28/10/2026 18:00. "
+            "Confira no site da CAIXA.") in r["avisos"]
+    assert "Data de encerramento" not in r["nao_encontrados"]
+
+
+def test_encerramento_arredonda_o_atraso_entre_copiar_e_ler():
+    # Lido 2 minutos depois de copiar: o calculo da 18:02:02, arredonda para 18:00.
+    assert _venda_online_colada(datetime(2026, 10, 27, 14, 59, 0))["campos"]["data_encerramento"] == (
+        datetime(2026, 10, 28, 18, 0))
+
+
+def test_contador_zerado_nao_vira_data():
+    from services.caixa_pagina import _encerramento_pelo_tempo_restante
+    zerado = "Tempo restante:\n00 DIAS 00 HORAS 00 MINUTOS 00 SEGUNDOS"
+    assert _encerramento_pelo_tempo_restante(zerado, datetime(2026, 10, 27)) is None
+    assert _encerramento_pelo_tempo_restante("sem contador", datetime(2026, 10, 27)) is None
+
+
+def test_area_errada_da_caixa_nao_e_preenchida():
+    r = _venda_online_colada(datetime(2026, 10, 27, 14, 57, 0))
+    c = r["campos"]
+    assert c["area_terreno"] is None and c["area_privativa"] == 62.02   # "Área do terreno = 0,01m2"
+    assert "Área do terreno na CAIXA (0,01 m²) parece errada: não foi preenchida. Confira na matrícula." in r["avisos"]
+    assert "Área do terreno" in r["nao_encontrados"]
+    assert (c["tipo"], c["quartos"], c["banheiros"], c["valor_minimo"]) == ("Casa", 2, 2, 67049.76)
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
