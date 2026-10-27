@@ -20,6 +20,19 @@ def limpar_cep(texto) -> str | None:
     return digitos if len(digitos) == 8 else None
 
 
+def texto_endereco_cep(endereco: dict) -> str:
+    """
+    Endereco do CEP para a tela: 'Rua X, Centro, Curitiba/PR'. CEP geral da cidade (sem
+    rua e bairro, ex.: 69980-000 de Cruzeiro do Sul): 'Cruzeiro do Sul/AC (CEP geral
+    da cidade, sem rua e bairro)'. Partes vazias nao aparecem.
+    """
+    local = "/".join(p for p in (endereco.get("cidade"), endereco.get("estado")) if p)
+    partes = [p for p in (endereco.get("rua"), endereco.get("bairro")) if p]
+    if not partes:
+        return f"{local} (CEP geral da cidade, sem rua e bairro)"
+    return ", ".join(partes + [local])
+
+
 def _viacep(cep: str) -> dict | None:
     d = requests.get(f"https://viacep.com.br/ws/{cep}/json/", timeout=TIMEOUT_CEP_S).json()
     if d.get("erro"):

@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.funil import funil_ligado, montar_funil, mostrar_funil
-from services.cep import buscar_cep, limpar_cep
+from services.cep import buscar_cep, limpar_cep, texto_endereco_cep
 from services.formatos import ler_numero_br
 from services.verificacoes import resumo_conferencia, verificar_execucao
 from services.textos_tela import (
@@ -366,8 +366,7 @@ with st.sidebar:
                         if endereco_cep.get(_campo):
                             st.session_state[_chave] = endereco_cep[_campo]
                     st.session_state["_cep_aplicado"] = cep_limpo
-                st.success(f"✅ {endereco_cep['rua']}, {endereco_cep['bairro']}, "
-                           f"{endereco_cep['cidade']}/{endereco_cep['estado']}")
+                st.success(f"✅ {texto_endereco_cep(endereco_cep)}")
             elif situacao_cep == "nao_encontrado":
                 st.warning("CEP não encontrado.")
             else:

@@ -42,6 +42,30 @@ def test_cep_inexistente():
     assert cep.buscar_cep("00000000") == (None, "nao_encontrado")
 
 
+
+def test_texto_do_endereco_sem_partes_vazias():
+    from services.cep import texto_endereco_cep
+    assert texto_endereco_cep({"rua": "Rua X", "bairro": "Centro", "cidade": "Curitiba", "estado": "PR"}) == (
+        "Rua X, Centro, Curitiba/PR")
+    # CEP geral da cidade (69980-000, Cruzeiro do Sul): antes saia ", , Cruzeiro do Sul/AC".
+    assert texto_endereco_cep({"rua": "", "bairro": "", "cidade": "Cruzeiro do Sul", "estado": "AC"}) == (
+        "Cruzeiro do Sul/AC (CEP geral da cidade, sem rua e bairro)")
+    assert texto_endereco_cep({"rua": "", "bairro": "Centro", "cidade": "Rio Branco", "estado": "AC"}) == (
+        "Centro, Rio Branco/AC")
+
+
+def test_tela_com_cep_geral_nao_mostra_virgulas_soltas():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file("app/interface.py", default_timeout=60)
+    # CEP ja consultado (cache da sessao): o teste nao usa a rede.
+    at.session_state["_cache_cep"] = {"69980000": {"rua": "", "bairro": "", "cidade": "Cruzeiro do Sul",
+                                                   "estado": "AC"}}
+    at.run()
+    at.sidebar.text_input(key="f_cep").input("69980-000").run()
+    textos = [s.value for s in at.sidebar.success]
+    assert "Cruzeiro do Sul/AC (CEP geral da cidade, sem rua e bairro)" in textos, textos
+    assert at.session_state["f_cidade"] == "Cruzeiro do Sul" and at.session_state["f_rua"] == ""
+
 if __name__ == "__main__":
     originais = list(cep.SERVICOS_CEP)
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
