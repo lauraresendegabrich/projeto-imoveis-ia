@@ -261,7 +261,7 @@ ORDER BY e.data_hora DESC;
 
 Rodar `db/migracoes/006_resultado_completo.sql` no SQL Editor do Neon **antes** de
 colocar no ar o código que grava a coluna (sem ela, a gravação falha e as avaliações
-deixam de ser registradas; o app continua funcionando).
+deixam de ser registradas; o app continua funcionando). **Rodada no Neon** (conferido em 28/10/2026).
 
 - **`execucoes.resultado_completo`**: o resultado dos 5 agentes como a tela de resultado
   o usa (`{versao, resultado, tela}`), montado em `services/detalhe_leilao.py`. Fotos e
