@@ -130,6 +130,46 @@ def _metros(v) -> str:
     return f"{int(v):,}".replace(",", ".")
 
 
+def _m2(valor: float) -> str:
+    """35,88 / 100 / 1.000 (m², sem casas decimais quando inteiro)."""
+    texto = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return texto[:-3] if texto.endswith(",00") else texto
+
+
+def motivo_areas_diferentes(resultado: dict, nome: str, nomes: str) -> str | None:
+    """
+    Nenhum imovel construido passou na comparacao do Agente 2 e todos sairam pela area
+    (pre-classificacao, sem IA): diz as areas encontradas. Ex.: imovel de 35,88 m² numa
+    cidade onde as casas a venda tem de 100 a 1.000 m². None em qualquer outro caso.
+    """
+    resumo = (resultado or {}).get("resumo") or {}
+    pre = resumo.get("pre_classificacao") or {}
+    area_alvo = (pre.get("referencia_alvo") or {}).get("area_construida")
+    limite = pre.get("regra_area_percentual")
+    if resumo.get("cluster_a") or not area_alvo or not limite:
+        return None
+    reprovados = [c for c in (resultado.get("comparaveis") or [])
+                  if c.get("status_julgamento") == "REPROVADO_PRE_CLASSIFICACAO"]
+    areas = []
+    for c in reprovados:
+        ac = (c.get("pre_classificacao") or {}).get("area_construida") or {}
+        if ac.get("candidato") is None or (ac.get("diferenca_percentual") or 0) <= (ac.get("limite_percentual") or limite):
+            return None   # saiu por outro motivo (terreno, caracteristica): nao e so a area
+        areas.append(float(ac["candidato"]))
+    if not areas or len(areas) != pre.get("total_construidos"):
+        return None
+    lo, hi = area_alvo * (1 - limite / 100), area_alvo * (1 + limite / 100)
+    faixa = f"de {_m2(min(areas))} a {_m2(max(areas))} m²" if min(areas) != max(areas) else f"{_m2(areas[0])} m²"
+    feminino = nome == "casa"
+    if len(areas) == 1:
+        quem = f"{'A única' if feminino else 'O único'} {nome} à venda na região tem {faixa}"
+    else:
+        quem = (f"{'Nenhuma das' if feminino else 'Nenhum dos'} {len(areas)} {nomes} à venda na região tem área "
+                f"parecida: {'elas' if feminino else 'eles'} têm {faixa}")
+    return (f"{quem}, e o imóvel tem {_m2(area_alvo)} m² (o cálculo aceita de {_m2(round(lo))} a "
+            f"{_m2(round(hi))} m², até {limite}% de diferença).")
+
+
 def motivo_sem_valor(resultado: dict, imovel_alvo: dict | None = None) -> dict:
     """
     Motivo exato de a avaliacao nao ter valor confiavel e o que da para fazer:
@@ -160,15 +200,17 @@ def motivo_sem_valor(resultado: dict, imovel_alvo: dict | None = None) -> dict:
                   f"de {minimo}: só {contagem(n_constr, f'{nome} {parecidos[0]}', f'{nomes} {parecidos[1]}')} "
                   f"perto do imóvel {'entrou' if n_constr == 1 else 'entraram'} no cálculo.")
         if n_constr == 0:
-            motivo = (f"Faltaram {minimo} {nomes} para o mínimo de {minimo}: "
-                      f"{'nenhuma' if eh_casa else 'nenhum'} perto do imóvel entrou no cálculo.")
+            motivo = motivo_areas_diferentes(resultado, nome, nomes) or (
+                f"Faltaram {minimo} {nomes} para o mínimo de {minimo}: "
+                f"{'nenhuma' if eh_casa else 'nenhum'} perto do imóvel entrou no cálculo.")
     elif status == "amostra_insuficiente":
         motivo = next((a for a in preco.get("avisos") or [] if a.startswith("Amostra insuficiente")),
                       "Amostra insuficiente para uma estimativa confiável.")
     elif status == "sem_amostra":
         cluster_a = (resultado.get("resumo") or {}).get("cluster_a")
         if not cluster_a:
-            motivo = f"Nenhum anúncio parecido com o imóvel foi encontrado na busca (mínimo de {minimo})."
+            motivo = motivo_areas_diferentes(resultado, nome, nomes) or (
+                f"Nenhum anúncio parecido com o imóvel foi encontrado na busca (mínimo de {minimo}).")
         else:
             motivo = (f"Nenhum dos {contagem(cluster_a, 'anúncio parecido', 'anúncios parecidos')} ficou perto do "
                       f"imóvel (na zona homogênea); o mínimo é {minimo}.")
@@ -184,7 +226,8 @@ def motivo_sem_valor(resultado: dict, imovel_alvo: dict | None = None) -> dict:
                    f" {n_alvo} anúncios do próprio imóvel saíram do cálculo.")
 
     fazer = []
-    if status == "valor_nao_estimado":
+    if status == "valor_nao_estimado" or (status in ("amostra_insuficiente", "sem_amostra") and n_constr == 0
+                                          and motivo_areas_diferentes(resultado, nome, nomes)):
         fazer.append("Confira a área construída informada.")
     amp = zona.get("ampliacao_raio") or {}
     raio_final = zona.get("raio_final_m")

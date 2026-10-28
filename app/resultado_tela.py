@@ -347,7 +347,9 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela):
         _resumo_ag2 = resultado.get("resumo", {})
         terrenos_sep = _resumo_ag2.get("terrenos_separados", _resumo_ag2.get("terrenos_excluidos", 0))
         with st.expander("🔍 Agente Coletor de Dados"):
-            st.write(f"Encontramos **{contagem(total_encontrados, 'imóvel', 'imóveis')}** à venda no bairro {bairro}, {cidade}/{estado}.")
+            # "Na regiao": a busca vai alem do bairro (rua, bairro e ate 1,5 km).
+            st.write(f"Encontramos **{contagem(total_encontrados, 'imóvel', 'imóveis')}** à venda na região do imóvel "
+                     f"({bairro}, {cidade}/{estado}).")
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
                 st.metric("Total", total_encontrados, f"{len(portais)} fontes")
@@ -364,8 +366,20 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela):
             # Monta texto compacto em um único bloco markdown
             linhas = [f"Dos {contagem(total_encontrados, 'imóvel encontrado', 'imóveis encontrados')}:"]
             if terrenos_sep > 0:
-                analisados = total_encontrados - terrenos_sep
                 linhas.append(f"- {contagem(terrenos_sep, 'é terreno', 'são terrenos')} (não entram na comparação direta)")
+            # Quantos sairam ja na comparacao de area/caracteristicas (Python, sem IA) e
+            # quantos a IA julgou. Resultado antigo sem esses numeros: texto de antes.
+            n_sem_ia = (_resumo_ag2.get("pre_classificacao") or {}).get("incompativeis_pre_classificacao")
+            n_ia = _resumo_ag2.get("llm_tentados")
+            if n_sem_ia is not None and n_ia is not None:
+                if n_sem_ia:
+                    linhas.append(f"- {contagem(n_sem_ia, 'saiu', 'saíram')} já na comparação de área e características "
+                                  f"(muito diferentes das do seu), sem chegar à IA")
+                if n_ia:
+                    linhas.append(f"- {contagem(n_ia, 'foi analisado', 'foram analisados')} pela IA para identificar "
+                                  f"os mais parecidos com o seu")
+            elif terrenos_sep > 0:
+                analisados = total_encontrados - terrenos_sep
                 linhas.append(f"- {contagem(analisados, 'foi analisado', 'foram analisados')} pela IA para identificar os mais parecidos com o seu")
             else:
                 linhas.append(f"- Todos foram analisados pela IA para identificar os mais parecidos com o seu")
@@ -383,7 +397,9 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela):
             zona_linhas = []
             n_zona = len(comparaveis_zona_list)
             nota_alvo = nota_anuncio_do_alvo(anuncios_do_alvo_na_zona(resultado, comparaveis_zona_list))
-            if n_zona == cluster_a == 1:
+            if cluster_a == 0:
+                zona_linhas.append("- Nenhum comparável para conferir na zona homogênea")
+            elif n_zona == cluster_a == 1:
                 zona_linhas.append(f"- O único comparável está na zona homogênea (raio de {raio} m){nota_alvo}")
             elif n_zona == cluster_a:
                 zona_linhas.append(f"- Todos os **{cluster_a}** comparáveis estão na zona homogênea (raio de {raio} m){nota_alvo}")

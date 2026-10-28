@@ -42,7 +42,7 @@ Os terrenos ficam no resultado final com `cluster="terreno"` e **passam pela mes
 Cada imóvel construído passa por um filtro Python **eliminatório e objetivo** que reprova candidatos claramente incompatíveis antes de gastar tempo/quota de LLM. Regras:
 
 - **Área construída** difere mais que o limite (padrão **30%**) da área do alvo → incompatível.
-- **Área de terreno** (só quando o alvo é casa/sobrado) difere mais que o limite → incompatível.
+- **Área de terreno** (só quando o alvo é casa/sobrado) difere mais que o limite → incompatível, **só quando foram coletados menos de 5 terrenos** (`MIN_TERRENOS_TERRENO_NAO_ELIMINA`). Com 5 ou mais, o Agente 5 separa o terreno e desconta o lote de cada comparável, então o tamanho do lote não elimina (a diferença fica registrada em `pre_classificacao.area_terreno`, com `elimina: false`), e o prompt da IA avisa que o terreno não é motivo para rejeitar. Mudança de 28/10/2026: em Birigui (casa de 300 m², lote de 400 m²), os parecidos passaram de 6 para 15 e a avaliação deixou de dar "Sem estimativa". O resumo registra `terreno_elimina`.
 - **Divergência explícita** em característica objetiva (piscina, churrasqueira, área gourmet, quintal, varanda, elevador, portaria, academia, salão de festas, playground, armários planejados) → incompatível. Só elimina quando há evidência contrária (alvo tem, candidato explicitamente não tem, ou vice-versa).
 - **Dado ausente nunca elimina** — ausência é tratada como "desconhecido".
 

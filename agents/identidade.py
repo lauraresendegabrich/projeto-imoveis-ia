@@ -46,6 +46,11 @@ Diferencas em relacao a proposta original:
     sem palavras genericas ("Habicarmo" = "Habicarmo Imoveis"): em Sao Jose do Rio
     Preto (out/2026) a mesma casa e o mesmo terreno escapavam por isso.
 
+  - Na prova direta, um nome contido no outro tambem e o mesmo anunciante ("Hope" =
+    "Hope Administracao de Bens", com o mesmo codigo TE287993): em Alvorada do Sul
+    (out/2026) o mesmo lote no Chaves na Mao e no VivaReal contava duas vezes no m2
+    do terreno.
+
 Limitacoes: calibrado so em BH/venda; poucos pares de casa (61); terreno e
 comercial nao tem regra calibrada: so sao fundidos pela prova direta (mesmo
 codigo + mesmo anunciante).
@@ -169,6 +174,18 @@ def _anunciante_base(d: dict) -> str:
         p for p in _juntar_letras_soltas(_anunciante(d).split())
         if p not in PALAVRAS_GENERICAS_ANUNCIANTE and len(p) > 1 and not any(ch.isdigit() for ch in p)
     )
+
+
+def mesmo_anunciante(base_a: str, base_b: str) -> bool:
+    """
+    Nomes de _anunciante_base iguais, ou as palavras de um todas no outro ("hope" e
+    "hope administracao bens": cada portal escreve a razao social de um jeito). So na
+    prova direta, que exige tambem o mesmo codigo do imovel.
+    """
+    if not base_a or not base_b:
+        return False
+    pa, pb = set(base_a.split()), set(base_b.split())
+    return base_a == base_b or pa <= pb or pb <= pa
 
 
 def _codigo(d: dict) -> str | None:
@@ -394,7 +411,7 @@ def mesmo_imovel(a: dict, b: dict) -> tuple[bool, str]:
     # a mesma imobiliaria de um jeito). Vale tambem para terreno.
     cod_a, cod_b = _codigo(a), _codigo(b)
     base_a, base_b = _anunciante_base(a), _anunciante_base(b)
-    if cod_a and cod_a == cod_b and base_a and base_a == base_b:
+    if cod_a and cod_a == cod_b and mesmo_anunciante(base_a, base_b):
         return True, "mesmo_codigo_e_anunciante"
     # O proprio anunciante diz que sao imoveis diferentes: mesmo portal, mesmo
     # anunciante e codigos diferentes = outras unidades (era a maior fonte de fusao
@@ -536,8 +553,9 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
         return ("preco", milhar, int(q) if q is not None else None)
 
     def _bloco_codigo(d):
+        # So o codigo: o nome do anunciante muda entre portais (ver mesmo_anunciante).
         if _codigo(d) and _anunciante_base(d):
-            return [("codigo", _codigo(d), _anunciante_base(d))]
+            return [("codigo", _codigo(d))]
         return []
 
     def blocos_registro(d):

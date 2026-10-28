@@ -672,7 +672,7 @@ with area_principal.container():
         resumo = resultado_ag2.get("resumo", {})
 
         with log_area:
-            st.success(f"✅ {contagem(resumo.get('cluster_a', 0), 'imóvel parecido', 'imóveis parecidos')} com o seu (mesma faixa de área, quartos e preço)")
+            st.success(f"✅ {contagem(resumo.get('cluster_a', 0), 'imóvel parecido', 'imóveis parecidos')} com o seu (mesma faixa de área e quartos)")
 
         if not comparaveis:
             status_box.error("❌ Nenhum imóvel comparável encontrado. O bairro pode ter poucos anúncios.")
@@ -833,7 +833,10 @@ with area_principal.container():
             liquidez_val = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_liquidez_arredondado", 0)
             tempo_venda = (resultado_ag5.get("liquidez_experimental") or resultado_ag5.get("liquidez", {})).get("tempo_estimado", "?")
             with log_area:
-                st.success("✅ Preço calculado")
+                if resultado_ag5.get("avaliacao_confiavel", True):
+                    st.success("✅ Preço calculado")
+                else:
+                    st.warning("⚠️ Sem anúncios suficientes para um valor confiável (veja o motivo no resultado)")
         except Exception as e:
             falhas_execucao.append(f"agente5: {type(e).__name__}: {e}")
             with log_area:

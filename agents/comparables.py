@@ -157,6 +157,13 @@ LIMITE_AREA_PRE_CLASSIFICACAO = 0.30
 # estrangular a amostra em bairros com poucos anuncios comparaveis.
 MIN_ELEGIVEIS_PRE_CLASSIFICACAO = 8
 LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO = 0.45
+# Casa: com pelo menos este numero de terrenos coletados, a area do terreno NAO elimina
+# na pre-classificacao. O Agente 5 separa o terreno (MIN_AMOSTRAS_CONFIAVEL terrenos na
+# zona) e desconta o lote de cada comparavel, entao o tamanho do lote ja e corrigido na
+# conta. Com menos terrenos o Agente 5 usa o m2 total da casa e o lote parecido continua
+# exigido. Antes (ate out/2026) o terreno eliminava sempre: em Palhoca, Maceio e
+# Alvorada do Sul, casas de area parecida caiam so pelo tamanho do lote.
+MIN_TERRENOS_TERRENO_NAO_ELIMINA = 5
 
 # Zona homogenea: minimo de comparaveis confirmados (na_zona) desejado.
 # Se a validacao geografica confirmar menos que isto, os imoveis "zona_nao_verificada"
@@ -1096,13 +1103,16 @@ def _pre_classificar(
     candidato: dict,
     caracteristicas_alvo: dict | None = None,
     limite_area_pct: float = LIMITE_AREA_PRE_CLASSIFICACAO,
+    terreno_elimina: bool = True,
 ) -> dict:
     """
     Pre-classificacao objetiva e eliminatoria.
 
     Regras finais combinadas:
       - diferenca de area construida > limite_area_pct em relacao ao alvo -> incompatível;
-      - para casas, diferenca de area de terreno > limite_area_pct -> incompatível;
+      - para casas, diferenca de area de terreno > limite_area_pct -> incompatível, so
+        com terreno_elimina (sem ele a diferenca fica registrada, sem eliminar; ver
+        MIN_TERRENOS_TERRENO_NAO_ELIMINA);
       - divergencia explicita em qualquer caracteristica objetiva -> incompatível;
       - dado ausente/desconhecido nunca elimina.
 
@@ -1140,7 +1150,7 @@ def _pre_classificar(
     if terreno_aplicavel and area_terreno_alvo is not None and area_terreno_cand is not None:
         comparacoes_realizadas += 1
         diferenca_terreno_pct = abs(area_terreno_cand - area_terreno_alvo) / area_terreno_alvo
-        if diferenca_terreno_pct > limite_area_pct:
+        if terreno_elimina and diferenca_terreno_pct > limite_area_pct:
             motivos.append(
                 f"area de terreno difere {diferenca_terreno_pct*100:.1f}% do alvo "
                 f"({area_terreno_cand:.1f}m² vs {area_terreno_alvo:.1f}m²; limite {limite_pct_int}%)"
@@ -1183,6 +1193,7 @@ def _pre_classificar(
             "diferenca_percentual": round(diferenca_terreno_pct * 100, 2) if diferenca_terreno_pct is not None else None,
             "limite_percentual": limite_pct_int,
             "aplicavel": terreno_aplicavel,
+            "elimina": terreno_aplicavel and terreno_elimina,
         },
         "caracteristicas_alvo": caracteristicas_alvo,
         "caracteristicas_candidato": caracteristicas_candidato,
@@ -1289,11 +1300,14 @@ def _resumir_descricao(imovel: dict, limite: int = 320) -> str:
         return "nao_informada"
     return texto[:limite] + ("..." if len(texto) > limite else "")
 
-def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
+def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrigido: bool = False) -> str:
     """
     Prompt de comparabilidade sem preco/preco-m2 para evitar circularidade na precificacao.
     Inclui descricao curta e caracteristicas extraidas para dar contexto qualitativo a LLM.
     O score Python tambem nao e enviado, evitando ancoragem.
+
+    terreno_corrigido: o Agente 5 vai separar o terreno (MIN_TERRENOS_TERRENO_NAO_ELIMINA),
+    entao o tamanho do lote nao e motivo para rejeitar.
 
     Sem bairro e rua (out/2026): a localizacao e julgada depois, pela zona homogenea
     (distancia). Com bairro no prompt, a IA recusava candidatos de outro bairro antes
@@ -1326,6 +1340,12 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict]) -> str:
         linhas.append(linha)
 
     candidatos_texto = "\n".join(linhas)
+    criterio_terreno = (
+        "3. Banheiros, vagas e caracteristicas estruturais ajudam a diferenciar o padrao. O TAMANHO\n"
+        "   DO TERRENO NAO e motivo para rejeitar: o valor do terreno e descontado no calculo."
+        if terreno_corrigido else
+        "3. Banheiros, vagas, terreno e caracteristicas estruturais ajudam a diferenciar o padrao."
+    )
 
     return f"""Classifique cada candidato como A (comparavel) ou B (nao comparavel) em relacao ao imovel alvo.
 
@@ -1350,7 +1370,7 @@ CRITERIOS DE JULGAMENTO:
    Trate ate 1 quarto de diferenca como equivalente quando a area
    for compativel. So considere os quartos um problema se a diferenca for de
    2 ou mais, ou se vier acompanhada de outras divergencias relevantes.
-3. Banheiros, vagas, terreno e caracteristicas estruturais ajudam a diferenciar o padrao.
+{criterio_terreno}
 4. Use a descricao somente para entender tipologia, padrao e caracteristicas; nao invente dados ausentes.
 5. PADRAO POR AMENIDADES: um CONJUNTO EXPRESSIVO de amenidades de lazer/conforto no
    candidato (por exemplo piscina + area gourmet + churrasqueira + sauna + varanda, varias
@@ -1990,6 +2010,13 @@ def identificar_comparaveis(
     area_alvo = _obter_area_construida(imovel_alvo)
     terreno_alvo = _obter_area_terreno(imovel_alvo) if _eh_casa(imovel_alvo) else None
     caracteristicas_alvo = _extrair_caracteristicas(imovel_alvo)
+    terreno_elimina = len(terrenos) < MIN_TERRENOS_TERRENO_NAO_ELIMINA
+    if _eh_casa(imovel_alvo):
+        logger.info(
+            f"[Ag2][PreClassificacao] {len(terrenos)} terrenos coletados: area do terreno "
+            + ("elimina (o Agente 5 nao vai separar o terreno)" if terreno_elimina
+               else "nao elimina (o Agente 5 separa o terreno)")
+        )
 
     # 4. Pre-classificacao (com relaxamento adaptativo do limite de area).
     #
@@ -2005,6 +2032,7 @@ def identificar_comparaveis(
                 imovel_alvo, im,
                 caracteristicas_alvo=caracteristicas_alvo,
                 limite_area_pct=limite_area_pct,
+                terreno_elimina=terreno_elimina,
             )
             im["pre_classificacao"] = pre
             if pre["elegivel_llm"]:
@@ -2059,10 +2087,11 @@ def identificar_comparaveis(
             lim_area = (pre.get("area_construida") or {}).get("limite_percentual")
             dif_terr = (pre.get("area_terreno") or {}).get("diferenca_percentual")
             lim_terr = (pre.get("area_terreno") or {}).get("limite_percentual")
+            terreno_eliminou = (pre.get("area_terreno") or {}).get("elimina", True)
             divergencias = pre.get("divergencias_caracteristicas") or []
             if dif_area is not None and lim_area is not None and dif_area > lim_area:
                 por_area += 1
-            if dif_terr is not None and lim_terr is not None and dif_terr > lim_terr:
+            if terreno_eliminou and dif_terr is not None and lim_terr is not None and dif_terr > lim_terr:
                 por_terreno += 1
             if divergencias:
                 por_caracteristica += 1
@@ -2113,7 +2142,8 @@ def identificar_comparaveis(
 
         for num_lote, lote in enumerate(lotes, 1):
             llm_tentados += len(lote)
-            prompt = _montar_prompt_clustering(imovel_alvo, lote)
+            prompt = _montar_prompt_clustering(imovel_alvo, lote,
+                                               terreno_corrigido=_eh_casa(imovel_alvo) and not terreno_elimina)
             retorno_llm = _chamar_llm(prompt, lote)
             if retorno_llm:
                 lote = _parsear_resposta_llm(
@@ -2181,6 +2211,8 @@ def identificar_comparaveis(
         "regra_area_percentual": round(limite_area_usado * 100),
         "regra_area_percentual_padrao": round(LIMITE_AREA_PRE_CLASSIFICACAO * 100),
         "relaxamento_area_acionado": limite_area_usado != LIMITE_AREA_PRE_CLASSIFICACAO,
+        # Casa: area do terreno eliminou? (nao, com MIN_TERRENOS_TERRENO_NAO_ELIMINA terrenos)
+        "terreno_elimina": _eh_casa(imovel_alvo) and terreno_elimina,
         "caracteristicas_eliminatorias": list(CARACTERISTICAS_PRE_CLASSIFICACAO.keys()),
         "estatisticas_areas": estatisticas_areas,
         "referencia_alvo": {"area_construida": area_alvo, "area_terreno": terreno_alvo},

@@ -175,7 +175,7 @@ def test_ver_avaliacao_completa_abre_a_tela_do_resultado_e_volta():
         for agente in ("🔍 Agente Coletor de Dados", "📊 Agente Identificador de Comparáveis",
                        "💰 Agente Estimador de Preço"):
             assert agente in rotulos, rotulos
-        assert any("no bairro Caji, Lauro de Freitas/BA" in m.value for m in at.markdown)        # campos da tela
+        assert any("na região do imóvel (Caji, Lauro de Freitas/BA)" in m.value for m in at.markdown)  # campos da tela
         assert not [b for b in at.button if b.label == "Salvar"]                               # a lista sumiu
         next(b for b in at.button if b.label == "← Voltar aos leilões").click().run()
         assert not at.exception and at.button(key="detalhe_1") and len(at.selectbox) == 1
