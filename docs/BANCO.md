@@ -256,3 +256,26 @@ FROM execucoes e JOIN imoveis_leilao i ON i.id = e.id_imovel_leilao
 WHERE i.codigo = '8555522716531'
 ORDER BY e.data_hora DESC;
 ```
+
+## Resultado completo de cada avaliação (migração 006)
+
+Rodar `db/migracoes/006_resultado_completo.sql` no SQL Editor do Neon **antes** de
+colocar no ar o código que grava a coluna (sem ela, a gravação falha e as avaliações
+deixam de ser registradas; o app continua funcionando).
+
+- **`execucoes.resultado_completo`**: o resultado dos 5 agentes como a tela de resultado
+  o usa (`{versao, resultado, tela}`), montado em `services/detalhe_leilao.py`. Fotos e
+  descrições dos anúncios ficam de fora (são a maior parte do tamanho e a tela não as
+  mostra). Acima de `TAMANHO_MAX_RESULTADO` a coluna fica vazia e o resto da avaliação é
+  gravado normalmente.
+- **Na interface**: o botão "Ver avaliação completa" de cada card de "Leilões ativos"
+  abre a mesma tela de quando a avaliação acaba de rodar (agentes, laudo e Excel). O
+  cartão do leilão é refeito com a etapa atual. Avaliações sem a coluna (anteriores à
+  006) mostram o cartão do leilão, os valores, os comparáveis e o Excel, com o aviso de
+  que é preciso avaliar de novo para ver o resto.
+
+```sql
+-- Tamanho do resultado completo das últimas avaliações
+SELECT id_execucao, data_hora, pg_column_size(resultado_completo) / 1024 AS kb_no_disco
+FROM execucoes ORDER BY data_hora DESC LIMIT 20;
+```

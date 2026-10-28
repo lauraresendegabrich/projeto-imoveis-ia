@@ -132,7 +132,10 @@ CREATE TABLE IF NOT EXISTS execucoes (
     id_imovel_leilao            BIGINT REFERENCES imoveis_leilao (id),
     etapa_avaliada              SMALLINT,                  -- 1 ou 2 (Leilão SFI); NULL nas outras
     roi                         NUMERIC(10, 4),            -- ROI pagando o valor mínimo da etapa
-    lance_limite_descarte       NUMERIC(14, 2)             -- acima dele, ROI < 15%: descartar
+    lance_limite_descarte       NUMERIC(14, 2),            -- acima dele, ROI < 15%: descartar
+
+    -- Resultado completo (migração 006) ----------------------------------------
+    resultado_completo          JSONB                      -- resultado dos 5 agentes, sem fotos e descrições (services/detalhe_leilao.py)
 );
 
 CREATE INDEX IF NOT EXISTS idx_execucoes_data_hora ON execucoes (data_hora DESC);

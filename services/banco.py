@@ -40,10 +40,11 @@ COLUNAS_EXECUCOES = (
     "lance_maximo", "sobra", "decisao", "tempo_venda", "alertas",
     "entrada_usuario", "checagem_anuncio_alvo", "verificacoes",
     "id_imovel_leilao", "etapa_avaliada", "roi", "lance_limite_descarte",
+    "resultado_completo",
 )
 COLUNAS_JSON = {
     "parametros", "fontes", "modelos_ia", "falhas", "campos_presumidos", "alertas", "formas_pagamento",
-    "entrada_usuario", "checagem_anuncio_alvo", "verificacoes",
+    "entrada_usuario", "checagem_anuncio_alvo", "verificacoes", "resultado_completo",
 }
 COLUNAS_IMOVEIS_LEILAO = (
     "banco", "codigo", "numero_imovel", "link", "modalidade",

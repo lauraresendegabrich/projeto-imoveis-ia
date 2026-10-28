@@ -2,19 +2,25 @@
 Pagina "Leiloes ativos": imoveis de leilao avaliados (vw_leiloes_ativos), do
 encerramento mais proximo ao mais distante, com cronometro, a resposta no valor
 minimo da etapa atual e a mudanca manual da situacao (vendido, retirado...).
+
+"Ver avaliacao completa" (em cada card) troca a lista pela mesma tela de quando a
+avaliacao acaba de rodar, com o resultado gravado no banco (services/detalhe_leilao.py).
 """
 import sys
-from datetime import timedelta
+from datetime import timedelta, timezone
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.blocos_leilao import mostrar_estimativa_2o_leilao
 from app.cronometro import mostrar_cronometro
-from services import leiloes_ativos
+from app.resultado_tela import fmt_brl, mostrar_avaliacao_leilao, mostrar_resultado
+from services import detalhe_leilao, leiloes_ativos
 from services.banco import obter_database_url
+from services.registro_execucao import ROTULOS_STATUS_ZONA, ROTULOS_TIPO_COMPARAVEL, excel_resultado
 from services.leilao import (
     DECISAO_DESCARTAR, DECISAO_MARGEM_APERTADA, DECISAO_OPORTUNIDADE, DECISAO_SEM_ESTIMATIVA, MODALIDADES_CAIXA,
     SITUACAO_ATIVO, SITUACOES_LEILAO, agora_brasilia, html_decisao, texto_cabecalho, texto_lance_descarte,
@@ -24,6 +30,8 @@ from services.leilao import (
 SEM_AVALIACAO = "Sem avaliação"
 DECISOES = [DECISAO_OPORTUNIDADE, DECISAO_MARGEM_APERTADA, DECISAO_DESCARTAR, DECISAO_SEM_ESTIMATIVA, SEM_AVALIACAO]
 ENCERRA_EM_BREVE_DIAS = 7
+CHAVE_DETALHE = "detalhe_leilao"     # {id_execucao, id_imovel} do card aberto
+FUSO_BRASILIA = timezone(timedelta(hours=-3))
 
 
 def brl(valor) -> str:
@@ -34,6 +42,92 @@ def brl(valor) -> str:
 @st.cache_data(ttl=60, show_spinner=False)
 def carregar(database_url: str, incluir_inativos: bool) -> list[dict]:
     return leiloes_ativos.listar_leiloes(database_url, incluir_inativos)
+
+
+@st.cache_data(ttl=300, show_spinner="Carregando a avaliação...")
+def carregar_detalhe(database_url: str, id_execucao: str, id_imovel: int) -> dict:
+    return detalhe_leilao.carregar_detalhe(database_url, id_execucao, id_imovel)
+
+
+def abrir_detalhe(id_execucao: str, id_imovel: int) -> None:
+    st.session_state[CHAVE_DETALHE] = {"id_execucao": id_execucao, "id_imovel": id_imovel}
+
+
+def fechar_detalhe() -> None:
+    st.session_state.pop(CHAVE_DETALHE, None)
+
+
+def data_brasilia(momento) -> str:
+    """dd/mm/aaaa hh:mm no horario de Brasilia (data_hora do banco vem com fuso)."""
+    if momento.tzinfo is not None:
+        momento = momento.astimezone(FUSO_BRASILIA)
+    return momento.strftime("%d/%m/%Y %H:%M")
+
+
+def mostrar_registro_antigo(detalhe: dict) -> None:
+    """
+    Avaliacao sem resultado_completo (anterior a migracao 006): o cartao do leilao, os
+    valores e os comparaveis gravados, e o Excel.
+    """
+    import pandas as pd
+    execucao = detalhe["execucao"]
+    st.info("Esta avaliação foi feita antes de o sistema guardar a tela completa. Abaixo está o que "
+            "ficou gravado; para ver os agentes, o laudo e o resto, avalie o imóvel de novo.")
+    mostrar_avaliacao_leilao(detalhe["leilao"])
+    confiavel = execucao.get("status_agente5") == "ok"
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("💰 Valor Médio Estimado", fmt_brl(execucao.get("valor_mercado")) if confiavel else "—")
+    col_b.metric("⚡ Valor de Liquidez (-10%)", fmt_brl(execucao.get("liquidez")) if confiavel else "—")
+    col_c.metric("⏱️ Tempo Estimado de Venda", (execucao.get("tempo_venda") or "?") if confiavel else "—")
+    comparaveis = sorted(detalhe["comparaveis"], key=lambda c: (not c.get("entrou_no_calculo"), c.get("tipo") or ""))
+    if comparaveis:
+        st.markdown(f"**🏘️ Anúncios comparáveis gravados ({len(comparaveis)})**")
+        st.markdown(pd.DataFrame([{
+            "Tipo": ROTULOS_TIPO_COMPARAVEL.get(c.get("tipo"), c.get("tipo")),
+            "No cálculo": "Sim" if c.get("entrou_no_calculo") else "Não",
+            "Localização": ROTULOS_STATUS_ZONA.get(c.get("status_zona"), c.get("status_zona") or "-"),
+            "Preço": fmt_brl(c["preco"]) if c.get("preco") else "-",
+            "Área": f"{c['area']:.0f}m²" if c.get("area") else "-",
+            "Rua": c.get("endereco") or "-",
+            "Bairro": c.get("bairro") or "-",
+            "Anúncio": f"[ver]({c['link']})" if c.get("link") else "-",
+        } for c in comparaveis]).to_markdown(index=False), unsafe_allow_html=True)
+    st.download_button(
+        label="📥 Baixar resultado (Excel)",
+        data=excel_resultado(execucao, detalhe["comparaveis"]),
+        file_name=f"resultado_{execucao.get('cidade') or ''}_{execucao.get('bairro') or ''}.xlsx".replace(" ", "_"),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+
+def mostrar_detalhe(database_url: str, escolhido: dict) -> None:
+    """A avaliacao completa do card aberto, no lugar da lista."""
+    st.button("← Voltar aos leilões", on_click=fechar_detalhe)
+    # Abre no topo (o clique foi no meio da lista).
+    components.html("<script>try{window.parent.document.querySelector('[data-testid=\"stMain\"]')"
+                    ".scrollTo(0,0)}catch(e){}</script>", height=0)
+    try:
+        dados = carregar_detalhe(database_url, escolhido["id_execucao"], escolhido["id_imovel"])
+    except Exception as exc:
+        st.error(f"Não foi possível ler a avaliação no banco agora ({type(exc).__name__}). Tente de novo em instantes.")
+        return
+    detalhe = detalhe_leilao.montar_detalhe(dados)
+    if detalhe is None:
+        st.warning("Avaliação não encontrada no banco.")
+        return
+    execucao = detalhe["execucao"]
+    endereco = ", ".join(x for x in (execucao.get("endereco"), execucao.get("bairro")) if x)
+    cidade = "/".join(x for x in (execucao.get("cidade"), execucao.get("uf")) if x)
+    st.subheader(" · ".join(x for x in (endereco, cidade) if x) or "Avaliação")
+    if execucao.get("data_hora"):
+        st.caption(f"Avaliado em {data_brasilia(execucao['data_hora'])}. O cartão do leilão usa a etapa "
+                   f"atual; o resto é o resultado do dia da avaliação.")
+    if detalhe["resultado"] is not None:
+        resultado = detalhe["resultado"]
+        mostrar_resultado(resultado, resultado.get("imovel_alvo") or {}, detalhe["tela"] or {})
+    else:
+        mostrar_registro_antigo(detalhe)
 
 
 def salvar_situacao(id_imovel: int) -> None:
@@ -83,6 +177,8 @@ def mostrar_imovel(l: dict) -> None:
                                f"do {l['etapa']}º leilão (mesma liquidez).")
                 if l.get("avaliado_em"):
                     st.caption(f"Avaliado em {l['avaliado_em'].strftime('%d/%m/%Y')}")
+                st.button("🔎 Ver avaliação completa", key=f"detalhe_{l['id']}", on_click=abrir_detalhe,
+                          args=(l["ultima_execucao"], l["id"]), use_container_width=True)
             col_sit, col_botao = st.columns([3, 2])
             with col_sit:
                 st.selectbox("Situação", SITUACOES_LEILAO, key=f"situacao_{l['id']}",
@@ -104,6 +200,10 @@ if mensagem:
 database_url = obter_database_url()
 if not database_url:
     st.warning("Banco não configurado (DATABASE_URL): não há leilões para mostrar.")
+    st.stop()
+
+if st.session_state.get(CHAVE_DETALHE):
+    mostrar_detalhe(database_url, st.session_state[CHAVE_DETALHE])
     st.stop()
 
 incluir_inativos = st.toggle("Mostrar também os encerrados, vendidos, retirados e suspensos")

@@ -288,6 +288,9 @@ def montar_registro(
     # Verificacoes automaticas (services/verificacoes.py): a interface preenche depois
     # de montar o resultado completo.
     execucao["verificacoes"] = None
+    # Resultado dos 5 agentes para o "Ver avaliacao completa" (services/detalhe_leilao.py):
+    # a interface preenche junto com as verificacoes.
+    execucao["resultado_completo"] = None
     # Imovel de leilao (tabela imoveis_leilao). Nao e coluna de execucoes: a gravacao
     # usa esta chave para gravar o imovel e ligar a execucao a ele.
     execucao["_imovel_leilao"] = montar_imovel_leilao(leilao_entrada, execucao)
