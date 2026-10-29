@@ -75,6 +75,28 @@ def test_alerta_mostra_o_preco_de_cada_imobiliaria():
         ("Auxiliadora", 1_300_000), ("GFloripa", 1_600_000), ("GS Corretores", 1_400_000)]
 
 
+# ---------------------------------------------------------------- zona
+def test_anuncio_do_proprio_imovel_nao_conta_para_o_minimo_da_zona():
+    from agents.comparables import _ampliar_raio, _completar_mesmo_bairro
+
+    def anuncio(dist, **extra):
+        return {"url": f"https://x/{dist}", "distancia_metros": dist, "geocodificacao_nivel": "coordenadas_athena",
+                "neighborhood": "Praia do Sonho", **extra}
+    # Palhoca: 5 na zona de 450 m, mas 1 e o suspeito: o raio amplia para 675 m.
+    confirmados = [anuncio(100, possivel_anuncio_do_alvo=True), anuncio(92), anuncio(310), anuncio(409),
+                   anuncio(80, eh_anuncio_do_alvo=True)]
+    fora = [anuncio(606), anuncio(610), anuncio(900)]
+    conf, resto, raio = _ampliar_raio(confirmados, fora, 450)
+    assert raio == 675 and len(conf) == 7 and [r["distancia_metros"] for r in resto] == [900], (raio, len(conf))
+    # Sem suspeito, 5 bastam (como antes).
+    conf, _, raio = _ampliar_raio([anuncio(d) for d in (1, 2, 3, 4, 5)], [anuncio(606)], 450)
+    assert raio == 450 and len(conf) == 5
+    # Zona no mesmo bairro tambem nao conta o suspeito.
+    entram, _, _ = _completar_mesmo_bairro([anuncio(d) for d in (1, 2, 3, 4)] + [anuncio(5, possivel_anuncio_do_alvo=True)],
+                                           [anuncio(1800)], 1500, "Praia do Sonho")
+    assert [e["distancia_metros"] for e in entram] == [1800]
+
+
 # ---------------------------------------------------------------- Agente 5
 def test_agente5_tira_do_calculo_o_anuncio_marcado():
     import agents.price_liquidity as ag5

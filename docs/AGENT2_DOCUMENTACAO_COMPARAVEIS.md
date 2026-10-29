@@ -196,6 +196,14 @@ aviso no leilão. Casas e terrenos separadamente. Motivo: em Maceió (Cidade
 Universitária) o imóvel fica na borda do bairro e as 48 casas parecidas estavam no
 próprio bairro, a 1-3 km; só 4 entravam na zona.
 
+**O anúncio do próprio imóvel não conta para o mínimo de 5** (`_conta_para_o_minimo`,
+out/2026). Vale para o confirmado (`eh_anuncio_do_alvo`, que o Agente 5 sempre tira) e
+para o suspeito (`possivel_anuncio_do_alvo`, que sai se a pessoa responder na tela que
+é dela). A regra vale na ampliação do raio, na zona do mesmo bairro e no fallback dos
+não verificados. Em Palhoça, a zona de 450 m tinha 5 contando o próprio imóvel e não
+ampliava. Tirando-o, sobravam 4 e o resultado ficava sem estimativa, com casas
+parecidas a 600 m.
+
 **Coordenada impossível.** Coordenada do portal a mais de 50 km do imóvel é descartada
 (`coordenada_portal_descartada`) e o anúncio é localizado pelo endereço (Maceió: dois
 anúncios a 3.945 km).

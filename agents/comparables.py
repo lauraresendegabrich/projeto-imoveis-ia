@@ -3232,6 +3232,17 @@ def _distancia_exata(im: dict) -> float | None:
         return None
 
 
+def _conta_para_o_minimo(lista: list[dict]) -> int:
+    """
+    Quantos contam para o minimo de MIN_CONFIRMADOS_ZONA: o anuncio do proprio imovel
+    (confirmado ou suspeito) nao conta. O confirmado sai sempre no Agente 5, e o
+    suspeito sai se a pessoa responder na tela que e o dela. Palhoca, 29/10/2026: com o
+    suspeito, a zona de 450 m tinha 5 e nao ampliou; sem ele, sobravam 4 e o resultado
+    ficava sem estimativa, com casas parecidas a 600 m.
+    """
+    return sum(1 for im in lista if not (im.get("eh_anuncio_do_alvo") or im.get("possivel_anuncio_do_alvo")))
+
+
 def _ampliar_raio(
     confirmados: list[dict],
     fora: list[dict],
@@ -3243,13 +3254,14 @@ def _ampliar_raio(
     Amplia o raio em passos de FATOR_AMPLIACAO_RAIO ate `minimo` confirmados ou `limite`.
     Retorna (confirmados, fora, raio_final). Os promovidos saem de `fora`, viram
     na_zona e ficam marcados com incluido_por_ampliacao_raio=True.
-    Raio da IA ja igual ou maior que o limite: nao amplia.
+    Raio da IA ja igual ou maior que o limite: nao amplia. O anuncio do proprio imovel
+    nao conta para o minimo (_conta_para_o_minimo).
     """
     raio = float(raio_ia)
-    if len(confirmados) >= minimo or raio >= limite:
+    if _conta_para_o_minimo(confirmados) >= minimo or raio >= limite:
         return confirmados, fora, raio_ia
     confirmados, fora = list(confirmados), list(fora)
-    while len(confirmados) < minimo and raio < limite:
+    while _conta_para_o_minimo(confirmados) < minimo and raio < limite:
         raio = min(raio * FATOR_AMPLIACAO_RAIO, float(limite))
         entram = [im for im in fora if (_distancia_exata(im) or float("inf")) <= raio]
         for im in entram:
@@ -3277,7 +3289,7 @@ def _completar_mesmo_bairro(
     (nao contam como confirmados na zona) e confianca baixa.
     """
     raio = float(raio_atual)
-    if len(confirmados) >= minimo or not bairro_alvo or raio >= limite:
+    if _conta_para_o_minimo(confirmados) >= minimo or not bairro_alvo or raio >= limite:
         return [], fora, raio_atual
     candidatos = [
         im for im in fora
@@ -3285,7 +3297,7 @@ def _completar_mesmo_bairro(
         and _mesmo_bairro(im.get("neighborhood") or im.get("bairro"), bairro_alvo)
     ]
     entram: list[dict] = []
-    while candidatos and len(confirmados) + len(entram) < minimo and raio < limite:
+    while candidatos and _conta_para_o_minimo(confirmados + entram) < minimo and raio < limite:
         raio = min(raio * FATOR_AMPLIACAO_RAIO, float(limite))
         entram = [im for im in candidatos if _distancia_exata(im) <= raio]
     if not entram:
@@ -3695,7 +3707,7 @@ def analisar_zona_homogenea(
     fallback_zona_acionado = bool(mesmo_bairro or terrenos_mesmo_bairro)
     confirmados_efetivos = confirmados + mesmo_bairro
     terrenos_efetivos = terrenos_confirmados + terrenos_mesmo_bairro
-    if len(confirmados_efetivos) < MIN_CONFIRMADOS_ZONA and nao_verificados:
+    if _conta_para_o_minimo(confirmados_efetivos) < MIN_CONFIRMADOS_ZONA and nao_verificados:
         fallback_zona_acionado = True
         logger.info(
             f"[Ag2][Zona] apenas {len(confirmados)} confirmados na zona (minimo desejado="
