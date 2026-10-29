@@ -6,7 +6,7 @@ Correcoes da reavaliacao dos "Sem estimativa" (29/10/2026):
     palavras (Rio Largo, Cruzeiro do Sul). "Rua X, SN" e a mesma rua.
   - Agente 2: zona estendida no mesmo bairro ate 2,5 km quando faltam confirmados;
     coordenada do portal a mais de 50 km e descartada; areas absurdas fora da media.
-  - IA: tolerancia de quartos maior em casa grande; amenidade nao informada no alvo
+  - IA: tolerancia de quartos e banheiros maior em casa grande; amenidade nao informada no alvo
     nao rebaixa.
 Sem rede.
 
@@ -25,7 +25,7 @@ from agents.collector import (
 )
 from agents.comparables import (
     _calcular_estatisticas_areas, _classificar_imovel_na_zona, _completar_mesmo_bairro,
-    _montar_prompt_clustering, _tolerancia_quartos,
+    _montar_prompt_clustering, _tolerancia_comodos,
 )
 from services.leilao import contar_status_zona, texto_aviso_zona
 
@@ -142,11 +142,20 @@ CASA = {"propertyType": "Casas", "area": 340, "bedrooms": 5, "bathrooms": 4}
 
 
 def test_tolerancia_de_quartos():
-    assert [_tolerancia_quartos(q) for q in (None, 2, 4, 5, 6, 7, 8)] == [1, 1, 1, 2, 2, 3, 3]
+    assert [_tolerancia_comodos(q) for q in (None, 2, 4, 5, 6, 7, 8)] == [1, 1, 1, 2, 2, 3, 3]
     grande = _montar_prompt_clustering({"propertyType": "Casas", "area": 360, "bedrooms": 8}, [CASA])
     assert "ATE 3 QUARTOS (candidato com 5 a 11)" in grande
     pequena = _montar_prompt_clustering({"propertyType": "Casas", "area": 55, "bedrooms": 2}, [CASA])
     assert "ATE 1 QUARTO" in pequena and "casa grande" not in pequena
+
+
+def test_tolerancia_de_banheiros():
+    # Palhoca: alvo com 6 banheiros, casas parecidas com 4.
+    grande = _montar_prompt_clustering({"propertyType": "Casas", "area": 360, "bedrooms": 8, "bathrooms": 6}, [CASA])
+    assert "ATE 2 BANHEIROS (candidato com\n   4 a 8)" in grande, grande
+    assert "quartos e banheiros dentro da tolerancia" in grande
+    pequena = _montar_prompt_clustering({"propertyType": "Casas", "area": 55, "bedrooms": 2, "bathrooms": 1}, [CASA])
+    assert "BANHEIROS" not in pequena
 
 
 def test_amenidade_nao_informada_no_alvo_nao_rebaixa():

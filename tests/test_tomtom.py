@@ -172,6 +172,48 @@ def test_google_sem_partial_match_aceito_como_hoje():
     (r, n) = _rodar(detalhado_com_bairro, tomtom("Point Address"), google=google_rua("Pachecos", parcial=False))
     assert r == (-22.84, -42.80, "rua") and n == 0, (r, n)
 
+
+# ---------------------------------------------------------------- Palhoca, 29/10/2026
+END_P = "Avenida Caravelas, 364, Praia Do Sonho, Palhoça, SC, Brasil"
+
+
+def test_tomtom_com_outra_rua_e_recusada():
+    # Pesquisada a Avenida Caravelas; a TomTom devolveu a Estrada Geral, a 2,1 km.
+    resp = tomtom("Street", municipio="Palhoça")
+    resp["results"][0]["address"]["streetName"] = "Estrada Geral Praia do Sonho"
+    (r, n) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
+                                                        rua_esperada="Avenida Caravelas"), resp)
+    assert r == (None, None, None) and n == 1, r
+    # A mesma rua (com ou sem prefixo) e aceita; Cross Street basta uma das duas.
+    resp["results"][0]["address"]["streetName"] = "Av. Caravelas"
+    (r, _) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
+                                                        rua_esperada="Avenida Caravelas"), resp)
+    assert r[2] == "rua", r
+    cross = tomtom("Cross Street", municipio="Palhoça")
+    cross["results"][0]["address"]["streetName"] = "Rua Ijui & Avenida Caravelas"
+    (r, _) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
+                                                        rua_esperada="Avenida Caravelas"), cross)
+    assert r[2] == "rua", r
+
+
+def test_google_com_bairro_entre_parenteses_e_aceito():
+    g = google_rua("Praia do Sonho (Ens Brito)")
+    (r, n) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
+                                                        bairro_esperado="Praia Do Sonho"), tomtom("Street"), google=g)
+    assert r == (-22.84, -42.80, "rua") and n == 0, (r, n)
+
+
+def test_nominatim_highway_residential_e_rua():
+    via = [{"lat": "-27.8343", "lon": "-48.5919", "class": "highway", "type": "residential",
+            "addresstype": "residential"}]
+    (r, n) = _rodar(lambda: ag2._geocodificar_detalhado(END_P), tomtom("Street"), nominatim=via)
+    assert r == (-27.8343, -48.5919, "rua") and n == 0, r
+    loteamento = [{"lat": "-27.83", "lon": "-48.59", "class": "landuse", "type": "residential",
+                   "addresstype": "residential"}]
+    (r, _) = _rodar(lambda: ag2._geocodificar_detalhado(END_P), tomtom("Street"), nominatim=loteamento)
+    assert r[2] == "bairro", r
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

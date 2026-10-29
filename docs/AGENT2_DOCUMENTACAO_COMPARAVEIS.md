@@ -129,8 +129,10 @@ Para cada imóvel:
 1. Tipo do imóvel
 2. Localização (mesmo bairro)
 3. Área (±50% aceitável)
-4. Quartos: ±1 até 4 quartos; ±2 com 5-6; ±3 com 7 ou mais (`_tolerancia_quartos`,
-   out/2026: em Palhoça, casa de 8 quartos, a IA recusava casas de área parecida com 4 a 6)
+4. Quartos: ±1 até 4 quartos; ±2 com 5-6; ±3 com 7 ou mais (`_tolerancia_comodos`,
+   out/2026: em Palhoça, casa de 8 quartos, a IA recusava casas de área parecida com 4 a 6).
+   Banheiros seguem a mesma regra a partir de 5 (alvo com 6 aceita de 4 a 8): com a
+   tolerância de quartos, a IA passou a recusar as mesmas casas por banheiros.
 
 **Amenidades (out/2026):** só conta como diferença a amenidade que o alvo **não** tem
 explicitamente. Marcada `nao_informado` no alvo é desconhecida e não rebaixa, nem em
@@ -197,6 +199,19 @@ próprio bairro, a 1-3 km; só 4 entravam na zona.
 **Coordenada impossível.** Coordenada do portal a mais de 50 km do imóvel é descartada
 (`coordenada_portal_descartada`) e o anúncio é localizado pelo endereço (Maceió: dois
 anúncios a 3.945 km).
+
+**Conferências da geocodificação (Palhoça, 29/10/2026).** O mesmo endereço do alvo caiu
+em pontos a 2,1 km um do outro em dois dias. Correções:
+- **TomTom com outra rua é recusada:** resultado de nível rua cujo `streetName` não é a
+  rua pesquisada (comparação de `_mesma_rua`) não é aceito. Pesquisada a Avenida
+  Caravelas, a TomTom devolvia a Estrada Geral Praia do Sonho. Só nas tentativas que
+  pesquisam a rua; Cross Street ("A & B") vale se uma das duas bater.
+- **Bairro do Google entre parênteses:** "Praia do Sonho (Ens Brito)" conta como "Praia do
+  Sonho" na checagem do `partial_match`.
+- **Nominatim `class=highway`** é rua, mesmo com `addresstype=residential` (antes saía
+  como bairro).
+- **Falha do Nominatim** (HTTP diferente de 200 ou exceção) agora aparece no log. Antes
+  ia para o debug, e o alvo seguia para o Google/TomTom sem registro do motivo.
 
 ### Fallback de amostra escassa (Opção B)
 

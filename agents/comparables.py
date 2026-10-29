@@ -1307,11 +1307,11 @@ def _resumir_descricao(imovel: dict, limite: int = 320) -> str:
         return "nao_informada"
     return texto[:limite] + ("..." if len(texto) > limite else "")
 
-def _tolerancia_quartos(quartos_alvo: float | None) -> int:
-    """Diferenca de quartos aceita pela IA: 1 ate 4 quartos, 2 com 5-6, 3 com 7 ou mais."""
-    if quartos_alvo is None or quartos_alvo < 5:
+def _tolerancia_comodos(qtd_alvo: float | None) -> int:
+    """Diferenca de quartos (ou banheiros) aceita pela IA: 1 ate 4, 2 com 5-6, 3 com 7 ou mais."""
+    if qtd_alvo is None or qtd_alvo < 5:
         return 1
-    return 2 if quartos_alvo < 7 else 3
+    return 2 if qtd_alvo < 7 else 3
 
 
 def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrigido: bool = False) -> str:
@@ -1366,7 +1366,7 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrig
     # quartos; a IA recusou 31 casas de area parecida com 4 a 6 quartos). O preco segue
     # a area; com muitos quartos, 1 a mais ou a menos pesa pouco.
     quartos_alvo = _para_float(alvo.get("bedrooms"))
-    tolerancia = _tolerancia_quartos(quartos_alvo)
+    tolerancia = _tolerancia_comodos(quartos_alvo)
     if tolerancia == 1:
         criterio_quartos = (
             "2. Area e numero de quartos sao relevantes, mas uma diferenca de ATE 1 QUARTO\n"
@@ -1382,6 +1382,17 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrig
             f"   ATE {tolerancia} QUARTOS (candidato com {q - tolerancia} a {q + tolerancia}) NAO e motivo para rejeitar\n"
             f"   quando a area for compativel. So considere os quartos um problema se a diferenca\n"
             f"   for maior que {tolerancia}, ou se vier acompanhada de outras divergencias relevantes."
+        )
+
+    # Banheiros: mesma regra proporcional (Palhoca, out/2026: com a tolerancia de quartos,
+    # a IA passou a recusar por banheiros; alvo com 6, casas parecidas com 3 ou 4).
+    banheiros_alvo = _para_float(alvo.get("bathrooms"))
+    tol_banheiros = _tolerancia_comodos(banheiros_alvo)
+    if tol_banheiros > 1:
+        b = int(banheiros_alvo)
+        criterio_quartos += (
+            f"\n   Banheiros: o alvo tem {b}; uma diferenca de ATE {tol_banheiros} BANHEIROS (candidato com\n"
+            f"   {b - tol_banheiros} a {b + tol_banheiros}) tambem NAO e motivo para rejeitar quando a area for compativel."
         )
 
     # Amenidades: o anuncio da CAIXA lista so os comodos ("2 Quartos, Varanda, Area de
@@ -1428,7 +1439,7 @@ CRITERIOS DE JULGAMENTO:
 {criterio_terreno}
 4. Use a descricao somente para entender tipologia, padrao e caracteristicas; nao invente dados ausentes.
 {criterio_amenidades}
-6. Nao rejeite por uma unica diferenca secundaria (incluindo quartos dentro da tolerancia do item 2).
+6. Nao rejeite por uma unica diferenca secundaria (incluindo quartos e banheiros dentro da tolerancia do item 2).
    Classifique B apenas quando o CONJUNTO das diferencas tornar o candidato inadequado
    como referencia de mercado.
 7. A = referencia suficientemente semelhante para compor a amostra de comparaveis.
@@ -2765,7 +2776,11 @@ def _motivo_parcial_outro_bairro(item: dict, bairro_esperado: str | None) -> str
     if not item.get("partial_match") or not _normalizar_texto(bairro_esperado or ""):
         return None
     devolvido = _bairro_google(item)
-    if devolvido and _normalizar_texto(devolvido) == _normalizar_texto(bairro_esperado):
+    # O Google as vezes completa o nome entre parenteses: "Praia do Sonho (Ens Brito)"
+    # para "Praia do Sonho" (Palhoca, 29/10/2026). O nome sem o parentese conta.
+    if devolvido and _normalizar_texto(bairro_esperado) in {
+        _normalizar_texto(devolvido), _normalizar_texto(re.sub(r"\s*\(.*?\)\s*", " ", devolvido)),
+    }:
         return None
     return f"partial_match com bairro diferente (informado={bairro_esperado!r}, devolvido={devolvido!r})"
 
@@ -2791,6 +2806,10 @@ NIVEL_NOMINATIM = {
 
 
 def _nivel_nominatim(item: dict) -> str | None:
+    # class=highway e uma via, mesmo com addresstype=residential (rua residencial no
+    # OSM). Palhoca, out/2026: a Avenida Caravelas saia como "bairro".
+    if str(item.get("class") or "").lower() == "highway":
+        return "rua"
     return NIVEL_NOMINATIM.get(str(item.get("addresstype") or "").lower())
 
 
@@ -2845,10 +2864,27 @@ def _mesma_cidade_tomtom(endereco: dict, cidade_esperada: str | None) -> bool:
     return False
 
 
-def _geocodificar_tomtom(endereco: str, cidade_esperada: str | None = None) -> tuple:
+def _outra_rua_tomtom(item: dict, rua_esperada: str | None) -> str | None:
+    """
+    Nome da rua devolvida quando NAO e a pesquisada (resultado de nivel rua). Palhoca,
+    29/10/2026: pesquisada a Avenida Caravelas, a TomTom devolveu a "Estrada Geral Praia
+    do Sonho" (type=Street, confianca 0,52), a 2,1 km. Sem rua esperada ou sem nome
+    devolvido, nao veta. Cross Street traz as duas ruas ("A & B"): basta uma bater.
+    """
+    from agents.collector import _mesma_rua
+    nome = (item.get("address") or {}).get("streetName")
+    if not rua_esperada or not nome:
+        return None
+    if any(_mesma_rua(parte, rua_esperada) for parte in re.split(r"\s*[&/]\s*", str(nome))):
+        return None
+    return str(nome)
+
+
+def _geocodificar_tomtom(endereco: str, cidade_esperada: str | None = None, rua_esperada: str | None = None) -> tuple:
     """
     (lat, lon, nivel) pela TomTom ou (None, None, None). Sem chave, pula sem erro;
     erro, limite (429) ou tempo esgotado: registra no log e devolve "nao achou".
+    Resultado de nivel rua com outra rua que nao a pesquisada e recusado.
     """
     import requests
     from urllib.parse import quote
@@ -2906,6 +2942,13 @@ def _geocodificar_tomtom(endereco: str, cidade_esperada: str | None = None) -> t
             f"{(item.get('address') or {}).get('municipality')!r}) | {endereco!r}"
         )
         return None, None, None
+    outra_rua = _outra_rua_tomtom(item, rua_esperada) if tipo in TIPOS_TOMTOM_RUA else None
+    if outra_rua:
+        logger.info(
+            f"[Geo] TomTom: type={tipo} | nivel={nivel} | recusado (outra rua: {outra_rua!r}, "
+            f"pesquisada {rua_esperada!r}) | {endereco!r}"
+        )
+        return None, None, None
     pos = item.get("position") or {}
     try:
         lat, lon = float(pos["lat"]), float(pos["lon"])
@@ -2928,6 +2971,7 @@ def _geocodificar_detalhado(
     aceitar_cidade: bool = False,
     cidade_esperada: str | None = None,
     bairro_esperado: str | None = None,
+    rua_esperada: str | None = None,
 ) -> tuple:
     """
     Geocodifica uma tentativa: Nominatim, Google e, por ultimo, TomTom. Retorna
@@ -2956,8 +3000,12 @@ def _geocodificar_detalhado(
                 logger.info(f"[Geo] Nominatim recusado ({motivo}, precisao de cidade) para {endereco!r}")
             else:
                 return float(data["lat"]), float(data["lon"]), _nivel_nominatim(data)
+        elif r.status_code != 200:
+            # Antes so ia para o debug: em Palhoca (29/10/2026) o Nominatim nao respondeu
+            # e o alvo foi para a TomTom sem nenhum registro do porque.
+            logger.info(f"[Geo] Nominatim indisponivel (HTTP {r.status_code}) para {endereco!r}")
     except Exception as e:
-        logger.debug(f"Nominatim falhou para {endereco!r}: {e}")
+        logger.info(f"[Geo] Nominatim falhou ({type(e).__name__}) para {endereco!r}")
 
     maps_key = os.getenv("GOOGLE_MAPS_KEY", "")
     if maps_key:
@@ -2986,7 +3034,7 @@ def _geocodificar_detalhado(
 
     # Ultima tentativa: TomTom (nunca para o centro da cidade).
     if not aceitar_cidade:
-        return _geocodificar_tomtom(endereco, cidade_esperada)
+        return _geocodificar_tomtom(endereco, cidade_esperada, rua_esperada)
     return None, None, None
 
 
@@ -3099,7 +3147,11 @@ def _geocodificar_com_fallback(
         add("cidade", [cidade, estado, "Brasil"])
 
     for idx, (nivel, endereco) in enumerate(tentativas):
-        lat, lon, nivel_real = _geocodificar_detalhado(endereco, cidade_esperada=cidade, bairro_esperado=bairro)
+        # A rua so e conferida nas tentativas que a pesquisam (nao na do bairro).
+        lat, lon, nivel_real = _geocodificar_detalhado(
+            endereco, cidade_esperada=cidade, bairro_esperado=bairro,
+            rua_esperada=rua if nivel in ("endereco_completo", "rua_numero", "rua") else None,
+        )
         if lat is not None and lon is not None:
             # Grava o nivel do que foi ACHADO (ex.: endereco completo pesquisado mas
             # so o bairro encontrado -> "bairro"); sem essa informacao, o pesquisado.
