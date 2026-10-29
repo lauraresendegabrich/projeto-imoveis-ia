@@ -189,6 +189,11 @@ def test_tomtom_com_outra_rua_e_recusada():
     (r, _) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
                                                         rua_esperada="Avenida Caravelas"), resp)
     assert r[2] == "rua", r
+    # Abreviacao: Rio Largo, a CAIXA escreve "DR EMILIO MAIA" e a TomTom "Doutor Emilio de Maia".
+    resp["results"][0]["address"]["streetName"] = "Rua Doutor Emílio de Maia"
+    (r, _) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
+                                                        rua_esperada="RUA DR EMILIO MAIA"), resp)
+    assert r[2] == "rua", r
     cross = tomtom("Cross Street", municipio="Palhoça")
     cross["results"][0]["address"]["streetName"] = "Rua Ijui & Avenida Caravelas"
     (r, _) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",

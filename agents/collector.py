@@ -388,6 +388,14 @@ def _chave_rua(rua: object) -> str:
     return " ".join(partes) or valor
 
 
+ABREVIACOES_TITULO = {
+    "dr": "doutor", "dra": "doutora", "prof": "professor", "profa": "professora", "cel": "coronel",
+    "pe": "padre", "eng": "engenheiro", "gal": "general", "gen": "general", "cap": "capitao",
+    "des": "desembargador", "sen": "senador", "ver": "vereador", "pres": "presidente", "gov": "governador",
+    "maj": "major", "sta": "santa", "sto": "santo",
+}
+
+
 def _textos_equivalentes(a: str, b: str) -> bool:
     """
     Compara dois logradouros ja normalizados (sem prefixo Rua/Av, sem acento).
@@ -421,8 +429,10 @@ def _textos_equivalentes(a: str, b: str) -> bool:
         "vereador", "prefeito", "padre", "pe", "de", "da", "do", "das", "dos", "e",
     }
 
-    tokens_a = [t for t in a.split() if t]
-    tokens_b = [t for t in b.split() if t]
+    # Abreviacao de titulo = titulo por extenso ("Dr Emilio Maia" x "Doutor Emilio de
+    # Maia": Rio Largo, 29/10/2026, a TomTom achou a rua certa e foi recusada).
+    tokens_a = [ABREVIACOES_TITULO.get(t, t) for t in a.split() if t]
+    tokens_b = [ABREVIACOES_TITULO.get(t, t) for t in b.split() if t]
     if not tokens_a or not tokens_b:
         return False
 
