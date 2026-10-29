@@ -55,9 +55,10 @@ def anuncios_do_proprio_imovel(resultado: dict) -> tuple[list[str], list[str]]:
     (excluidos, suspeitos): links dos anuncios do proprio imovel que sairam do calculo
     (identidade confirmada) e dos possiveis que continuam no calculo.
     """
+    # Os marcados pela pessoa na tela tem aviso proprio (marcados_pela_usuaria).
     excluidos = list(dict.fromkeys(
         c.get("url") or "" for c in (resultado.get("comparaveis") or []) + (resultado.get("terrenos") or [])
-        if c.get("eh_anuncio_do_alvo")
+        if c.get("eh_anuncio_do_alvo") and not c.get("anuncio_do_alvo_pela_usuaria")
     ))
     usados = ((resultado.get("preco_estimado") or {}).get("comparaveis_usados") or {})
     suspeitos = list(dict.fromkeys(
@@ -124,6 +125,18 @@ def suspeitos_do_proprio_imovel(resultado: dict, alvo: dict | None = None) -> li
             "motivo": motivo_parecido_com_o_alvo(alvo, comp),
         })
     return sorted(saida, key=lambda s: not s["provavel"])
+
+
+def marcados_pela_usuaria(resultado: dict, alvo: dict | None = None) -> list[dict]:
+    """
+    Anuncios que a pessoa disse, na tela, que sao do proprio imovel (sairam do calculo):
+    [{"url", "motivo"}]. O motivo continua aparecendo (decisao da usuaria, 29/10/2026).
+    """
+    alvo = alvo or resultado.get("imovel_alvo") or {}
+    urls = (resultado.get("preco_estimado") or {}).get("anuncios_do_alvo_pela_usuaria") or []
+    por_url = {c.get("url"): c for c in (resultado.get("comparaveis") or []) + (resultado.get("terrenos") or [])
+               if c.get("url")}
+    return [{"url": u, "motivo": motivo_parecido_com_o_alvo(alvo, por_url.get(u) or {})} for u in urls]
 
 
 def _metros(v) -> str:

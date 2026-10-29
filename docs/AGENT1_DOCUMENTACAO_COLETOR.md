@@ -305,6 +305,25 @@ de cada absorvido) e `fontes_origem`. Os descartados vão **completos** para
 [Ag1][Duplicatas] 105 anuncio(s) do mesmo imovel descartado(s) | 145 imoveis unicos | motivos={...}
 ```
 
+### Mesma casa com preços diferentes (out/2026)
+
+Depois de `deduplicar`, `agents/identidade.py::agrupar_mesmo_endereco` junta a mesma
+casa anunciada por imobiliárias diferentes, cada uma com o seu preço. Em Palhoça, a
+casa da Rua Jandaia, 286 (295 m², 8 quartos) estava em anúncios de R$ 1,3, 1,4 e
+1,6 milhão. Como a regra 6 exige preço igual, os anúncios ficavam separados, e a casa
+pesava 2 vezes entre os 5 usados no cálculo.
+
+- Junta só **casa**, com **mesma rua e mesmo número**, área até 2% de diferença e os
+  mesmos quartos. Não junta condomínio de casas (número compartilhado), códigos de
+  unidades diferentes nem apartamentos (unidades iguais no mesmo prédio são imóveis
+  diferentes).
+- Fica 1 anúncio (o mais completo) com a **mediana** dos preços do grupo. O preço dele
+  vai para `preco_original`, e o de cada imobiliária para `precos_entre_imobiliarias`.
+- Os outros vão para `duplicatas_descartadas_ag1.json` com o motivo
+  `casa_mesmo_endereco_precos_diferentes`.
+- A tela mostra o alerta **"Mesma casa com preços diferentes"**, com o preço de cada
+  imobiliária (`services/alertas.py`, código `mesma_casa_precos_diferentes`).
+
 ---
 
 ## ETAPA 8 — Ordenação Final

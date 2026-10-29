@@ -18,7 +18,7 @@ from services.leilao import linhas_laudo as linhas_laudo_leilao
 from services.textos_tela import (
     anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, imobiliaria_proxima,
     linhas_laudo_imobiliaria, linhas_referencia, motivo_sem_valor, motivo_terreno_fora,
-    nota_anuncio_do_alvo, suspeitos_do_proprio_imovel, texto_sem_imobiliaria,
+    marcados_pela_usuaria, nota_anuncio_do_alvo, suspeitos_do_proprio_imovel, texto_sem_imobiliaria,
 )
 from services.verificacoes import resumo_conferencia
 
@@ -40,7 +40,7 @@ def fmt_brl(valor, decimais=0):
 # Alertas (os mesmos gravados no banco) mostrados na tela com explicacao e anuncios.
 ALERTAS_NA_TELA = (
     "amostra_concentrada", "terreno_fora_do_padrao", "possivel_repetido_no_calculo",
-    "area_diferente_entre_portais",
+    "area_diferente_entre_portais", "mesma_casa_precos_diferentes",
 )
 
 
@@ -125,7 +125,8 @@ def mostrar_alertas_na_tela(resultado):
                     "Anúncio": f"[ver]({a['link']})" if a.get("link") else "-",
                 }
                 if com_motivo:
-                    linha["Motivo"] = str(a.get("motivo") or "-").replace("R$", "R\\$")
+                    coluna = "Imobiliária" if alerta.get("codigo") == "mesma_casa_precos_diferentes" else "Motivo"
+                    linha[coluna] = str(a.get("motivo") or "-").replace("R$", "R\\$")
                 linhas.append(linha)
             if linhas:
                 st.markdown(pd.DataFrame(linhas).to_markdown(index=False), unsafe_allow_html=True)
@@ -215,11 +216,26 @@ def mostrar_avaliacao_leilao(leilao):
     if leilao.get("aviso_zona"):
         st.warning(f"⚠️ {leilao['aviso_zona']}")
 
-def mostrar_resultado(resultado, imovel_alvo_export, tela):
+def mostrar_pergunta_anuncio_do_alvo(suspeito, chave, ao_responder):
+    """
+    "Este anuncio e do seu imovel?" abaixo do aviso de possivel/provavel anuncio do
+    proprio imovel. Sim: ao_responder(url, True) refaz o calculo sem ele.
+    """
+    st.button(
+        "Sim, este anúncio é do meu imóvel: tirar do cálculo",
+        key=f"anuncio_alvo_sim_{chave}", on_click=ao_responder, args=(suspeito["url"], True),
+    )
+
+
+def mostrar_resultado(resultado, imovel_alvo_export, tela, ao_responder_anuncio_do_alvo=None):
     """
     Resultado completo de uma avaliacao. `imovel_alvo_export` e o imovel alvo mandado
     aos agentes; `tela` traz os campos do formulario mostrados no texto e no laudo
     (rua, numero, bairro, cidade, estado, tipo, quartos, banheiros, vagas).
+
+    ao_responder_anuncio_do_alvo(url, e_do_alvo): com ele, cada possivel anuncio do
+    proprio imovel ganha a pergunta "Este anuncio e do seu imovel?" (so logo depois de
+    avaliar; o "Ver avaliacao completa" dos leiloes ativos e so leitura).
     """
     rua, numero, bairro, cidade, estado = (tela.get(c) for c in ("rua", "numero", "bairro", "cidade", "estado"))
     tipo, quartos, banheiros, vagas = (tela.get(c) for c in ("tipo", "quartos", "banheiros", "vagas"))
@@ -270,23 +286,44 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela):
         # aparecendo tambem nas tabelas de baixo).
         excluidos_alvo, _ = anuncios_do_proprio_imovel(resultado)
         suspeitos_alvo = suspeitos_do_proprio_imovel(resultado, imovel_alvo_export)
+        marcados_alvo = marcados_pela_usuaria(resultado, imovel_alvo_export)
+        if resultado.get("erro_refazer_calculo"):
+            st.error(f"⚠️ {resultado['erro_refazer_calculo']}")
         # Provavel anuncio do proprio imovel (perfil quase todo igual): em destaque.
-        for s_alvo in [s for s in suspeitos_alvo if s["provavel"]]:
+        for i, s_alvo in enumerate(s for s in suspeitos_alvo if s["provavel"]):
             st.error(
                 f"⚠️ **Provável anúncio do próprio imóvel (continua no cálculo):** "
                 f"{s_alvo['motivo']}.".replace("$", "\\$")
                 + (f" [Ver o anúncio]({s_alvo['url']})" if s_alvo["url"] else "")
+                + " **Este anúncio é do seu imóvel?**"
             )
+            if ao_responder_anuncio_do_alvo and s_alvo["url"]:
+                mostrar_pergunta_anuncio_do_alvo(s_alvo, f"provavel_{i}", ao_responder_anuncio_do_alvo)
         if excluidos_alvo:
             st.info(
                 "🎯 Encontramos o anúncio do próprio imóvel e ele saiu do cálculo."
                 + "".join(f" [Ver o anúncio]({u})" for u in excluidos_alvo if u)
             )
-        for s_alvo in [s for s in suspeitos_alvo if not s["provavel"]]:
+        # Marcados pela pessoa: a observacao continua na tela, com o motivo e o link.
+        for i, m_alvo in enumerate(marcados_alvo):
+            st.info(
+                f"🎯 **Você indicou que este anúncio é do seu imóvel, e ele saiu do cálculo.** "
+                f"Era parecido em: {m_alvo['motivo']}.".replace("$", "\\$")
+                + (f" [Ver o anúncio]({m_alvo['url']})" if m_alvo["url"] else "")
+            )
+            if ao_responder_anuncio_do_alvo:
+                st.button(
+                    "Não é do meu imóvel: voltar ao cálculo", key=f"anuncio_alvo_nao_{i}",
+                    on_click=ao_responder_anuncio_do_alvo, args=(m_alvo["url"], False),
+                )
+        for i, s_alvo in enumerate(s for s in suspeitos_alvo if not s["provavel"]):
             st.warning(
                 f"⚠️ Possível anúncio do próprio imóvel (continua no cálculo): {s_alvo['motivo']}.".replace("$", "\\$")
                 + (f" [Confira o anúncio]({s_alvo['url']})" if s_alvo["url"] else "")
+                + " **Este anúncio é do seu imóvel?**"
             )
+            if ao_responder_anuncio_do_alvo and s_alvo["url"]:
+                mostrar_pergunta_anuncio_do_alvo(s_alvo, f"possivel_{i}", ao_responder_anuncio_do_alvo)
 
         # Sem valor confiavel: os comparaveis validos como referencia (nao e estimativa).
         referencia = linhas_referencia(resultado) if not avaliacao_confiavel else []
@@ -1031,6 +1068,11 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela):
 
         for _url in excluidos_alvo:
             bloco_resultado += f"\nAtenção: encontramos o anúncio do próprio imóvel e ele saiu do cálculo ({_url or 'sem link'})."
+        for m_alvo in marcados_alvo:
+            bloco_resultado += (
+                f"\nAtenção: você indicou que este anúncio é do seu imóvel, e ele saiu do cálculo "
+                f"({m_alvo['motivo']}; {m_alvo['url'] or 'sem link'})."
+            )
         for s_alvo in suspeitos_alvo:
             bloco_resultado += (
                 f"\nAtenção: {'provável' if s_alvo['provavel'] else 'possível'} anúncio do próprio imóvel, "

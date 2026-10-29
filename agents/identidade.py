@@ -629,3 +629,92 @@ def deduplicar(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
                 })
         unicos.append(rep)
     return unicos, descartados
+
+
+# ---------------------------------------------------------------- mesma casa, precos diferentes
+# A mesma casa anunciada por imobiliarias diferentes, cada uma com o seu preco: Palhoca
+# (29/10/2026), Rua Jandaia, 286, 295 m2, 8 quartos, por R$ 1,3 / 1,4 / 1,6 mi. deduplicar
+# exige preco identico e deixava os anuncios separados: a casa pesava 2 vezes entre os 5
+# usados. Decisao da usuaria, 29/10/2026: so casa, mesma rua E mesmo numero, area ate 2%
+# e mesmos quartos; fica 1 anuncio com a MEDIANA dos precos, e os precos de cada
+# imobiliaria ficam em `precos_entre_imobiliarias` (alerta na tela). Apartamento nao:
+# unidades iguais no mesmo predio sao imoveis diferentes.
+MOTIVO_MESMO_ENDERECO = "casa_mesmo_endereco_precos_diferentes"
+
+
+def _mesma_casa_precos_diferentes(a: dict, b: dict) -> bool:
+    if grupo(a) != "casa" or grupo(b) != "casa" or _pode_ser_condominio(a) or _pode_ser_condominio(b):
+        return False
+    num = numero(a)
+    if not num or num != numero(b) or not rua(a) or rua(a) != rua(b):
+        return False
+    area_dif = dif_relativa(area(a), area(b))
+    qa, qb = _num(_campo(a, "quartos", "bedrooms")), _num(_campo(b, "quartos", "bedrooms"))
+    if area_dif is None or area_dif > CASA_AREA_COM_NUMERO or qa is None or qb is None or int(qa) != int(qb):
+        return False
+    return not _codigos_de_unidades_diferentes(a, b)
+
+
+def _preco_mediano(precos: list[float]) -> float:
+    from statistics import median
+    return float(median(precos))
+
+
+def agrupar_mesmo_endereco(anuncios: list[dict]) -> tuple[list[dict], list[dict]]:
+    """
+    Depois de deduplicar: junta a mesma casa com precos diferentes (ver acima). Devolve
+    (unicos, descartados) no mesmo formato de deduplicar; o anuncio que fica (o mais
+    completo) passa a ter o preco mediano, o preco dele em `preco_original` e a lista
+    `precos_entre_imobiliarias` (anunciante, portal, preco, url de cada anuncio).
+    """
+    ordem = sorted(range(len(anuncios)), key=lambda k: -_completude(anuncios[k]))
+    membros: dict[int, list[int]] = {}
+    for i in ordem:
+        destino = next((r for r in membros if _mesma_casa_precos_diferentes(anuncios[r], anuncios[i])), None)
+        if destino is None:
+            membros[i] = []
+        else:
+            membros[destino].append(i)
+
+    unicos, descartados = [], []
+    for rep_idx in sorted(membros):
+        outros = membros[rep_idx]
+        rep = anuncios[rep_idx]
+        grupo_todo = [rep] + [anuncios[k] for k in outros]
+        precos = [_num(preco(d)) for d in grupo_todo]
+        if not outros or any(p is None or p <= 0 for p in precos) or len(set(precos)) == 1:
+            # Sozinho, ou algum preco faltando/igual (deduplicar ja decidiu): nao junta.
+            unicos.append(rep)
+            unicos.extend(anuncios[k] for k in outros)
+            continue
+        rep = dict(rep)
+        mediana = _preco_mediano(precos)
+        rep["precos_entre_imobiliarias"] = [
+            {"anunciante": _campo(d, "anunciante_nome", "advertiser", "publisher"),
+             "portal": _campo(d, "source") or portal(d) or None, "preco": p, "url": _campo(d, "url")}
+            for d, p in zip(grupo_todo, precos)
+        ]
+        rep["preco_original"] = precos[0]
+        for campo in ("price", "preco"):
+            if campo == "price" or not _vazio(rep.get(campo)):
+                rep[campo] = mediana
+        a = _num(area(rep))
+        if a and not _vazio(rep.get("pricePerSqm")):
+            rep["pricePerSqm"] = round(mediana / a, 2)
+        rep["duplicatas"] = list(rep.get("duplicatas") or []) + [
+            {**_resumo(anuncios[k]), "motivo": MOTIVO_MESMO_ENDERECO, "preco": _num(preco(anuncios[k])),
+             "area": _num(area(anuncios[k])),
+             "dados_identidade": {c: anuncios[k][c] for c in CAMPOS_IDENTIDADE if not _vazio(anuncios[k].get(c))}}
+            for k in outros
+        ]
+        fontes = list(rep.get("fontes_origem") or [rep.get("source") or portal(rep)])
+        for k in outros:
+            fonte = anuncios[k].get("source") or portal(anuncios[k])
+            if fonte and fonte not in fontes:
+                fontes.append(fonte)
+        rep["fontes_origem"] = fontes
+        for k in outros:
+            descartados.append({**anuncios[k], "duplicata_de": _resumo(anuncios[rep_idx]),
+                                "motivo_duplicata": MOTIVO_MESMO_ENDERECO})
+        unicos.append(rep)
+    return unicos, descartados

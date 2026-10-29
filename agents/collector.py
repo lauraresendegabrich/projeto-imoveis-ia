@@ -147,7 +147,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import requests
 from dotenv import load_dotenv
 
-from agents.identidade import deduplicar, portal as portal_de
+from agents.identidade import agrupar_mesmo_endereco, deduplicar, portal as portal_de
 from agents.identidade import _anunciante, _resumo, area as area_de, grupo as grupo_de, preco as preco_de
 
 load_dotenv()
@@ -2058,6 +2058,15 @@ def coletar_imoveis(
     contagem = {"brutos": len(todos), "removidos_leilao_apos_enriquecimento": removidos_leilao,
                 "antes_dos_repetidos": len(combinados)}
     combinados, duplicatas_descartadas = deduplicar(combinados)
+    # Mesma casa (rua, numero, area, quartos) de imobiliarias diferentes, com precos
+    # diferentes: 1 anuncio com a mediana dos precos (agents/identidade.py).
+    combinados, mesmo_endereco = agrupar_mesmo_endereco(combinados)
+    if mesmo_endereco:
+        logger.info(
+            f"[Ag1][Duplicatas] {len(mesmo_endereco)} anuncio(s) da mesma casa com precos diferentes "
+            f"juntado(s) (preco = mediana do grupo)"
+        )
+    duplicatas_descartadas += mesmo_endereco
     contagem["repetidos_juntados"] = len(duplicatas_descartadas)
     contagem["unicos"] = len(combinados)
     _marcar_provaveis_lancamentos(combinados, duplicatas_descartadas)

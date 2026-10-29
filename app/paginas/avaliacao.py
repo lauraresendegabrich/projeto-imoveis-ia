@@ -119,6 +119,166 @@ def mostrar_resumo_caixa(lida):
         st.error(f"⚠️ {lida['campos'].get('gravame_texto') or TEXTO_GRAVAME}")
 
 
+def montar_resultado_final(ctx, resultado_ag5, id_registro=None):
+    """
+    Fim da avaliacao, depois do Agente 5: aviso da zona, avaliacao de leilao,
+    resultado da tela, verificacoes e registro no banco (em segundo plano).
+
+    ctx: o que os agentes 1 a 4 produziram (montado no fluxo e guardado na sessao).
+    id_registro: id da linha no banco; outro quando o calculo e refeito pela resposta
+    "Este anuncio e do seu imovel?" (os arquivos dos agentes continuam com o id da avaliacao).
+    """
+    import logging as _log_resumo
+    id_execucao = ctx["id_execucao"]
+    escopo_busca = ctx["escopo_busca"]
+    tempos = ctx["tempos"]
+
+    # ── RESUMO DA EXECUCAO (log para auditoria) ───────────────────
+    _lr = _log_resumo.getLogger("pipeline")
+    _lr.info("")
+    _lr.info("=" * 55)
+    _lr.info("  RESUMO DA EXECUCAO")
+    _lr.info("=" * 55)
+    _lr.info(f"  Agente 1 (coleta): {tempos['agente1']:.1f}s")
+    _lr.info(f"  Agente 2 (clustering): {tempos['agente2']:.1f}s")
+    _lr.info(f"  Agente 3+4 (paralelo): {tempos['agentes3e4']:.1f}s")
+    _lr.info(f"  Tempo total: {tempos['total']:.1f}s")
+    # Comparaveis usados por situacao da zona (os nao verificados contam para o minimo).
+    contagem_zona = contar_status_zona(resultado_ag5)
+    aviso_zona = texto_aviso_zona(contagem_zona, escopo_busca)
+    _lr.info(
+        f"  Usados no calculo: {contagem_zona['confirmado']} confirmados | "
+        f"{contagem_zona['fallback']} zona_nao_verificada (contam para o minimo de 5) | "
+        f"{contagem_zona['sem_validacao']} sem_validacao (socorro) | escopo_busca={escopo_busca}"
+    )
+    _lr.info("=" * 55)
+
+    # Avaliacao de leilao: so depois do Agente 5, com os valores do formulario
+    # (nunca passaram por nenhum agente). A etapa atual (1o/2o leilao) sai pela data.
+    dados_leilao = ctx["dados_leilao"]
+    leilao_entrada = leilao = None
+    if dados_leilao:
+        leilao_entrada = {**dados_leilao, "origem": dados_leilao["banco"],
+                          "codigo_caixa": dados_leilao.get("numero_imovel")}
+        leilao = avaliar_imovel_leilao(resultado_ag5, dados_leilao)
+    if leilao is not None:
+        leilao["aviso_zona"] = aviso_zona
+        # Endereco nao localizado com precisao de rua/bairro: o calculo segue, mas o
+        # aviso fica junto da decisao para nao passar despercebido.
+        leilao["alvo_sem_localizacao"] = ctx["alvo_sem_localizacao"]
+
+    imoveis_coletados = ctx["imoveis_coletados"]
+    resultado = {
+        "status": "completo",
+        "id_execucao": id_execucao,
+        "aviso_zona": aviso_zona,
+        "aviso_raio": texto_aviso_raio(ctx["zona_resultado"]),
+        "leilao_entrada": leilao_entrada,
+        "leilao": leilao,
+        "duplicatas_descartadas": ctx["duplicatas_descartadas"],
+        "comparaveis": ctx["comparaveis"],
+        "terrenos": ctx["terrenos"],
+        "zona_homogenea": ctx["zona_resultado"],
+        "analise_qualitativa": ctx["resultado_ag3"],
+        "infraestrutura": ctx["resultado_ag4"],
+        "preco_estimado": resultado_ag5,
+        "resumo": ctx["resumo"],
+        # Para as verificacoes automaticas (services/verificacoes.py).
+        "imovel_alvo": ctx["imovel_alvo"],
+        # Situacao de cada fonte e contagens da coleta (Agente 1).
+        "resumo_coleta": imoveis_coletados[0].get("resumo_coleta") if imoveis_coletados else None,
+        "falhas": ctx["falhas"],
+        "localizacao_alvo": ctx["localizacao_alvo"],
+    }
+    # Verificacoes automaticas: leem o resultado de cada agente e conferem regras
+    # (nao mudam nenhum calculo). Tela (modo conferencia), banco e Excel.
+    resultado["verificacoes"] = verificar_execucao(resultado)
+
+    # Grava a avaliacao no banco (Neon) em segundo plano: a tela nao espera e uma
+    # falha do banco so vira aviso no log (services/banco.py).
+    try:
+        from services.registro_execucao import montar_registro
+        from services.banco import gravar_em_segundo_plano
+        entrada_usuario = ctx["entrada_usuario"]
+        if id_registro:
+            # Calculo refeito pela resposta da pessoa: linha nova no banco, ligada a original.
+            entrada_usuario = {**(entrada_usuario or {}), "refeita_de": id_execucao,
+                               "anuncios_do_alvo_pela_usuaria": resultado_ag5.get("anuncios_do_alvo_pela_usuaria")}
+        registro_execucao, registro_comparaveis = montar_registro(
+            id_execucao=id_registro or id_execucao,
+            imovel_alvo=ctx["imovel_alvo"],
+            leilao_entrada=leilao_entrada,
+            leilao=leilao,
+            imoveis_coletados=imoveis_coletados,
+            resultado_ag2=ctx["resultado_ag2"],
+            zona_resultado=ctx["zona_resultado"],
+            resultado_ag3=ctx["resultado_ag3"],
+            resultado_ag4=ctx["resultado_ag4"],
+            resultado_ag5=resultado_ag5,
+            tempos=tempos,
+            falhas=ctx["falhas"],
+            localizacao_alvo=ctx["localizacao_alvo"],
+            entrada_usuario=entrada_usuario,
+        )
+        # Guardado no resultado (sessao) para o botao de exportar Excel: mesmo
+        # conteudo gravado no banco.
+        registro_execucao["verificacoes"] = resultado["verificacoes"]
+        # Para o "Ver avaliacao completa" da pagina "Leiloes ativos" (migracao 006).
+        registro_execucao["resultado_completo"] = resultado_para_gravar(resultado, ctx["tela_resultado"])
+        resultado["registro"] = {"execucao": registro_execucao, "comparaveis": registro_comparaveis}
+        gravar_em_segundo_plano(registro_execucao, registro_comparaveis)
+    except Exception as e:
+        _log_resumo.getLogger("pipeline").warning(f"[Banco] registro nao montado: {type(e).__name__}: {e}")
+    return resultado
+
+
+def _marcar_anuncio_do_alvo_na_tela(ctx, url, e_do_alvo):
+    """Marca/desmarca o anuncio nas listas da tela (as tabelas mostram "seu anuncio")."""
+    listas = [ctx["comparaveis"], ctx["terrenos"],
+              (ctx["zona_resultado"] or {}).get("comparaveis_confirmados") or []]
+    for lista in listas:
+        for c in lista or []:
+            if c.get("url") != url:
+                continue
+            if e_do_alvo:
+                c["eh_anuncio_do_alvo"] = True
+                c["anuncio_do_alvo_pela_usuaria"] = True
+            elif c.get("anuncio_do_alvo_pela_usuaria"):
+                c["eh_anuncio_do_alvo"] = False
+                c.pop("anuncio_do_alvo_pela_usuaria", None)
+
+
+def responder_anuncio_do_alvo(url, e_do_alvo):
+    """
+    Botao "Sim, este anuncio e do meu imovel" (ou "Nao e do meu imovel"): refaz o
+    Agente 5 sem (ou com) o anuncio e o fim da avaliacao. Os agentes 1 a 4 nao rodam
+    de novo: o Agente 5 le os arquivos desta avaliacao (id_execucao). Se outra
+    avaliacao ja rodou depois, os arquivos sao dela e o calculo nao e refeito.
+    """
+    from agents.execucao import novo_id_execucao
+    from agents.price_liquidity import estimar_preco
+    ctx = st.session_state.get("contexto_avaliacao")
+    resultado = st.session_state.get("resultado") or {}
+    if not ctx:
+        return
+    urls = list((resultado.get("preco_estimado") or {}).get("anuncios_do_alvo_pela_usuaria") or [])
+    if e_do_alvo and url not in urls:
+        urls.append(url)
+    elif not e_do_alvo and url in urls:
+        urls.remove(url)
+    imovel_alvo = {**ctx["imovel_alvo"], "escopo_busca": ctx["escopo_busca"]}
+    novo_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo, id_execucao=ctx["id_execucao"],
+                             urls_do_alvo_pela_usuaria=urls)
+    if not novo_ag5.get("zona_calculada_nesta_avaliacao", True):
+        resultado["erro_refazer_calculo"] = (
+            "Não foi possível refazer o cálculo: outra avaliação rodou depois desta e os dados "
+            "dela substituíram os desta. Avalie o imóvel de novo para responder."
+        )
+        return
+    _marcar_anuncio_do_alvo_na_tela(ctx, url, e_do_alvo)
+    st.session_state["resultado"] = montar_resultado_final(ctx, novo_ag5, id_registro=novo_id_execucao())
+
+
 # Streamlit Cloud: carrega secrets como variáveis de ambiente
 try:
     for key, value in st.secrets.items():
@@ -855,27 +1015,6 @@ with area_principal.container():
         aviso_cancelar.empty()
         cabecalho.subheader(f"✅ Avaliação concluída em {tempo_total:.0f} segundos")
 
-        # ── RESUMO DA EXECUCAO (log para auditoria) ───────────────────
-        import logging as _log_resumo
-        _lr = _log_resumo.getLogger("pipeline")
-        _lr.info("")
-        _lr.info("=" * 55)
-        _lr.info("  RESUMO DA EXECUCAO")
-        _lr.info("=" * 55)
-        _lr.info(f"  Agente 1 (coleta): {tempo_ag1:.1f}s")
-        _lr.info(f"  Agente 2 (clustering): {tempo_ag2_cluster:.1f}s")
-        _lr.info(f"  Agente 3+4 (paralelo): {tempo_ag34:.1f}s")
-        _lr.info(f"  Tempo total: {tempo_total:.1f}s")
-        # Comparaveis usados por situacao da zona (os nao verificados contam para o minimo).
-        contagem_zona = contar_status_zona(resultado_ag5)
-        aviso_zona = texto_aviso_zona(contagem_zona, escopo_busca)
-        _lr.info(
-            f"  Usados no calculo: {contagem_zona['confirmado']} confirmados | "
-            f"{contagem_zona['fallback']} zona_nao_verificada (contam para o minimo de 5) | "
-            f"{contagem_zona['sem_validacao']} sem_validacao (socorro) | escopo_busca={escopo_busca}"
-        )
-        _lr.info("=" * 55)
-
         # Monta resultado para exibição
         # Enriquece resumo com dados da coleta
         resumo["total_coletados"] = len(imoveis_coletados)
@@ -900,86 +1039,30 @@ with area_principal.container():
 
         resumo["duplicatas_descartadas"] = len(duplicatas_descartadas)
 
-        # Avaliacao de leilao: so depois do Agente 5, com os valores do formulario
-        # (nunca passaram por nenhum agente). A etapa atual (1o/2o leilao) sai pela data.
-        leilao_entrada = leilao = None
-        if dados_leilao:
-            leilao_entrada = {**dados_leilao, "origem": dados_leilao["banco"],
-                              "codigo_caixa": dados_leilao.get("numero_imovel")}
-            leilao = avaliar_imovel_leilao(resultado_ag5, dados_leilao)
-        if leilao is not None:
-            leilao["aviso_zona"] = aviso_zona
-            # Endereco nao localizado com precisao de rua/bairro: o calculo segue, mas o
-            # aviso fica junto da decisao para nao passar despercebido.
-            leilao["alvo_sem_localizacao"] = alvo_sem_localizacao
-
-        resultado = {
-            "status": "completo",
-            "id_execucao": id_execucao,
-            "aviso_zona": aviso_zona,
-            "aviso_raio": texto_aviso_raio(zona_resultado),
-            "leilao_entrada": leilao_entrada,
-            "leilao": leilao,
-            "duplicatas_descartadas": duplicatas_descartadas,
-            "comparaveis": comparaveis,
-            "terrenos": terrenos,
-            "zona_homogenea": zona_resultado,
-            "analise_qualitativa": resultado_ag3,
-            "infraestrutura": resultado_ag4,
-            "preco_estimado": resultado_ag5,
-            "resumo": resumo,
-            # Para as verificacoes automaticas (services/verificacoes.py).
-            "imovel_alvo": imovel_alvo,
-            # Situacao de cada fonte e contagens da coleta (Agente 1).
-            "resumo_coleta": imoveis_coletados[0].get("resumo_coleta") if imoveis_coletados else None,
-            "falhas": falhas_execucao,
-            "localizacao_alvo": localizacao_alvo,
+        # Tudo o que o fim do fluxo usa (resultado, leilao, verificacoes, banco). Fica na
+        # sessao: roda de novo quando a pessoa responde "Este anuncio e do seu imovel?".
+        contexto = {
+            "id_execucao": id_execucao, "imovel_alvo": imovel_alvo, "imoveis_coletados": imoveis_coletados,
+            "escopo_busca": escopo_busca, "resumo": resumo, "duplicatas_descartadas": duplicatas_descartadas,
+            "dados_leilao": dados_leilao, "alvo_sem_localizacao": alvo_sem_localizacao,
+            "comparaveis": comparaveis, "terrenos": terrenos, "zona_resultado": zona_resultado,
+            "resultado_ag2": resultado_ag2, "resultado_ag3": resultado_ag3, "resultado_ag4": resultado_ag4,
+            "falhas": falhas_execucao, "localizacao_alvo": localizacao_alvo,
+            "entrada_usuario": entrada_usuario, "tela_resultado": tela_resultado,
+            "tempos": {
+                "total": round(tempo_total, 1),
+                "agente1": round(tempo_ag1, 1),
+                "agente2": round(tempo_ag2_cluster, 1),
+                "zona": round(locals().get("tempo_zona", 0.0), 1),
+                "agentes3e4": round(tempo_ag34, 1),
+            },
         }
-        # Verificacoes automaticas: leem o resultado de cada agente e conferem regras
-        # (nao mudam nenhum calculo). Tela (modo conferencia), banco e Excel.
-        resultado["verificacoes"] = verificar_execucao(resultado)
+        resultado = montar_resultado_final(contexto, resultado_ag5)
 
         # Salva no session_state pra não perder no rerun
         st.session_state["resultado"] = resultado
         st.session_state["imovel_alvo_dados"] = imovel_alvo
-
-        # Grava a avaliacao no banco (Neon) em segundo plano: a tela nao espera e uma
-        # falha do banco so vira aviso no log (services/banco.py).
-        try:
-            from services.registro_execucao import montar_registro
-            from services.banco import gravar_em_segundo_plano
-            registro_execucao, registro_comparaveis = montar_registro(
-                id_execucao=id_execucao,
-                imovel_alvo=imovel_alvo,
-                leilao_entrada=leilao_entrada,
-                leilao=leilao,
-                imoveis_coletados=imoveis_coletados,
-                resultado_ag2=resultado_ag2,
-                zona_resultado=zona_resultado,
-                resultado_ag3=resultado_ag3,
-                resultado_ag4=resultado_ag4,
-                resultado_ag5=resultado_ag5,
-                tempos={
-                    "total": round(tempo_total, 1),
-                    "agente1": round(tempo_ag1, 1),
-                    "agente2": round(tempo_ag2_cluster, 1),
-                    "zona": round(locals().get("tempo_zona", 0.0), 1),
-                    "agentes3e4": round(tempo_ag34, 1),
-                },
-                falhas=falhas_execucao,
-                localizacao_alvo=localizacao_alvo,
-                entrada_usuario=entrada_usuario,
-            )
-            # Guardado no resultado (sessao) para o botao de exportar Excel: mesmo
-            # conteudo gravado no banco.
-            registro_execucao["verificacoes"] = resultado["verificacoes"]
-            # Para o "Ver avaliacao completa" da pagina "Leiloes ativos" (migracao 006).
-            registro_execucao["resultado_completo"] = resultado_para_gravar(resultado, tela_resultado)
-            resultado["registro"] = {"execucao": registro_execucao, "comparaveis": registro_comparaveis}
-            gravar_em_segundo_plano(registro_execucao, registro_comparaveis)
-        except Exception as e:
-            import logging as _log_banco
-            _log_banco.getLogger("pipeline").warning(f"[Banco] registro nao montado: {type(e).__name__}: {e}")
+        st.session_state["contexto_avaliacao"] = contexto
 
     # Recupera resultado salvo (pra quando faz download sem perder)
     if "resultado" in st.session_state:
@@ -990,4 +1073,5 @@ with area_principal.container():
         # RESULTADO
         # ============================================================
 
-        mostrar_resultado(resultado, imovel_alvo_export, tela_resultado)
+        mostrar_resultado(resultado, imovel_alvo_export, tela_resultado,
+                          ao_responder_anuncio_do_alvo=responder_anuncio_do_alvo)

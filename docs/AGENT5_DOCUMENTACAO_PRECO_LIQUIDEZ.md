@@ -12,6 +12,30 @@ Calcula o valor estimado do imóvel alvo reproduzindo a metodologia da planilha 
 - `data/imoveis_analisados_ag3.json` — score qualitativo + padrão acabamento
 - `data/infra_avaliada_ag4.json` — score infraestrutura
 - Imóvel alvo (área, área_terreno, tipo)
+- `urls_do_alvo_pela_usuaria` (opcional): anúncios que a pessoa marcou na tela como do
+  próprio imóvel
+
+### Anúncio do próprio imóvel
+
+Saem do cálculo os anúncios que o Agente 2 confirmou como do próprio imóvel
+(`eh_anuncio_do_alvo`) e os que a pessoa indicou na tela.
+
+Os "possíveis" e "prováveis" continuam no cálculo, porque não há prova. Na tela, cada um
+ganha a pergunta **"Este anúncio é do seu imóvel?"** (out/2026: em Palhoça, a casa
+avaliada estava na amostra pelo próprio preço pedido, e sem o preço no formulário não
+dava para confirmar).
+
+O botão **"Sim, este anúncio é do meu imóvel: tirar do cálculo"**
+(`app/paginas/avaliacao.py::responder_anuncio_do_alvo`):
+- roda de novo **só** o Agente 5, lendo os arquivos desta avaliação (`id_execucao`);
+- refaz o fim do fluxo (leilão, alertas, verificações) e grava uma linha nova no banco,
+  com `entrada_usuario.refeita_de` e `entrada_usuario.anuncios_do_alvo_pela_usuaria`;
+- deixa a observação na tela ("Você indicou que este anúncio é do seu imóvel…"), com
+  o motivo, o link e o botão "Não é do meu imóvel: voltar ao cálculo".
+
+Se outra avaliação rodou depois, os arquivos já são dela e o cálculo não é refeito: a
+tela pede para avaliar de novo. A pergunta não aparece no "Ver avaliação completa" dos
+leilões ativos, que é só leitura.
 
 ---
 

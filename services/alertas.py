@@ -318,4 +318,27 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
              for c in lancamentos],
         ))
 
+    # 13. Mesma casa (rua, numero, area, quartos) anunciada por imobiliarias diferentes
+    #     com precos diferentes: o Agente 1 juntou e usou a mediana dos precos.
+    juntadas = [c for c in usados_todos if c.get("precos_entre_imobiliarias")]
+    if juntadas:
+        frases, detalhe = [], []
+        for c in juntadas:
+            precos = [p["preco"] for p in c["precos_entre_imobiliarias"] if p.get("preco")]
+            area_txt = f" ({float(c['area']):g} m²)" if c.get("area") else ""
+            frases.append(
+                f"A casa da {c.get('rua') or 'mesma rua e número'}{area_txt} aparece em "
+                f"{len(c['precos_entre_imobiliarias'])} anúncios de imobiliárias diferentes, com preços "
+                f"de {_brl(min(precos))} a {_brl(max(precos))}. Contou como 1 imóvel, com o preço do "
+                f"meio (mediana): {_brl(float(c.get('preco') or 0))}."
+            )
+            for p in c["precos_entre_imobiliarias"]:
+                detalhe.append({**_anuncio(c), "preco": p.get("preco"), "portal": p.get("portal"),
+                                "link": p.get("url"), "motivo": p.get("anunciante") or "-"})
+        alertas.append(_alerta(
+            "mesma_casa_precos_diferentes",
+            "Mesma casa com preços diferentes: " + " ".join(frases),
+            sum(len(c["precos_entre_imobiliarias"]) for c in juntadas), 0, detalhe,
+        ))
+
     return alertas

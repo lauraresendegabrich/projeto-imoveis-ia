@@ -340,7 +340,9 @@ def salvar_json(dados: Any, caminho: str) -> None:
         json.dump(dados, f, ensure_ascii=False, indent=2)
 
 
-def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]:
+def carregar_dados_pipeline(
+    id_execucao: Optional[str] = None, urls_do_alvo_pela_usuaria: Optional[List[str]] = None,
+) -> Tuple[Dict, List[Dict], List[Dict], Dict, Dict]:
     """
     Le os JSONs dos agentes anteriores e retorna:
     - imovel_alvo (dict)
@@ -354,9 +356,13 @@ def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, Li
     Se a zona homogenea nao rodou nesta avaliacao, nao ha comparaveis (o status
     sai sem_amostra): antes, o arquivo da avaliacao anterior — de outro imovel —
     era usado no calculo. Sem id_execucao (testes/scripts antigos), le como antes.
+
+    urls_do_alvo_pela_usuaria: anuncios que a pessoa disse, na tela, que sao do proprio
+    imovel ("Este anuncio e do seu imovel?"). Saem do calculo como os confirmados pelo Ag2.
     """
     import logging
     logger_local = logging.getLogger(__name__)
+    urls_pela_usuaria = set(urls_do_alvo_pela_usuaria or ())
 
     def _ler(caminho: str) -> Dict:
         if id_execucao:
@@ -411,7 +417,7 @@ def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, Li
         # O Ag2 marca o proprio anuncio do imovel-alvo (quando ele aparece entre os
         # coletados). Ele e excluido do CALCULO de preco para nao ancorar a estimativa
         # no preco pedido pelo usuario. Continua disponivel nos demais agentes/interface.
-        if imovel.get("eh_anuncio_do_alvo"):
+        if imovel.get("eh_anuncio_do_alvo") or (imovel.get("url") and imovel.get("url") in urls_pela_usuaria):
             excluidos_anuncio_alvo += 1
             continue
 
@@ -450,7 +456,8 @@ def carregar_dados_pipeline(id_execucao: Optional[str] = None) -> Tuple[Dict, Li
     if excluidos_anuncio_alvo:
         _lg.info(
             f"[Ag5] {excluidos_anuncio_alvo} anuncio(s) do proprio alvo excluido(s) do "
-            f"calculo de preco (marcados pelo Ag2 como eh_anuncio_do_alvo)"
+            f"calculo de preco (marcados pelo Ag2 como eh_anuncio_do_alvo"
+            + (f" ou pela usuaria na tela: {len(urls_pela_usuaria)}" if urls_pela_usuaria else "") + ")"
         )
 
     # Agente 3 (analise qualitativa) e Agente 4 (infraestrutura): se falharam nesta
@@ -832,6 +839,10 @@ def executar_agente5(
             # Mesmo imovel com areas diferentes entre portais (Ag1): area de cada
             # portal; o calculo ja usa a area escolhida (menor, para casa/apto).
             "areas_entre_portais": im.get("areas_entre_portais"),
+            # Mesma casa (rua, numero, area, quartos) anunciada por imobiliarias diferentes
+            # com precos diferentes (Ag1): conta como 1, com a mediana dos precos.
+            "precos_entre_imobiliarias": im.get("precos_entre_imobiliarias"),
+            "preco_original": im.get("preco_original"),
             # Grupo de anuncios iguais de imobiliarias diferentes (Ag1): conta como 1.
             "provavel_lancamento": im.get("provavel_lancamento"),
             "area_original": im.get("area_original"),
@@ -1379,7 +1390,10 @@ def executar_agente5(
 # FUNCAO DE ENTRADA (chamada pelo pipeline)
 # ============================================================
 
-def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optional[str] = None) -> Dict[str, Any]:
+def estimar_preco(
+    imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optional[str] = None,
+    urls_do_alvo_pela_usuaria: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Funcao principal do Agente 5.
     Le os JSONs dos agentes anteriores, calcula e salva o resultado.
@@ -1393,6 +1407,8 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optiona
     id_execucao : str (opcional)
         Identificador desta avaliacao. Com ele, so sao usados arquivos gravados por
         esta avaliacao; sem a zona homogenea desta avaliacao, o status e sem_amostra.
+    urls_do_alvo_pela_usuaria : list (opcional)
+        Anuncios que a pessoa marcou na tela como do proprio imovel: saem do calculo.
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -1400,7 +1416,7 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optiona
     logger.info("Agente 5: carregando dados dos agentes anteriores...")
 
     imovel_alvo, terrenos_zona, comparaveis_zona, dados_ag3, dados_ag4 = (
-        carregar_dados_pipeline(id_execucao)
+        carregar_dados_pipeline(id_execucao, urls_do_alvo_pela_usuaria)
     )
 
     # Complementa imovel_alvo com dados extras (ex: area_terreno do main.py)
@@ -1438,6 +1454,7 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optiona
             "Maps ou erro na validacao geografica); por seguranca, o valor nao foi estimado.",
         )
     resultado["id_execucao"] = id_execucao
+    resultado["anuncios_do_alvo_pela_usuaria"] = list(urls_do_alvo_pela_usuaria or [])
 
     salvar_json(resultado, CAMINHO_SAIDA)
     logger.info(f"[Ag5] Resultado salvo em {CAMINHO_SAIDA}")
