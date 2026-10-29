@@ -640,6 +640,12 @@ with area_principal.container():
                     f"ℹ️ {contagem(n_proximidade, 'anúncio veio', 'anúncios vieram')} por proximidade (até 1,5 km do "
                     f"imóvel, fora da rua e do bairro). Só entram no cálculo se estiverem dentro da zona do imóvel."
                 )
+            n_resto_cidade = sum(1 for im in imoveis_coletados if im.get("origem_busca") == "cidade")
+            if n_resto_cidade:
+                st.caption(
+                    f"ℹ️ {contagem(n_resto_cidade, 'anúncio veio', 'anúncios vieram')} do resto da cidade (poucos "
+                    f"anúncios perto do imóvel). Só entram no cálculo se estiverem dentro da zona do imóvel."
+                )
             if (rua or bairro) and escopo_busca == "cidade":
                 local = " / ".join(x for x in (rua, bairro) if x)
                 st.caption(f"ℹ️ Nenhum imóvel encontrado em {local}. Usando imóveis da cidade toda.")

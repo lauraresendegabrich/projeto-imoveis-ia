@@ -165,6 +165,10 @@ LIMITE_AREA_PRE_CLASSIFICACAO_RELAXADO = 0.45
 # Alvorada do Sul, casas de area parecida caiam so pelo tamanho do lote.
 MIN_TERRENOS_TERRENO_NAO_ELIMINA = 5
 
+# Faixa de area usada nas medias do resumo da pre-classificacao (so estatistica).
+AREA_MIN_ESTATISTICA_M2 = 10
+AREA_MAX_ESTATISTICA_M2 = 10_000
+
 # Zona homogenea: minimo de comparaveis confirmados (na_zona) desejado.
 # Se a validacao geografica confirmar menos que isto, os imoveis "zona_nao_verificada"
 # (geocodificados por bairro fora do raio, sem posicao propria) sao anexados como
@@ -1081,11 +1085,14 @@ def _calcular_estatisticas_areas(candidatos: list[dict], imovel_alvo: dict) -> d
     pertence ao grupo casa/sobrado. Para apartamento/flat/cobertura,
     media_area_terreno=None e amostras_area_terreno=0.
     """
-    areas = [a for a in (_obter_area_construida(i) for i in candidatos) if a is not None]
+    # Area digitada errada no portal (Birigui, out/2026: casa com 2,79 milhoes de m2)
+    # nao entra na media; o anuncio continua (a pre-classificacao ja o recusa pela area).
+    plausivel = lambda a: a is not None and AREA_MIN_ESTATISTICA_M2 <= a <= AREA_MAX_ESTATISTICA_M2
+    areas = [a for a in (_obter_area_construida(i) for i in candidatos) if plausivel(a)]
 
     terreno_aplicavel = _eh_casa(imovel_alvo)
     if terreno_aplicavel:
-        terrenos = [a for a in (_obter_area_terreno(i) for i in candidatos) if a is not None]
+        terrenos = [a for a in (_obter_area_terreno(i) for i in candidatos) if plausivel(a)]
     else:
         terrenos = []
 
@@ -1300,6 +1307,13 @@ def _resumir_descricao(imovel: dict, limite: int = 320) -> str:
         return "nao_informada"
     return texto[:limite] + ("..." if len(texto) > limite else "")
 
+def _tolerancia_quartos(quartos_alvo: float | None) -> int:
+    """Diferenca de quartos aceita pela IA: 1 ate 4 quartos, 2 com 5-6, 3 com 7 ou mais."""
+    if quartos_alvo is None or quartos_alvo < 5:
+        return 1
+    return 2 if quartos_alvo < 7 else 3
+
+
 def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrigido: bool = False) -> str:
     """
     Prompt de comparabilidade sem preco/preco-m2 para evitar circularidade na precificacao.
@@ -1342,10 +1356,55 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrig
     candidatos_texto = "\n".join(linhas)
     criterio_terreno = (
         "3. Banheiros, vagas e caracteristicas estruturais ajudam a diferenciar o padrao. O TAMANHO\n"
-        "   DO TERRENO NAO e motivo para rejeitar: o valor do terreno e descontado no calculo."
+        "   DO TERRENO NAO e motivo para rejeitar: o valor do terreno e descontado no calculo.\n"
+        "   Nao cite o terreno na justificativa."
         if terreno_corrigido else
         "3. Banheiros, vagas, terreno e caracteristicas estruturais ajudam a diferenciar o padrao."
     )
+
+    # Quartos: tolerancia maior em casa grande (Palhoca, out/2026: alvo de 360 m2 com 8
+    # quartos; a IA recusou 31 casas de area parecida com 4 a 6 quartos). O preco segue
+    # a area; com muitos quartos, 1 a mais ou a menos pesa pouco.
+    quartos_alvo = _para_float(alvo.get("bedrooms"))
+    tolerancia = _tolerancia_quartos(quartos_alvo)
+    if tolerancia == 1:
+        criterio_quartos = (
+            "2. Area e numero de quartos sao relevantes, mas uma diferenca de ATE 1 QUARTO\n"
+            "   (ex.: alvo com 4 quartos vs candidato com 3 ou 5) NAO e motivo para rejeitar.\n"
+            "   Trate ate 1 quarto de diferenca como equivalente quando a area\n"
+            "   for compativel. So considere os quartos um problema se a diferenca for de\n"
+            "   2 ou mais, ou se vier acompanhada de outras divergencias relevantes."
+        )
+    else:
+        q = int(quartos_alvo)
+        criterio_quartos = (
+            f"2. A AREA e o criterio principal. O alvo tem {q} quartos (casa grande): uma diferenca de\n"
+            f"   ATE {tolerancia} QUARTOS (candidato com {q - tolerancia} a {q + tolerancia}) NAO e motivo para rejeitar\n"
+            f"   quando a area for compativel. So considere os quartos um problema se a diferenca\n"
+            f"   for maior que {tolerancia}, ou se vier acompanhada de outras divergencias relevantes."
+        )
+
+    # Amenidades: o anuncio da CAIXA lista so os comodos ("2 Quartos, Varanda, Area de
+    # Servico, Wc, Sala, Cozinha") e a IA lia isso como descricao informativa: em Maceio
+    # (out/2026) recusou 31 casas por piscina/salao/playground que o alvo nao "tinha".
+    # Amenidade nao_informado no alvo e desconhecida; so a ausencia explicita ("nao") conta.
+    car_alvo = _extrair_caracteristicas(alvo)
+    ausentes_alvo = [nome for nome, valor in car_alvo.items() if valor is False]
+    if ausentes_alvo:
+        criterio_amenidades = (
+            "5. PADRAO POR AMENIDADES: so contam como diferenca as amenidades que o alvo NAO possui\n"
+            f"   explicitamente ({', '.join(ausentes_alvo)}). As marcadas nao_informado no alvo sao\n"
+            "   DESCONHECIDAS: a presenca delas no candidato NAO e motivo para B. Mesmo as que contam\n"
+            "   so justificam B junto com outras divergencias relevantes (area, quartos, banheiros).\n"
+            "   Uma ou duas amenidades isoladas permanecem diferenca secundaria e NAO eliminam."
+        )
+    else:
+        criterio_amenidades = (
+            "5. PADRAO POR AMENIDADES: o alvo NAO informa a ausencia de nenhuma amenidade (todas\n"
+            "   nao_informado ou presentes). Piscina, churrasqueira, area gourmet, salao, playground,\n"
+            "   portaria etc. no candidato NAO sao motivo para B, nem em conjunto: no alvo sao\n"
+            "   DESCONHECIDAS, nao evidencia de padrao inferior."
+        )
 
     return f"""Classifique cada candidato como A (comparavel) ou B (nao comparavel) em relacao ao imovel alvo.
 
@@ -1365,21 +1424,11 @@ CRITERIOS DE JULGAMENTO:
 1. A localizacao NAO e criterio aqui: ela e avaliada depois, pela zona homogenea.
    Julgue apenas tipo/uso, area, quartos e padrao. Ignore bairro, rua ou regiao que
    aparecam na descricao.
-2. Area e numero de quartos sao relevantes, mas uma diferenca de ATE 1 QUARTO
-   (ex.: alvo com 4 quartos vs candidato com 3 ou 5) NAO e motivo para rejeitar.
-   Trate ate 1 quarto de diferenca como equivalente quando a area
-   for compativel. So considere os quartos um problema se a diferenca for de
-   2 ou mais, ou se vier acompanhada de outras divergencias relevantes.
+{criterio_quartos}
 {criterio_terreno}
 4. Use a descricao somente para entender tipologia, padrao e caracteristicas; nao invente dados ausentes.
-5. PADRAO POR AMENIDADES: um CONJUNTO EXPRESSIVO de amenidades de lazer/conforto no
-   candidato (por exemplo piscina + area gourmet + churrasqueira + sauna + varanda, varias
-   ao mesmo tempo) que o alvo NAO possui sugere padrao de acabamento superior e PODE
-   justificar B. Porem, aplique isto SOMENTE quando o alvo tiver descricao informativa.
-   Se a descricao do alvo for vazia ou muito curta, NAO rebaixe por isso: a ausencia de
-   mencao no alvo e DESCONHECIDO, nao evidencia de padrao inferior. Uma ou duas amenidades
-   isoladas permanecem diferenca secundaria e NAO eliminam.
-6. Nao rejeite por uma unica diferenca secundaria (incluindo 1 quarto a mais ou a menos).
+{criterio_amenidades}
+6. Nao rejeite por uma unica diferenca secundaria (incluindo quartos dentro da tolerancia do item 2).
    Classifique B apenas quando o CONJUNTO das diferencas tornar o candidato inadequado
    como referencia de mercado.
 7. A = referencia suficientemente semelhante para compor a amostra de comparaveis.
@@ -3102,8 +3151,18 @@ def _so_entra_com_circulo(im: dict) -> bool:
 # proximidade do Agente 1, que traz os anuncios ate essa distancia). Sem chamar a IA
 # nem geocodificar de novo: usa a distancia ja calculada. Casas/aptos e terrenos
 # sao ampliados separadamente (cada grupo precisa de 5).
-from agents.collector import RAIO_PROXIMIDADE_M  # noqa: E402
+from agents.collector import RAIO_PROXIMIDADE_M, _mesmo_bairro  # noqa: E402
 FATOR_AMPLIACAO_RAIO = 1.5
+
+# Zona estendida no mesmo bairro (decisao da usuaria, 29/10/2026): se mesmo depois
+# da ampliacao faltarem confirmados, entram os do MESMO BAIRRO do alvo ate este
+# raio, com a mesma ampliacao x1,5 por passo. Ficam marcados (incluido_por_mesmo_bairro)
+# e contam como fora da zona confirmada (completaram a amostra). Maceio, out/2026: o
+# alvo na borda do bairro, 48 casas parecidas no proprio bairro a 1-3 km, 4 na zona.
+RAIO_MESMO_BAIRRO_M = 2500
+
+# Coordenada do portal a mais disto do alvo nao e da mesma cidade: erro do portal.
+DISTANCIA_COORDENADA_IMPOSSIVEL_M = 50_000
 
 
 def _distancia_exata(im: dict) -> float | None:
@@ -3150,6 +3209,43 @@ def _ampliar_raio(
     return confirmados, fora, int(round(raio))
 
 
+def _completar_mesmo_bairro(
+    confirmados: list[dict],
+    fora: list[dict],
+    raio_atual: float,
+    bairro_alvo: str,
+    limite: float = RAIO_MESMO_BAIRRO_M,
+    minimo: int = MIN_CONFIRMADOS_ZONA,
+) -> tuple[list[dict], list[dict], float]:
+    """
+    Com menos de `minimo` confirmados, pega de `fora` os anuncios do mesmo bairro do
+    alvo com distancia medida da propria posicao (_distancia_exata), crescendo o raio
+    x FATOR_AMPLIACAO_RAIO ate o minimo ou `limite`. Retorna (entram, fora, raio).
+    Os que entram ficam com incluido_por_mesmo_bairro e incluido_por_fallback_zona
+    (nao contam como confirmados na zona) e confianca baixa.
+    """
+    raio = float(raio_atual)
+    if len(confirmados) >= minimo or not bairro_alvo or raio >= limite:
+        return [], fora, raio_atual
+    candidatos = [
+        im for im in fora
+        if _distancia_exata(im) is not None
+        and _mesmo_bairro(im.get("neighborhood") or im.get("bairro"), bairro_alvo)
+    ]
+    entram: list[dict] = []
+    while candidatos and len(confirmados) + len(entram) < minimo and raio < limite:
+        raio = min(raio * FATOR_AMPLIACAO_RAIO, float(limite))
+        entram = [im for im in candidatos if _distancia_exata(im) <= raio]
+    if not entram:
+        return [], fora, raio_atual
+    for im in entram:
+        im["incluido_por_mesmo_bairro"] = True
+        im["incluido_por_fallback_zona"] = True
+        im["confianca_zona"] = "baixa"
+    ids = {id(im) for im in entram}
+    return entram, [im for im in fora if id(im) not in ids], int(round(raio))
+
+
 def _classificar_imovel_na_zona(
     im: dict,
     lat_alvo: float,
@@ -3180,6 +3276,16 @@ def _classificar_imovel_na_zona(
             nivel = "coordenadas_athena"
             endereco_usado = "lat/lon existentes"
         except (TypeError, ValueError):
+            lat = lon = None
+        # Coordenada do portal longe demais para ser da mesma cidade (Maceio, out/2026:
+        # dois anuncios a 3.945 km, em outro estado): e erro do portal. Descarta e
+        # localiza pelo endereco, como um anuncio sem coordenada.
+        if lat is not None and _distancia_haversine(lat_alvo, lon_alvo, lat, lon) > DISTANCIA_COORDENADA_IMPOSSIVEL_M:
+            logger.info(
+                f"[Ag2][Zona] coordenada do portal a {_distancia_haversine(lat_alvo, lon_alvo, lat, lon) / 1000:.0f} km "
+                f"do alvo descartada: {str(im.get('url') or '')[:60]}"
+            )
+            im["coordenada_portal_descartada"] = {"lat": lat, "lon": lon}
             lat = lon = None
 
     if lat is None or lon is None:
@@ -3519,15 +3625,25 @@ def analisar_zona_homogenea(
             f"{len(terrenos_confirmados)} (raio dos terrenos {raio_final_terrenos}m)"
         )
 
+    # 3c2. Zona estendida no mesmo bairro (RAIO_MESMO_BAIRRO_M), se ainda faltar.
+    mesmo_bairro, fora, raio_mesmo_bairro = _completar_mesmo_bairro(confirmados, fora, raio_final, bairro_alvo)
+    terrenos_mesmo_bairro, terrenos_fora_zona, raio_mesmo_bairro_terrenos = _completar_mesmo_bairro(
+        terrenos_confirmados, terrenos_fora_zona, raio_final_terrenos, bairro_alvo)
+    if mesmo_bairro or terrenos_mesmo_bairro:
+        logger.info(
+            f"[Ag2][Zona] mesmo bairro ({bairro_alvo}) ate {raio_mesmo_bairro}m: +{len(mesmo_bairro)} "
+            f"comparavel(is), +{len(terrenos_mesmo_bairro)} terreno(s) (confianca baixa)"
+        )
+
     # 3d. Fallback de baixa confianca (Opcao B).
     # Quando poucos comparaveis foram confirmados geograficamente, os imoveis
     # "zona_nao_verificada" (posicao real desconhecida) sao anexados a lista de
     # confirmados para que os Agentes 3/5 tenham amostra suficiente. Eles ficam
     # marcados para que a jusante saiba que entraram por fallback, com confianca baixa.
-    fallback_zona_acionado = False
-    confirmados_efetivos = list(confirmados)
-    terrenos_efetivos = list(terrenos_confirmados)
-    if len(confirmados) < MIN_CONFIRMADOS_ZONA and nao_verificados:
+    fallback_zona_acionado = bool(mesmo_bairro or terrenos_mesmo_bairro)
+    confirmados_efetivos = confirmados + mesmo_bairro
+    terrenos_efetivos = terrenos_confirmados + terrenos_mesmo_bairro
+    if len(confirmados_efetivos) < MIN_CONFIRMADOS_ZONA and nao_verificados:
         fallback_zona_acionado = True
         logger.info(
             f"[Ag2][Zona] apenas {len(confirmados)} confirmados na zona (minimo desejado="
@@ -3537,10 +3653,10 @@ def analisar_zona_homogenea(
         for im in nao_verificados:
             im["incluido_por_fallback_zona"] = True
             im["confianca_zona"] = "baixa"
-        confirmados_efetivos = confirmados + nao_verificados
+        confirmados_efetivos = confirmados_efetivos + nao_verificados
     # Terrenos seguem a mesma politica: com menos de MIN_CONFIRMADOS_ZONA terrenos
     # confirmados, anexa os nao verificados (antes: so quando nenhum era confirmado).
-    if len(terrenos_confirmados) < MIN_CONFIRMADOS_ZONA and terrenos_nao_verificados:
+    if len(terrenos_efetivos) < MIN_CONFIRMADOS_ZONA and terrenos_nao_verificados:
         fallback_zona_acionado = True
         logger.info(
             f"[Ag2][Zona] apenas {len(terrenos_confirmados)} terreno(s) confirmado(s) na zona "
@@ -3550,7 +3666,7 @@ def analisar_zona_homogenea(
         for t in terrenos_nao_verificados:
             t["incluido_por_fallback_zona"] = True
             t["confianca_zona"] = "baixa"
-        terrenos_efetivos = terrenos_confirmados + terrenos_nao_verificados
+        terrenos_efetivos = terrenos_efetivos + terrenos_nao_verificados
 
     status = "ok"
     if nao_verificados:
@@ -3596,6 +3712,13 @@ def analisar_zona_homogenea(
             "terrenos_depois": len(terrenos_confirmados),
             "limite_m": RAIO_PROXIMIDADE_M,
             "minimo": MIN_CONFIRMADOS_ZONA,
+        },
+        "mesmo_bairro": {
+            "comparaveis": len(mesmo_bairro),
+            "terrenos": len(terrenos_mesmo_bairro),
+            "raio_m": raio_mesmo_bairro,
+            "raio_terrenos_m": raio_mesmo_bairro_terrenos,
+            "limite_m": RAIO_MESMO_BAIRRO_M,
         },
         "resumo_zona": {
             "raio_usado_metros": raio_final,

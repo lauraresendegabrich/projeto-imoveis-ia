@@ -254,7 +254,8 @@ def montar_registro(
         "repetidos": sum(len(im.get("duplicatas") or []) for im in coletados),
         "parecidos": _int(((resultado_ag2 or {}).get("resumo") or {}).get("cluster_a")),
         "confirmados_na_zona": _int(resumo_zona.get("confirmados")),
-        "usados_por_fallback": sum(1 for c in usados_todos if c.get("status_zona") in ("fallback", "sem_validacao")),
+        "usados_por_fallback": sum(1 for c in usados_todos
+                                   if c.get("status_zona") in ("fallback", "sem_validacao", "mesmo_bairro")),
         "terrenos_usados": len(usados.get("terreno") or []),
         "raio_zona_m": raio,
 
@@ -465,6 +466,7 @@ ROTULOS_ALERTAS = {
     "poucos_comparaveis": "Poucos comparáveis",
     "poucos_terrenos": "Poucos terrenos",
     "fora_da_zona": "Distância não verificada",
+    "mesmo_bairro_fora_da_zona": "Mesmo bairro, fora da zona",
     "precos_espalhados": "Preços muito espalhados",
     "diferente_avaliacao_caixa": "Diferente da avaliação CAIXA",
     "decisao_apertada": "Decisão apertada",
@@ -480,6 +482,7 @@ ROTULOS_ALERTAS = {
 ROTULOS_STATUS_ZONA = {
     "confirmado": "Confirmado na zona",
     "fallback": "Distância não verificada",
+    "mesmo_bairro": "Mesmo bairro, até 2,5 km",
     "sem_validacao": "Sem validação de distância",
 }
 

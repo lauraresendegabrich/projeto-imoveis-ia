@@ -129,7 +129,14 @@ Para cada imóvel:
 1. Tipo do imóvel
 2. Localização (mesmo bairro)
 3. Área (±50% aceitável)
-4. Quartos (±1 aceitável)
+4. Quartos: ±1 até 4 quartos; ±2 com 5-6; ±3 com 7 ou mais (`_tolerancia_quartos`,
+   out/2026: em Palhoça, casa de 8 quartos, a IA recusava casas de área parecida com 4 a 6)
+
+**Amenidades (out/2026):** só conta como diferença a amenidade que o alvo **não** tem
+explicitamente. Marcada `nao_informado` no alvo é desconhecida e não rebaixa, nem em
+conjunto. A descrição da CAIXA lista só os cômodos, e em Maceió a IA recusava 31 casas
+por piscina, salão e playground. Com o terreno descontado no cálculo, o prompt também
+pede para não citar o terreno na justificativa.
 
 **NÃO eliminatórios:**
 - Preço (pode estar sub/superavaliado)
@@ -174,6 +181,22 @@ Muitos imóveis não têm rua nem coordenada própria (é comum a coleta trazer 
 - **Bairro dentro do raio** → `na_zona`. Se o próprio bairro pertence à zona homogênea do alvo, é razoável presumir que o imóvel também está.
 - **Bairro fora do raio** → `zona_nao_verificada` (nunca `fora_zona`). A posição real é desconhecida; não afirmamos que está fora, apenas que não foi possível confirmar.
 - `fora_zona` fica reservado para imóveis cuja posição **é conhecida** (rua/número ou lat/lon próprios) e está de fato além do raio.
+
+### Zona estendida no mesmo bairro (out/2026)
+
+Se depois da ampliação do raio (até 1.500 m) ainda houver **menos de 5** confirmados,
+entram os anúncios do **mesmo bairro do imóvel** com distância medida da própria
+posição (nunca o centro do bairro nem coordenada genérica), crescendo o raio ×1,5 até
+**2.500 m** (`RAIO_MESMO_BAIRRO_M`). Eles recebem `incluido_por_mesmo_bairro=true` e
+`incluido_por_fallback_zona=true`, não contam como confirmados na zona e aparecem no
+cálculo como "Mesmo bairro, até 2,5 km" (`status_zona="mesmo_bairro"`), com alerta e
+aviso no leilão. Casas e terrenos separadamente. Motivo: em Maceió (Cidade
+Universitária) o imóvel fica na borda do bairro e as 48 casas parecidas estavam no
+próprio bairro, a 1-3 km; só 4 entravam na zona.
+
+**Coordenada impossível.** Coordenada do portal a mais de 50 km do imóvel é descartada
+(`coordenada_portal_descartada`) e o anúncio é localizado pelo endereço (Maceió: dois
+anúncios a 3.945 km).
 
 ### Fallback de amostra escassa (Opção B)
 

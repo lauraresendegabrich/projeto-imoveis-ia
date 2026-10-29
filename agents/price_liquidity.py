@@ -819,10 +819,12 @@ def executar_agente5(
             # De onde veio o comparavel (nao muda o calculo; usado no aviso da
             # avaliacao de leilao e na auditoria):
             #   confirmado    = dentro do raio da zona homogenea
+            #   mesmo_bairro  = fora da zona, no mesmo bairro ate 2,5 km (amostra escassa)
             #   fallback      = zona_nao_verificada anexado por amostra escassa
             #   sem_validacao = Cluster A do Ag2 usado sem zona (alvo nao geocodificado)
             "status_zona": (
-                "fallback" if im.get("incluido_por_fallback_zona")
+                "mesmo_bairro" if im.get("incluido_por_mesmo_bairro")
+                else "fallback" if im.get("incluido_por_fallback_zona")
                 else "sem_validacao" if im.get("_sem_validacao_zona")
                 else "confirmado"
             ),
@@ -1456,9 +1458,12 @@ def estimar_preco(imovel_alvo_extra: Dict[str, Any] = None, id_execucao: Optiona
     status = [c.get("status_zona") or "confirmado"
               for lista in (usados.get("construcao") or [], usados.get("terreno") or []) for c in lista]
     n_conf, n_fb, n_sv = status.count("confirmado"), status.count("fallback"), status.count("sem_validacao")
+    n_mb = status.count("mesmo_bairro")
+    n_fb += n_mb
     escopo_busca = (imovel_alvo_extra or {}).get("escopo_busca")
     linha_zona = (
-        f"[Ag5][Zona] usados no calculo: {n_conf} confirmados | {n_fb} zona_nao_verificada "
+        f"[Ag5][Zona] usados no calculo: {n_conf} confirmados | {n_mb} mesmo bairro ate 2,5 km | "
+        f"{n_fb - n_mb} zona_nao_verificada "
         f"(contam para o minimo de {MIN_AMOSTRAS_CONFIAVEL}) | {n_sv} sem_validacao (socorro) | "
         f"escopo_busca={escopo_busca}"
     )

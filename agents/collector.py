@@ -51,6 +51,10 @@ FLUXO COMPLETO:
   ────────────────────────────────────────────────────
     Portais: VivaReal + LugarCerto (unicos ativos).
     Max itens por URL varia por tipo: casa 20 / terreno 10 / apartamento 30.
+    Com o alvo localizado, raspa tambem a pagina da CIDADE no VivaReal (so ele: o
+    LugarCerto devolve outra cidade quando nao tem anuncios). Os anuncios de fora da
+    rua/bairro ficam com origem_busca="cidade" e so entram no calculo se a zona do
+    Agente 2 confirmar a distancia. Uma execucao so, sem nova tentativa (creditos).
     Actor: ocrad~brazil-real-estate-scraper (navegador headless)
     Depois: requests.get em cada URL para extrair publishedAt, descricao e fotos.
 
@@ -181,6 +185,14 @@ URLS_LISTAGEM_PORTAIS = {
     # "olx":          "https://www.olx.com.br/imoveis/venda/estado-{estado_sigla}?q={tipo_slug}+a+venda+{bairro_slug}+{cidade_slug}+{estado_nome}",
     # "mercadolivre": "https://imoveis.mercadolivre.com.br/{tipo_slug}/venda/{estado_nome}/{cidade_slug}/{bairro_slug}/",
 }
+# Pagina da cidade inteira (so com o alvo localizado: a distancia e filtrada pela zona).
+# Em cidade pequena a pagina do bairro costuma vir vazia ou com sugestoes de outra
+# cidade (out/2026: Paraiso do Tocantins trouxe 26 anuncios de Palmas e 1 do bairro;
+# Rio Largo, 35 de 39 de outras cidades). So VivaReal: o LugarCerto devolve Palmas
+# ate na pagina da cidade de Paraiso.
+URLS_LISTAGEM_CIDADE = {
+    "vivareal":       "https://www.vivareal.com.br/venda/{estado_nome}/{cidade_slug}/{tipo_slug}/",
+}
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -230,7 +242,51 @@ CIDADES_COMPOSTAS_SLUG = [
 ]
 
 
-def _extrair_cidade_da_url(url: str) -> str | None:
+def _miolo_url_imovel(url: str) -> str | None:
+    """Trecho bairro+cidade do slug da URL do anuncio, sem tipo e quartos."""
+    if not url:
+        return None
+    u = str(url).lower()
+    m = re.search(r"/imovel/(.+?)(?:-com-|-venda|-compra|-\d+m2|-id-)", u)
+    if not m:
+        return None
+    miolo = m.group(1)
+    miolo = re.sub(r"^(lote-terreno|casa|apartamento|sobrado|terreno|lote|cobertura|kitnet|flat|sala|loja)s?-", "", miolo)
+    miolo = re.sub(r"^\d+-quartos?-", "", miolo)
+    miolo = re.sub(r"-zona-(oeste|leste|norte|sul|central)", "", miolo)
+    return miolo
+
+
+def _separar_bairro_cidade(url: str, cidade_alvo: str = "") -> tuple[str | None, str | None]:
+    """
+    (bairro, cidade) do slug da URL INDIVIDUAL do imovel, em slug com espacos.
+
+    O VivaReal separa com "-bairros-" (".../lote-terreno-tabuleiro-do-pinto-bairros-
+    rio-largo-179m2-..."); sem ele, a cidade e a do alvo ou uma de CIDADES_COMPOSTAS_SLUG
+    quando o slug termina nela, senao a ultima palavra. Antes so a lista fixa valia e
+    "rio-largo" virava "Largo", "cruzeiro-do-sul" virava "Sul": os anuncios da propria
+    cidade saiam como "outra cidade" (out/2026).
+    """
+    miolo = _miolo_url_imovel(url)
+    if not miolo:
+        return None, None
+    if "-bairros-" in miolo:
+        bairro, cidade = miolo.split("-bairros-", 1)
+        return bairro.replace("-", " ").strip() or None, cidade.replace("-", " ").strip() or None
+    miolo = re.sub(r"-bairros?$", "", miolo)
+    compostas = ([_slugify(cidade_alvo)] if cidade_alvo else []) + CIDADES_COMPOSTAS_SLUG
+    for cidade in compostas:
+        if cidade and (miolo == cidade or miolo.endswith("-" + cidade)):
+            bairro = miolo[: -len(cidade)].rstrip("-")
+            return bairro.replace("-", " ").strip() or None, cidade.replace("-", " ")
+    partes = [p for p in miolo.split("-") if p]
+    if not partes:
+        return None, None
+    bairro = " ".join(partes[:-1]).strip()
+    return bairro or None, partes[-1]
+
+
+def _extrair_cidade_da_url(url: str, cidade_alvo: str = "") -> str | None:
     """
     Extrai a cidade a partir do slug da URL INDIVIDUAL do imovel.
 
@@ -240,25 +296,10 @@ def _extrair_cidade_da_url(url: str) -> str | None:
     Diferente da URL de BUSCA (from_url), que sempre tem a cidade pesquisada e por
     isso etiqueta errado imoveis de outra cidade que o portal devolve como "sugestao".
     """
-    if not url:
-        return None
-    u = str(url).lower()
-    m = re.search(r"/imovel/(.+?)(?:-com-|-venda|-compra|-\d+m2|-id-)", u)
-    if not m:
-        return None
-    miolo = m.group(1)
-    miolo = re.sub(r"^(casa|apartamento|sobrado|terreno|lote|cobertura|kitnet|flat|sala|loja)s?-", "", miolo)
-    miolo = re.sub(r"^\d+-quartos?-", "", miolo)
-    miolo = re.sub(r"-zona-(oeste|leste|norte|sul|central)", "", miolo)
-    miolo = re.sub(r"-bairros?", "", miolo)
-    for cidade in CIDADES_COMPOSTAS_SLUG:
-        if miolo.endswith(cidade):
-            return cidade.replace("-", " ")
-    partes = [p for p in miolo.split("-") if p]
-    return partes[-1] if partes else None
+    return _separar_bairro_cidade(url, cidade_alvo)[1]
 
 
-def _extrair_bairro_da_url(url: str) -> str | None:
+def _extrair_bairro_da_url(url: str, cidade_alvo: str = "") -> str | None:
     """
     Extrai o BAIRRO a partir do slug da URL INDIVIDUAL do imovel.
 
@@ -269,31 +310,7 @@ def _extrair_bairro_da_url(url: str) -> str | None:
     devolve como "sugestao" de outro bairro (ex.: imovel de Vila Olimpia numa busca
     de Itaim Paulista). Retorna None quando nao consegue isolar o bairro.
     """
-    if not url:
-        return None
-    u = str(url).lower()
-    m = re.search(r"/imovel/(.+?)(?:-com-|-venda|-compra|-\d+m2|-id-)", u)
-    if not m:
-        return None
-    miolo = m.group(1)
-    miolo = re.sub(r"^(casa|apartamento|sobrado|terreno|lote|cobertura|kitnet|flat|sala|loja)s?-", "", miolo)
-    miolo = re.sub(r"^\d+-quartos?-", "", miolo)
-    miolo = re.sub(r"-zona-(oeste|leste|norte|sul|central)", "", miolo)
-    miolo = re.sub(r"-bairros?", "", miolo)
-    # Remove a cidade do fim (composta ou simples) — o que sobra e o bairro.
-    cidade_removida = None
-    for cidade in CIDADES_COMPOSTAS_SLUG:
-        if miolo.endswith(cidade):
-            cidade_removida = cidade
-            miolo = miolo[: -len(cidade)].rstrip("-")
-            break
-    if cidade_removida is None:
-        partes = [p for p in miolo.split("-") if p]
-        if len(partes) <= 1:
-            return None  # so tem a cidade, sem bairro isolavel
-        miolo = "-".join(partes[:-1])  # tira a ultima palavra (cidade simples)
-    bairro = miolo.replace("-", " ").strip()
-    return bairro or None
+    return _separar_bairro_cidade(url, cidade_alvo)[0]
 
 
 # =============================================================================
@@ -355,6 +372,9 @@ def _chave_rua(rua: object) -> str:
     # Remove apenas numero explicitamente separado por virgula ou por marcador n/numero.
     bruto = re.sub(r",\s*(?:n(?:[ºo°.]*)\s*)?\d+[a-zA-Z-]*.*$", "", bruto, flags=re.I)
     bruto = re.sub(r"\s+(?:n(?:[ºo°.]*)|numero)\s*\d+[a-zA-Z-]*.*$", "", bruto, flags=re.I)
+    # "Sem numero" no fim (", SN", " S/N"): Itaboraí, out/2026, o mesmo logradouro
+    # com ", SN" nao casava com a rua do alvo.
+    bruto = re.sub(r",?\s+s\s*/?\s*n[º°.]?\s*$", "", bruto, flags=re.I)
     valor = _normalizar_texto(bruto)
     if not valor:
         return ""
@@ -538,6 +558,10 @@ def _salvar_meta_cache(nome_arquivo: str, consulta: dict) -> None:
 # com origem_busca="proximidade" e so entram no calculo se a zona do Agente 2
 # confirmar que estao dentro do circulo (nunca pelos socorros do Agente 2 ou 5).
 RAIO_PROXIMIDADE_M = 1500
+# Marcas dos anuncios de fora da rua/bairro: "proximidade" (Athena, ate
+# RAIO_PROXIMIDADE_M) e "cidade" (pagina da cidade no Apify, sem coordenada).
+# Iguais a ORIGENS_SO_COM_CIRCULO do Agente 2.
+ORIGENS_FORA_DO_BAIRRO = {"proximidade", "cidade"}
 NIVEIS_GEO_PRECISOS = {"endereco_completo", "rua_numero", "rua", "bairro"}
 
 
@@ -928,10 +952,13 @@ def _extrair_dados_pagina(url: str) -> dict:
 # BLOCO 2 - COLETA VIA APIFY (ocrad/brazil-real-estate-scraper)
 # =============================================================================
 
-def _montar_urls_listagem(tipo_imovel: str, bairro: str, cidade: str, estado: str = "MG") -> list[tuple]:
+def _montar_urls_listagem(
+    tipo_imovel: str, bairro: str, cidade: str, estado: str = "MG", incluir_cidade: bool = False,
+) -> list[tuple]:
     """
     Monta URLs de listagem para cada portal suportado pelo ocrad.
     Funciona pra qualquer bairro, cidade e estado do Brasil.
+    incluir_cidade: acrescenta as paginas da cidade inteira (URLS_LISTAGEM_CIDADE).
 
     Retorna lista de tuplas (url, max_items) com limites por tipo:
       - casa:         20 itens por URL
@@ -987,7 +1014,10 @@ def _montar_urls_listagem(tipo_imovel: str, bairro: str, cidade: str, estado: st
         return 20
 
     urls = []
-    for portal, template in URLS_LISTAGEM_PORTAIS.items():
+    modelos = list(URLS_LISTAGEM_PORTAIS.items())
+    if incluir_cidade:
+        modelos += list(URLS_LISTAGEM_CIDADE.items())
+    for portal, template in modelos:
         slugs = tipos_portais.get(portal, ["imoveis"])
         for tipo_slug in slugs:
             try:
@@ -1005,7 +1035,7 @@ def _montar_urls_listagem(tipo_imovel: str, bairro: str, cidade: str, estado: st
     return urls
 
 
-def _normalizar_ocrad(imovel: dict) -> dict:
+def _normalizar_ocrad(imovel: dict, cidade_alvo: str = "") -> dict:
     """
     Normaliza o schema do ocrad para o schema padrao.
     Extrai dados de 3 fontes (em ordem de prioridade):
@@ -1185,10 +1215,10 @@ def _normalizar_ocrad(imovel: dict) -> dict:
     # traz o que foi pesquisado e por isso etiqueta errado imoveis que o portal devolve
     # como "sugestao" de outra cidade/bairro (ex.: imovel de Vila Olimpia numa busca de
     # Itaim Paulista, ou de Porto Alegre numa busca de Lajeado).
-    cidade_da_url = _extrair_cidade_da_url(url)
+    cidade_da_url = _extrair_cidade_da_url(url, cidade_alvo)
     if cidade_da_url:
         city = " ".join(w.capitalize() for w in cidade_da_url.split())
-    bairro_da_url = _extrair_bairro_da_url(url)
+    bairro_da_url = _extrair_bairro_da_url(url, cidade_alvo)
     if bairro_da_url:
         neighborhood = " ".join(w.capitalize() for w in bairro_da_url.split())
 
@@ -1304,9 +1334,15 @@ def _coletar_ocrad(
     tipo_imovel: str,
     bairro: str,
     situacao: dict | None = None,
+    incluir_cidade: bool = False,
 ) -> list[dict]:
     """
     Coleta imoveis via Apify (ocrad/brazil-real-estate-scraper).
+
+    incluir_cidade: raspa tambem a pagina da cidade e marca todos os anuncios com
+    origem_busca="cidade" (o escopo tira a marca dos que forem da rua/bairro; os
+    demais so entram se a zona do Agente 2 confirmar a distancia). So com o alvo
+    localizado: sem a posicao dele nao ha como medir a distancia.
 
     FLUXO:
       1. Monta URLs de listagem para cada portal (com bairro e cidade)
@@ -1335,7 +1371,7 @@ def _coletar_ocrad(
     estado = partes[1].strip().upper() if len(partes) > 1 else "MG"
 
     # Monta URLs de listagem para todos os portais
-    urls = _montar_urls_listagem(tipo_imovel, bairro, cidade, estado)
+    urls = _montar_urls_listagem(tipo_imovel, bairro, cidade, estado, incluir_cidade=incluir_cidade)
     if not urls:
         logger.warning("[Ag1][Apify] Nenhuma URL de listagem montada")
         return _falhou("nenhuma URL de listagem montada")
@@ -1370,7 +1406,7 @@ def _coletar_ocrad(
             raise RuntimeError("Apify iniciou a requisicao, mas nao retornou run_id")
         logger.info(f"[Ag1][Apify] run iniciado: {run_id}")
     except Exception as e:
-        logger.error(f"[Ag1][Apify] Erro ao iniciar run: {e}")
+        logger.error(f"[Ag1][Apify] Erro ao iniciar run: {_sem_token(e)}")
         return _falhou(f"erro ao iniciar: {e}")
 
     # Polling ate concluir. Nao baixa dataset se a execucao ainda estiver RUNNING.
@@ -1391,7 +1427,7 @@ def _coletar_ocrad(
                 logger.error(f"[Ag1][Apify] run falhou: {ultimo_status}")
                 return _falhou(f"execução terminou com {ultimo_status}")
         except Exception as exc:
-            logger.warning(f"[Ag1][Apify] Falha temporaria consultando status: {exc}")
+            logger.warning(f"[Ag1][Apify] Falha temporaria consultando status: {_sem_token(exc)}")
         time.sleep(10)
 
     if not concluiu:
@@ -1409,15 +1445,18 @@ def _coletar_ocrad(
         if not isinstance(brutos, list):
             raise RuntimeError("Dataset do Apify nao retornou uma lista")
     except Exception as e:
-        logger.error(f"[Ag1][Apify] Erro ao baixar resultados: {e}")
+        logger.error(f"[Ag1][Apify] Erro ao baixar resultados: {_sem_token(e)}")
         return _falhou(f"erro ao baixar os resultados: {e}")
 
     logger.info(f"[Ag1][Apify] {len(brutos)} brutos coletados")
     salvar_dados(brutos, "imoveis_brutos_ocrad_ag1.json")
 
     # Normaliza e filtra
-    normalizados = [_normalizar_ocrad(i) for i in brutos]
+    normalizados = [_normalizar_ocrad(i, cidade_alvo=cidade) for i in brutos]
     filtrados = [i for i in normalizados if _campos_ok(i) and not _eh_leilao(i)]
+    if incluir_cidade:
+        for im in filtrados:
+            im["origem_busca"] = "cidade"
 
     # Extrai dados adicionais de cada imovel (publishedAt, description, bathrooms, etc.)
     # requests.get + regex: funciona pra VivaReal (dados no HTML estatico)
@@ -1582,14 +1621,15 @@ def _aplicar_escopo(imoveis: list[dict], rua: str, bairro: str, cidade: str = ""
     """
     resultado = _filtrar_matches_locais(imoveis, rua=rua, bairro=bairro, cidade=cidade)
     # Roda 2 vezes (antes e depois do enriquecimento): quem passou a ser da rua/bairro
-    # perde a marca de proximidade; os demais marcados continuam junto dos locais.
+    # perde a marca (proximidade ou cidade); os demais marcados continuam junto dos
+    # locais e so entram no calculo se a zona do Agente 2 confirmar a distancia.
     locais = {id(im) for im in resultado}
     for im in resultado:
-        if im.get("origem_busca") == "proximidade":
+        if im.get("origem_busca") in ORIGENS_FORA_DO_BAIRRO:
             im.pop("origem_busca", None)
     proximos = [
         im for im in _filtrar_por_cidade(imoveis, cidade)
-        if id(im) not in locais and im.get("origem_busca") == "proximidade"
+        if id(im) not in locais and im.get("origem_busca") in ORIGENS_FORA_DO_BAIRRO
     ]
     if proximos:
         escopo = "rua+bairro+proximidade" if resultado else "proximidade"
@@ -1781,6 +1821,11 @@ def coletar_imoveis(
                     )
                     queries_executadas += 1
                     fontes["athena"]["consultas_ok"] += 1
+                    # Com o alvo localizado, a cidade inteira so entra pela zona
+                    # (mesma regra dos anuncios da pagina da cidade no Apify).
+                    if usar_proximidade:
+                        for im in resultado_cidade:
+                            im["origem_busca"] = "cidade"
                     athena_imoveis.extend(resultado_cidade)
                     logger.info(
                         f"[Ag1][Athena][Cidade] {tipo_sql}: {len(resultado_cidade)} retornados"
@@ -1931,9 +1976,11 @@ def coletar_imoveis(
         t0 = time.time()
         fontes["apify"].update(consultada=True, motivo=f"Athena com {qtd_util_fallback} anúncios úteis/locais (menos de 10)")
         try:
-            ocrad = _coletar_ocrad(localizacao, tipo_imovel, bairro, situacao=fontes["apify"])
+            # Uma execucao so: sem nova tentativa se falhar (creditos do Apify).
+            ocrad = _coletar_ocrad(localizacao, tipo_imovel, bairro, situacao=fontes["apify"],
+                                   incluir_cidade=usar_proximidade)
         except Exception as exc:
-            logger.warning(f"[Ag1][Apify] Fallback falhou sem interromper o agente: {exc}")
+            logger.warning(f"[Ag1][Apify] Fallback falhou sem interromper o agente: {_sem_token(exc)}")
             fontes["apify"]["erro"] = _sem_token(exc)
             ocrad = []
         fontes["apify"]["respondeu"] = not fontes["apify"]["erro"]

@@ -28,6 +28,7 @@ ROTULOS_ORIGEM = {"proximidade": "proximidade", "cidade": "resto da cidade"}
 ROTULOS_STATUS_ZONA = {
     "confirmado": "confirmado na zona",
     "fallback": "distância não verificada (completou a amostra)",
+    "mesmo_bairro": "mesmo bairro, até 2,5 km (completou a amostra)",
     "sem_validacao": "sem verificar a distância (socorro)",
 }
 

@@ -290,12 +290,14 @@ def contar_status_zona(resultado_ag5: dict | None) -> dict:
       confirmado    = dentro do raio da zona homogenea;
       fallback      = "zona nao verificada": completaram a amostra porque havia menos
                       de 5 confirmados (a distancia nao pode ser medida);
-      sem_validacao = socorro do Agente 5: Cluster A usado sem nenhum confirmado.
-    Os de fallback e sem_validacao contam para o minimo de 5 (decisao do professor,
-    17/10/2026); o aviso na tela, no laudo e nos logs deixa isso claro.
+      sem_validacao = socorro do Agente 5: Cluster A usado sem nenhum confirmado;
+      mesmo_bairro  = fora da zona, no mesmo bairro do imovel ate 2,5 km (distancia
+                      medida), completaram a amostra (decisao da usuaria, 29/10/2026).
+    Os de fallback, mesmo_bairro e sem_validacao contam para o minimo de 5 (decisao do
+    professor, 17/10/2026); o aviso na tela, no laudo e nos logs deixa isso claro.
     """
     usados = (resultado_ag5 or {}).get("comparaveis_usados") or {}
-    contagem = {"confirmado": 0, "fallback": 0, "sem_validacao": 0}
+    contagem = {"confirmado": 0, "fallback": 0, "sem_validacao": 0, "mesmo_bairro": 0}
     for lista in (usados.get("construcao") or [], usados.get("terreno") or []):
         for comparavel in lista:
             status = comparavel.get("status_zona") or "confirmado"
@@ -317,6 +319,21 @@ def texto_aviso_zona(contagem: dict, escopo_busca: str | None = None) -> str | N
             + (f"1 imóvel parecido encontrado na busca" if contagem["sem_validacao"] == 1 else
                f"{contagem['sem_validacao']} imóveis parecidos encontrados na busca")
             + ", sem verificar a distância. Confira esses anúncios antes de decidir."
+        )
+    elif contagem.get("mesmo_bairro"):
+        n_mb, n_fb = contagem["mesmo_bairro"], contagem.get("fallback", 0)
+        partes.append(
+            (f"Nenhum dos {total} comparáveis foi confirmado" if not contagem.get("confirmado") else
+             f"Só 1 dos {total} comparáveis foi confirmado" if contagem.get("confirmado") == 1 else
+             f"Só {contagem['confirmado']} dos {total} comparáveis foram confirmados")
+            + " perto do imóvel (dentro da zona homogênea). "
+            + ("1 está no mesmo bairro, um pouco mais longe (até 2,5 km), e entrou" if n_mb == 1 else
+               f"{n_mb} estão no mesmo bairro, um pouco mais longe (até 2,5 km), e entraram")
+            + " para completar o mínimo de 5. "
+            + ("" if not n_fb else
+               "1 não tem localização exata no anúncio: pode estar perto ou longe. " if n_fb == 1 else
+               f"{n_fb} não têm localização exata no anúncio: podem estar perto ou longe. ")
+            + "Confira esses anúncios antes de decidir."
         )
     elif contagem.get("fallback"):
         partes.append(
@@ -450,7 +467,7 @@ def avaliar_leilao(
         1
         for lista in (usados.get("construcao") or [], usados.get("terreno") or [])
         for comparavel in lista
-        if comparavel.get("status_zona") in ("fallback", "sem_validacao")
+        if comparavel.get("status_zona") in ("fallback", "sem_validacao", "mesmo_bairro")
     )
 
     return {

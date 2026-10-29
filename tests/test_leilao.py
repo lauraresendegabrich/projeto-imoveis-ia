@@ -269,7 +269,7 @@ def _ag5_usados(construcao, terreno=()):
 
 def test_aviso_so_confirmados_nao_tem_aviso():
     c = contar_status_zona(_ag5_usados(["confirmado"] * 5, ["confirmado"] * 5))
-    assert c == {"confirmado": 10, "fallback": 0, "sem_validacao": 0, "total": 10}, c
+    assert c == {"confirmado": 10, "fallback": 0, "sem_validacao": 0, "mesmo_bairro": 0, "total": 10}, c
     assert texto_aviso_zona(c, "rua+bairro") is None
 
 

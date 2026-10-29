@@ -115,6 +115,17 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             n_fora, 0, [_anuncio(c) for c in fora],
         ))
 
+    # 2b. Fora da zona, no mesmo bairro ate 2,5 km (distancia medida): completaram a amostra.
+    mesmo_bairro = [c for c in usados_todos if c.get("status_zona") == "mesmo_bairro"]
+    if mesmo_bairro:
+        alertas.append(_alerta(
+            "mesmo_bairro_fora_da_zona",
+            f"{len(mesmo_bairro)} de {len(usados_todos)} comparáveis do cálculo estão fora da zona "
+            f"homogênea, no mesmo bairro do imóvel, a até 2,5 km: entraram porque havia menos de "
+            f"{MIN_CONFIRMADOS_ZONA} confirmados dentro do raio da zona.",
+            len(mesmo_bairro), 0, [_anuncio(c) for c in mesmo_bairro],
+        ))
+
     # 3. Precos espalhados: coeficiente de variacao do R$/m2 de construcao usado
     #    (um valor por comparavel; ja sem os descartados pela faixa de sanidade).
     valores_m2 = [v for v in (ag5.get("auditoria") or {}).get("m2_construcao_min_terreno") or [] if v and v > 0]

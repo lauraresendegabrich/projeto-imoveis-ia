@@ -150,6 +150,19 @@ Só roda se o total do Athena ficou **< 10 imóveis**.
 
 **Máximo de itens por URL (por tipo):** casa = 20 · terreno = 10 · apartamento = 30.
 
+**Página da cidade (out/2026).** Com o imóvel localizado no mapa (rua ou bairro),
+raspa também `/venda/{estado}/{cidade}/{tipo}/` no **VivaReal** (casa e terreno: +30
+itens). O LugarCerto não entra nessa página porque devolve outra cidade quando não tem
+anúncios (Paraíso do Tocantins: 26 anúncios de Palmas). Todos os anúncios do Apify
+recebem `origem_busca="cidade"`. O escopo tira a marca dos que forem da rua ou do
+bairro, e os demais só entram no cálculo se a zona do Agente 2 confirmar a distância
+(nunca pelos socorros). O Apify roda **uma vez**, só com Athena < 10, e sem nova
+tentativa se falhar, para economizar créditos. O mesmo vale para a busca do Athena na
+cidade inteira (quando a rua e o bairro não trazem nada).
+
+Motivo: nas cidades pequenas a página do bairro vinha vazia ou cheia de anúncios de
+outra cidade (Rio Largo: 35 de 39), e a coleta terminava com 1 a 4 anúncios.
+
 Usa o actor `ocrad/brazil-real-estate-scraper` no Apify:
 - Envia URLs de listagem
 - Actor abre com navegador headless, executa JavaScript

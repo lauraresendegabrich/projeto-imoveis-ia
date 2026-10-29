@@ -924,6 +924,7 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela):
                             alertas.append("⚠️ leilão?")
                         localizacao_u = (
                             "✅ Confirmado na zona" if (u.get("status_zona") or "confirmado") == "confirmado"
+                            else "📍 Mesmo bairro, até 2,5 km" if u.get("status_zona") == "mesmo_bairro"
                             else "📍 Distância não verificada"
                         )
                         linhas.append({
