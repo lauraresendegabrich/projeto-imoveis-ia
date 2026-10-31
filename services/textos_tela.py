@@ -45,6 +45,14 @@ def nota_anuncio_do_alvo(n_alvo: int) -> str:
     return ""
 
 
+def texto_sem_anuncios(tipo: str, cidade: str, estado: str) -> str:
+    """Nenhum anuncio coletado: o motivo, sem sugerir trocar de endereco (leilao)."""
+    imoveis = "apartamentos" if str(tipo).lower().startswith("apart") else "casas"
+    local = "/".join(p for p in (str(cidade or "").strip().title(), str(estado or "").strip().upper()) if p)
+    return (f"Não há {imoveis} nem terrenos à venda em {local or 'nesta cidade'} na base de anúncios; "
+            f"não é possível estimar o valor de mercado.")
+
+
 def texto_comparaveis_na_zona(n: int, n_alvo: int) -> str:
     """'5 comparáveis na zona (1 é o anúncio do próprio imóvel e saiu do cálculo)'."""
     return f"{contagem(n, 'comparável', 'comparáveis')} na zona" + nota_anuncio_do_alvo(n_alvo)

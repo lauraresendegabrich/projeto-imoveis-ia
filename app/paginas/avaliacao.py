@@ -21,7 +21,7 @@ from services.cep import buscar_cep, limpar_cep, texto_endereco_cep
 from services.detalhe_leilao import resultado_para_gravar
 from services.formatos import ler_numero_br
 from services.verificacoes import verificar_execucao
-from services.textos_tela import anuncios_do_alvo_na_zona, contagem, texto_comparaveis_na_zona
+from services.textos_tela import anuncios_do_alvo_na_zona, contagem, texto_comparaveis_na_zona, texto_sem_anuncios
 from services.leilao import (
     FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_imovel_leilao, contar_status_zona,
     campos_da_modalidade, ler_formulario_leilao, texto_aviso_raio, texto_aviso_zona,
@@ -760,9 +760,18 @@ with area_principal.container():
         tempo_ag1 = time.time() - t1
 
         if not imoveis_coletados:
-            status_box.error("❌ Nenhum imóvel encontrado na região. Tente outro bairro ou cidade maior.")
-            cabecalho.subheader("❌ Avaliação interrompida")
+            # Feijo/AC (31/10/2026): a base so tinha um galpao e fazendas. "Tente outro
+            # bairro" nao serve para imovel de leilao (o endereco e fixo); o cartao do
+            # leilao aparece mesmo assim, com a resposta "Sem estimativa".
+            status_box.empty()
+            progress.empty()
             aviso_cancelar.empty()
+            cabecalho.subheader("❌ Sem estimativa: nenhum anúncio para comparar")
+            st.error(texto_sem_anuncios(tipo, cidade, estado))
+            if dados_leilao:
+                from app.resultado_tela import mostrar_avaliacao_leilao
+                mostrar_avaliacao_leilao(avaliar_imovel_leilao(
+                    {"status_avaliacao": "sem_amostra", "avaliacao_confiavel": False}, dados_leilao))
             st.stop()
 
         progress.progress(20)

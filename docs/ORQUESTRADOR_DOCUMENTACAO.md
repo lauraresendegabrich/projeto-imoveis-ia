@@ -61,7 +61,7 @@ Isso é implementado com `ThreadPoolExecutor(max_workers=2)` para o paralelismo.
 
 | Situação | Motivo | Mensagem |
 |----------|--------|----------|
-| Ag. 1 sem imóveis | Sem dados não há o que comparar | "Nenhum imóvel encontrado na região" |
+| Ag. 1 sem imóveis | Sem dados não há o que comparar | "Não há casas nem terrenos à venda em <cidade>/<UF> na base de anúncios; não é possível estimar o valor de mercado." Com dados de leilão, o cartão do leilão aparece com "Sem estimativa" |
 | Ag. 2 dá exceção | Sem comparáveis não há base de preço | "Erro no Agente 2" |
 | Ag. 2 sem comparáveis | Nenhum imóvel similar encontrado | "Nenhum comparável encontrado" |
 
