@@ -227,6 +227,15 @@ AUCTION_KEYWORDS = [
     "caixa economica", "caixa econômica", "banco imoveis",
     "wiser", "sodre santoro", "sodré santoro", "zukerman", "mega leiloes", "mega leilões",
     "portal zuk", "biasi leiloes", "freitas leiloeiro",
+    # Texto copiado da pagina da CAIXA por corretores, sem a palavra "leilao" (Atalaia/PR,
+    # 31/10/2026: o proprio imovel avaliado em 9 anuncios; no Athena, ~12,5 mil anuncios
+    # com essas frases e sem nenhum termo acima). "venda online" sozinho NAO: corretores
+    # comuns usam ("VENDA ONLINE - Agendamento de visita pelo Site").
+    "baixar matrícula do imóvel", "baixar matricula do imovel", "baixar edital e anexos",
+    "regras para pagamento das despesas", "consulte condições e enquadramento",
+    "consulte condicoes e enquadramento",
+    "imóvel selecionado caixa", "imovel selecionado caixa", "oportunidade caixa",
+    "imóveis caixa", "imoveis caixa", "imóveis da caixa", "imoveis da caixa",
 ]
 
 

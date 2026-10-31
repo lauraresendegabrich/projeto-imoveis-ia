@@ -47,6 +47,22 @@ def test_texto():
     assert texto_sem_anuncios("Apartamento", "", "").startswith("Não há apartamentos nem terrenos à venda em nesta cidade")
 
 
+def test_anuncio_copiado_da_pagina_da_caixa_e_leilao():
+    from agents.collector import _eh_leilao
+    # Atalaia/PR: o proprio imovel da CAIXA revendido por corretores, sem a palavra "leilao".
+    vdp = {"title": "Imóvel selecionado Caixa — Casa no Centro, Atalaia - PR, Nº 125, 300m² | Venda Online",
+           "description": ". Cadastro do Imóvel nº 707 (prefeitura Municipal). Baixar matrícula do imóvelrua curitiba, N. 125"}
+    terreno = {"title": "R$ 88.518,56 - Terreno - PR - ATALAIA - GLEBA ATALAIA",
+               "description": "[! ] oportunidade caixa: Imóvel com 39% de Desconto! Terreno, 0. 00 de área total"}
+    apto = {"title": "Imóvel com potencial de valorização — Apartamento no Cavalhada, Porto Alegre",
+            "description": "2 Quartos, Wc, Sala, Cozinha. .Baixar matrícula do imóvelRUA DOUTOR JULIO TEIXEIRA"}
+    assert _eh_leilao(vdp) and _eh_leilao(terreno) and _eh_leilao(apto)
+    # Anuncio comum com "VENDA ONLINE" (corretor de BH) continua.
+    comum = {"title": "Maravilhosa Casa com 5 Quartos e 5 banheiros à Venda Mangabeiras",
+             "description": "VENDA ONLINE - Agendamento de visita pelo Site ou Whatsapp - Aprovação de cadastro online"}
+    assert not _eh_leilao(comum)
+
+
 def test_tela_sem_anuncios_mostra_o_motivo_e_o_leilao():
     import agents.collector as ag1
     import agents.comparables as ag2

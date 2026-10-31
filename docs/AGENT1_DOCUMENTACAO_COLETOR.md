@@ -229,7 +229,7 @@ Athena primeiro na lista.
 
 | Filtro | O que remove |
 |--------|-------------|
-| **Leilão** | Título, tipo **ou descrição** contêm: "leilão", "hasta publica", "judicial", "arrematação", "caixa economica", "lance inicial", etc. (muitos leilões só se revelam na descrição) |
+| **Leilão** | Título, tipo **ou descrição** contêm: "leilão", "hasta publica", "judicial", "arrematação", "caixa economica", "lance inicial", etc. (muitos leilões só se revelam na descrição). Também as frases-padrão da página da CAIXA copiadas por corretores sem a palavra "leilão": "baixar matrícula do imóvel", "regras para pagamento das despesas", "consulte condições e enquadramento", "imóvel selecionado caixa", "oportunidade caixa" (out/2026: ~12,5 mil anúncios no Athena). "Venda online" sozinho não, porque corretores comuns usam |
 | **Campos obrigatórios** | Não tem `price` (> 0) OU não tem `city`/`neighborhood` |
 
 ### Deduplicação com merge (não descarta — combina)
