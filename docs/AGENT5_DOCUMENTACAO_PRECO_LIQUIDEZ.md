@@ -65,6 +65,15 @@ Resultado:
 - `menor_m2_terreno` = MIN de todos
 - `medio_m2_terreno` = TRIMMEAN(0.5) de todos
 
+Saem os terrenos com R$/m² fora de R$ 50 a 30.000 e os com **menos de 50 m²**
+(`AREA_MINIMA_TERRENO`, out/2026; antes, 10 m²). No banco, os ~9,6 mil terrenos de 10 a
+50 m² conferidos eram erro de cadastro: o título dizia "200m²" e o campo, 10.
+
+Também não vale o preço/m² informado pelo portal quando ele é o preço dividido pela
+mesma área errada. Em Rio Branco, um "10 m²" de R$ 300 mil (R$ 30.000/m²) era o 5º
+terreno da zona e ligava a separação do terreno. Sem ele, o valor foi de R$ 627 mil para
+R$ 425 mil.
+
 ---
 
 ## ETAPA 2 — Separar terreno ou não

@@ -153,6 +153,10 @@ TIPOS_TERRENO = {
 # nobre, so cortam o impossivel.
 # ------------------------------------------------------------
 AREA_MINIMA_VALIDA = 10.0          # m2: abaixo disso e erro de cadastro
+# Terreno: no Athena, os ~9,6 mil terrenos de 10 a 50 m2 conferidos sao erro de cadastro
+# ("200m2" no titulo e 10 no campo). Rio Branco, 31/10/2026: um "10 m2" de R$ 300 mil
+# (R$ 30.000/m2) contou como o 5o terreno e ligou a separacao do terreno.
+AREA_MINIMA_TERRENO = 50.0
 M2_TERRENO_MIN = 50.0              # R$/m2 de terreno plausivel (minimo)
 M2_TERRENO_MAX = 30000.0          # R$/m2 de terreno plausivel (maximo)
 M2_CONSTRUCAO_MIN = 500.0         # R$/m2 de construcao plausivel (minimo)
@@ -601,10 +605,11 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]], coletar_usados: 
 
         # Area minima valida: abaixo disso e erro de cadastro (ex.: terreno "1 m2"),
         # que geraria um m2 gigante. Nesses casos, so aproveita pricePerSqm se vier
-        # explicito e plausivel.
-        if not preco or not area or area < AREA_MINIMA_VALIDA:
+        # explicito e plausivel, e nao for o preco dividido pela mesma area errada.
+        if not preco or not area or area < AREA_MINIMA_TERRENO:
             val_direto = converter_numero(terreno.get("pricePerSqm"))
-            if val_direto and M2_TERRENO_MIN <= val_direto <= M2_TERRENO_MAX:
+            da_area_errada = bool(val_direto and preco and area and abs(val_direto - preco / area) <= 0.05 * val_direto)
+            if val_direto and not da_area_errada and M2_TERRENO_MIN <= val_direto <= M2_TERRENO_MAX:
                 valores.append(val_direto)
                 usados.append(terreno)
             else:
@@ -630,7 +635,7 @@ def calcular_valores_m2_terreno(terrenos: List[Dict[str, Any]], coletar_usados: 
         import logging
         logging.getLogger(__name__).info(
             f"[Ag5][Sanidade] {descartados} terreno(s) descartado(s) por m2 fora da "
-            f"faixa R$ {M2_TERRENO_MIN:.0f}-{M2_TERRENO_MAX:.0f} ou area < {AREA_MINIMA_VALIDA:.0f}m2"
+            f"faixa R$ {M2_TERRENO_MIN:.0f}-{M2_TERRENO_MAX:.0f} ou area < {AREA_MINIMA_TERRENO:.0f}m2"
         )
 
     if coletar_usados:

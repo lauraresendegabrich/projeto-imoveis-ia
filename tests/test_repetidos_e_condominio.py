@@ -95,6 +95,19 @@ def test_anuncio_sem_area_nao_completa_o_minimo_da_zona():
     assert raio == 1350 and len(conf) == 8, (raio, len(conf))
 
 
+def test_terreno_com_menos_de_50_m2_e_erro_de_cadastro():
+    from agents.price_liquidity import calcular_valores_m2_terreno
+    # Rio Branco: "10 m2" por R$ 300 mil; o pricePerSqm do portal e da mesma area errada.
+    erro = {"propertyType": "Terrenos", "price": 300_000, "area": 10, "pricePerSqm": 30_000}
+    lote = {"propertyType": "Terrenos", "price": 180_000, "area": 250}
+    valores, usados, descartados = calcular_valores_m2_terreno([erro, lote], coletar_usados=True)
+    assert valores == [720.0] and descartados == 1, (valores, descartados)
+    # pricePerSqm de outra area (o certo) continua aproveitado; 50 m2 ou mais e valido.
+    com_m2_proprio = dict(erro, pricePerSqm=1_500)
+    assert calcular_valores_m2_terreno([com_m2_proprio]) == [1_500]
+    assert calcular_valores_m2_terreno([{"propertyType": "Terrenos", "price": 60_000, "area": 50}]) == [1_200.0]
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

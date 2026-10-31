@@ -21,7 +21,7 @@ from statistics import mean
 
 from agents import identidade
 from agents.price_liquidity import (
-    AREA_MINIMA_VALIDA, M2_CONSTRUCAO_MAX, M2_CONSTRUCAO_MIN, MIN_AMOSTRAS_CONFIAVEL, TIPOS_CONDOMINIAIS,
+    AREA_MINIMA_TERRENO, M2_CONSTRUCAO_MAX, M2_CONSTRUCAO_MIN, MIN_AMOSTRAS_CONFIAVEL, TIPOS_CONDOMINIAIS,
     TIPOS_TERRENO, converter_numero, normalizar_tipo,
 )
 
@@ -83,7 +83,7 @@ def _m2_terreno(t: dict) -> float | None:
     "acentuado" (aclive/declive) vale 80%.
     """
     preco, area = converter_numero(t.get("preco")), converter_numero(t.get("area"))
-    if not preco or not area or area < AREA_MINIMA_VALIDA:
+    if not preco or not area or area < AREA_MINIMA_TERRENO:
         return converter_numero(t.get("preco_m2_anuncio")) or None
     valor = preco / area
     if "acentuado" in str(t.get("topografia") or "").lower():
