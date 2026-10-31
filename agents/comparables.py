@@ -604,16 +604,14 @@ def _similaridade_descricao(texto_a: str, texto_b: str) -> float:
     algum texto e curto demais para ser distintivo (evita casar descricoes
     genericas do tipo "Casa 3 quartos no Centro").
     """
-    from difflib import SequenceMatcher
-
-    # Sem o rodape da imobiliaria (igual em todos os anuncios dela).
-    a = _normalizar_texto(_sem_rodape(texto_a))
-    b = _normalizar_texto(_sem_rodape(texto_b))
+    # Sem o rodape da imobiliaria (igual em todos os anuncios dela) e sem HTML ("<br>").
+    a = _normalizar_texto(_sem_rodape(identidade.sem_html(texto_a)))
+    b = _normalizar_texto(_sem_rodape(identidade.sem_html(texto_b)))
     # Texto curto nao e distintivo o suficiente para afirmar "mesmo anuncio".
     if len(a) < 60 or len(b) < 60:
         return 0.0
 
-    ratio = SequenceMatcher(None, a, b).ratio()
+    ratio = identidade.ratio_simetrico(a, b)
 
     tokens_a = set(re.findall(r"\w+", a))
     tokens_b = set(re.findall(r"\w+", b))
@@ -1105,6 +1103,43 @@ def _calcular_estatisticas_areas(candidatos: list[dict], imovel_alvo: dict) -> d
     }
 
 
+# Casa em condominio fechado x casa de rua (Arapiraca, 31/10/2026: uma casa de rua
+# popular de leilao teve como comparaveis uma casa no condominio Sierra Arapiraca, de
+# R$ 1,1 mi, e outra no Residencial Jardim Alto). Tipologia diferente: portaria,
+# seguranca e lazer do condominio. Decisao da usuaria: com o alvo casa de rua, o
+# candidato em condominio sai na pre-classificacao. Alvo em condominio: nao se aplica.
+FRASES_CONDOMINIO = ("condominio fechado", "casa de condominio", "casa em condominio", "casas em condominio",
+                     "dos condominios", "em condominio fechado")
+_NEGACAO_CONDOMINIO = re.compile(
+    r"\b(?:sem|nao (?:e|fica|esta|tem|paga|possui) (?:em |de )?)condominio\w*"
+    r"|\bvalores? de condominio\w* e iptu|\bcondominio\w*:? sob responsabilidade"
+)
+
+
+def _casa_em_condominio(im: dict) -> bool:
+    """Casa em condominio fechado: subtipo do portal, link ou texto (inclui os repetidos juntados)."""
+    anuncios = [im] + [d.get("dados_identidade") or {} for d in im.get("duplicatas") or []]
+    for a in anuncios:
+        if "condomin" in _normalizar_texto(a.get("property_sub_type") or ""):
+            return True
+        if re.search(r"casa-(?:de|em)-condominio", str(a.get("url") or "").lower()):
+            return True
+        texto = _normalizar_texto(" ".join(str(a.get(c) or "") for c in (
+            "title", "titulo", "description", "descricao", "street", "rua")))
+        texto = _NEGACAO_CONDOMINIO.sub(" ", texto)
+        if any(f in texto for f in FRASES_CONDOMINIO):
+            return True
+    return False
+
+
+def _alvo_em_condominio(alvo: dict) -> bool:
+    """O alvo diz que e em condominio (texto, rua ou "COND" no endereco da CAIXA)."""
+    if _casa_em_condominio(alvo):
+        return True
+    endereco = _normalizar_texto(" ".join(str(alvo.get(c) or "") for c in ("rua", "street", "bairro", "neighborhood")))
+    return bool(re.search(r"\bcond\b|\bcondominio\b", endereco))
+
+
 def _pre_classificar(
     alvo: dict,
     candidato: dict,
@@ -1175,6 +1210,13 @@ def _pre_classificar(
                 cand_txt = "sim" if valor_cand else "nao"
                 motivos.append(f"{nome} divergente (alvo={alvo_txt}, candidato={cand_txt})")
 
+    condominio_x_rua = (
+        _eh_casa(alvo) and _eh_casa(candidato) and not _alvo_em_condominio(alvo) and _casa_em_condominio(candidato)
+    )
+    if condominio_x_rua:
+        comparacoes_realizadas += 1
+        motivos.append("casa em condominio fechado (o imovel e casa de rua)")
+
     incompativel = bool(motivos)
     if incompativel:
         classe = "incompativel"
@@ -1205,6 +1247,7 @@ def _pre_classificar(
         "caracteristicas_alvo": caracteristicas_alvo,
         "caracteristicas_candidato": caracteristicas_candidato,
         "divergencias_caracteristicas": divergencias_caracteristicas,
+        "condominio_x_rua": condominio_x_rua,
     }
 
 
@@ -1314,7 +1357,8 @@ def _tolerancia_comodos(qtd_alvo: float | None) -> int:
     return 2 if qtd_alvo < 7 else 3
 
 
-def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrigido: bool = False) -> str:
+def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrigido: bool = False,
+                              limite_area_pct: float | None = None) -> str:
     """
     Prompt de comparabilidade sem preco/preco-m2 para evitar circularidade na precificacao.
     Inclui descricao curta e caracteristicas extraidas para dar contexto qualitativo a LLM.
@@ -1382,6 +1426,17 @@ def _montar_prompt_clustering(alvo: dict, candidatos: list[dict], terreno_corrig
             f"   ATE {tolerancia} QUARTOS (candidato com {q - tolerancia} a {q + tolerancia}) NAO e motivo para rejeitar\n"
             f"   quando a area for compativel. So considere os quartos um problema se a diferenca\n"
             f"   for maior que {tolerancia}, ou se vier acompanhada de outras divergencias relevantes."
+        )
+
+    # Area: o filtro Python ja tirou quem passa do limite. A IA julgava a area de novo, com
+    # criterio proprio e variavel (Arapiraca, 31/10/2026: casas a 26-27% da area aceitas
+    # numa rodada e recusadas na outra; o valor mudava conforme a rodada).
+    if limite_area_pct:
+        limite_txt = round(limite_area_pct * 100)
+        criterio_quartos += (
+            f"\n   Area: todos os candidatos ja estao a ate {limite_txt}% da area construida do alvo (filtro\n"
+            f"   objetivo anterior). Diferenca de area dentro desse limite NAO e motivo para B sozinha;\n"
+            f"   so pesa junto com outras divergencias relevantes."
         )
 
     # Banheiros: mesma regra proporcional (Palhoca, out/2026: com a tolerancia de quartos,
@@ -2203,7 +2258,8 @@ def identificar_comparaveis(
         for num_lote, lote in enumerate(lotes, 1):
             llm_tentados += len(lote)
             prompt = _montar_prompt_clustering(imovel_alvo, lote,
-                                               terreno_corrigido=_eh_casa(imovel_alvo) and not terreno_elimina)
+                                               terreno_corrigido=_eh_casa(imovel_alvo) and not terreno_elimina,
+                                               limite_area_pct=limite_area_usado)
             retorno_llm = _chamar_llm(prompt, lote)
             if retorno_llm:
                 lote = _parsear_resposta_llm(
@@ -3235,12 +3291,24 @@ def _distancia_exata(im: dict) -> float | None:
 def _conta_para_o_minimo(lista: list[dict]) -> int:
     """
     Quantos contam para o minimo de MIN_CONFIRMADOS_ZONA: o anuncio do proprio imovel
-    (confirmado ou suspeito) nao conta. O confirmado sai sempre no Agente 5, e o
+    (confirmado ou suspeito) nao conta, nem o anuncio sem preco ou area (_usavel_no_calculo). O confirmado sai sempre no Agente 5, e o
     suspeito sai se a pessoa responder na tela que e o dela. Palhoca, 29/10/2026: com o
     suspeito, a zona de 450 m tinha 5 e nao ampliou; sem ele, sobravam 4 e o resultado
     ficava sem estimativa, com casas parecidas a 600 m.
     """
-    return sum(1 for im in lista if not (im.get("eh_anuncio_do_alvo") or im.get("possivel_anuncio_do_alvo")))
+    return sum(1 for im in lista if not (im.get("eh_anuncio_do_alvo") or im.get("possivel_anuncio_do_alvo"))
+               and _usavel_no_calculo(im))
+
+
+def _usavel_no_calculo(im: dict) -> bool:
+    """
+    Tem preco e area, que o Agente 5 precisa para o R$/m2. Arapiraca, 31/10/2026: um
+    anuncio sem area completou os 5 da zona de 900 m, o raio parou de crescer e o
+    calculo ficou com 4, com 3 casas de rua a 966-1.336 m.
+    """
+    preco = _para_float(im.get("price") or im.get("preco"))
+    area = _obter_area_construida(im) if not _eh_terreno(im) else (_obter_area_terreno(im) or _obter_area_construida(im))
+    return bool(preco and preco > 0 and area and area > 0)
 
 
 def _ampliar_raio(

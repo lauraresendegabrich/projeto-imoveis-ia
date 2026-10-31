@@ -278,12 +278,27 @@ def regra_do_par(a: dict, b: dict) -> tuple[str | None, str]:
     return g_a, ""
 
 
+def sem_html(t) -> str:
+    """Texto sem tags e entidades HTML ("<br>", "&nbsp;"): um portal manda, o outro nao."""
+    t = "" if _vazio(t) else str(t)
+    return re.sub(r"&#?\w+;", " ", re.sub(r"<[^>]{0,200}>", " ", t))
+
+
+def ratio_simetrico(a: str, b: str) -> float:
+    """
+    SequenceMatcher nos dois sentidos, o maior. Em texto longo (>200 caracteres) o
+    ratio depende da ordem: Arapiraca (31/10/2026), o mesmo anuncio deu 0,85 num
+    sentido e 0,45 no outro, e ficou contado 2 vezes no calculo.
+    """
+    return max(SequenceMatcher(None, a, b).ratio(), SequenceMatcher(None, b, a).ratio())
+
+
 def similaridade_descricao(a, b) -> float:
     """Mesma formula de _similaridade_descricao do Agente 2: 0,6*SequenceMatcher + 0,4*Jaccard."""
-    a, b = _norm(a), _norm(b)
+    a, b = _norm(sem_html(a)), _norm(sem_html(b))
     if len(a) < 60 or len(b) < 60:
         return 0.0
-    ratio = SequenceMatcher(None, a, b).ratio()
+    ratio = ratio_simetrico(a, b)
     ta, tb = set(re.findall(r"\w+", a)), set(re.findall(r"\w+", b))
     jac = len(ta & tb) / len(ta | tb) if ta and tb else 0.0
     return round(0.6 * ratio + 0.4 * jac, 3)
@@ -432,9 +447,11 @@ def mesmo_imovel(a: dict, b: dict) -> tuple[bool, str]:
     # total no lugar da construida (Av. Joao Peixoto Viegas, 888: 135 x 203 m2). Junta
     # com preco identico; o grupo usa a menor area e ganha o alerta "area diferente
     # entre portais" (_ajustar_area_do_grupo). Decisao da usuaria, 21/10/2026.
+    # Rua com grafia proxima conta ("Queiroz" x "Queiros": Arapiraca, 31/10/2026); a
+    # regra continua exigindo o mesmo numero e o preco identico.
     num = numero(a)
     mesmo_endereco_casa = bool(
-        g == "casa" and num and num == numero(b) and rua(a) and rua(a) == rua(b)
+        g == "casa" and num and num == numero(b) and rua(a) and rua(b) and _nomes_parecidos(rua(a), rua(b))
         and not _pode_ser_condominio(a) and not _pode_ser_condominio(b)
     )
 

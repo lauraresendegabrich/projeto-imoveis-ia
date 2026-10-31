@@ -204,6 +204,20 @@ não verificados. Em Palhoça, a zona de 450 m tinha 5 contando o próprio imóv
 ampliava. Tirando-o, sobravam 4 e o resultado ficava sem estimativa, com casas
 parecidas a 600 m.
 
+**Também não conta o anúncio sem preço ou sem área** (`_usavel_no_calculo`): o Agente 5 não
+consegue calcular o R$/m² dele. Em Arapiraca (31/10/2026), um anúncio sem área completou os
+5 da zona de 900 m, o raio parou de crescer e o cálculo ficou com 4.
+
+**Casa em condomínio fechado x casa de rua** (`_casa_em_condominio`, na pré-classificação):
+com o imóvel em casa de rua, o candidato em condomínio fechado sai (subtipo do portal,
+link "casa-de-condominio" ou texto, inclusive nos repetidos juntados). Imóvel em condomínio
+(texto ou "COND" no endereço): a regra não se aplica. Arapiraca: casas do condomínio
+Sierra, de R$ 1,1 mi, eram comparáveis de uma casa popular de rua.
+
+**Área no prompt da IA:** o prompt diz que todos os candidatos já estão dentro do limite de
+área da pré-classificação, e que essa diferença sozinha não é motivo para B. Antes a IA
+aceitava numa rodada e recusava na outra as casas a 26–27% da área.
+
 **Coordenada impossível.** Coordenada do portal a mais de 50 km do imóvel é descartada
 (`coordenada_portal_descartada`) e o anúncio é localizado pelo endereço (Maceió: dois
 anúncios a 3.945 km).

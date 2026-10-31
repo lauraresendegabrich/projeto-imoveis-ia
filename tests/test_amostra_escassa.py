@@ -81,6 +81,7 @@ def test_rua_sem_numero():
 # ---------------------------------------------------------------- Agente 2: zona
 def _anuncio(dist, bairro="Cidade Universitária", nivel="coordenadas_athena"):
     return {"url": f"https://x/{dist}-{bairro}", "distancia_metros": dist, "geocodificacao_nivel": nivel,
+            "price": 300000, "area": 100,
             "neighborhood": bairro, "classificacao_zona": "fora_zona"}
 
 

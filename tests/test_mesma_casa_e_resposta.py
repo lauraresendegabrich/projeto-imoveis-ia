@@ -81,6 +81,7 @@ def test_anuncio_do_proprio_imovel_nao_conta_para_o_minimo_da_zona():
 
     def anuncio(dist, **extra):
         return {"url": f"https://x/{dist}", "distancia_metros": dist, "geocodificacao_nivel": "coordenadas_athena",
+                "price": 300000, "area": 100,
                 "neighborhood": "Praia do Sonho", **extra}
     # Palhoca: 5 na zona de 450 m, mas 1 e o suspeito: o raio amplia para 675 m.
     confirmados = [anuncio(100, possivel_anuncio_do_alvo=True), anuncio(92), anuncio(310), anuncio(409),

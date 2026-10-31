@@ -24,7 +24,8 @@ def anuncio(i, metros_ao_norte, tipo="Casas", **extra):
 
 
 def fora(i, dist, **extra):
-    return {"id": i, "distancia_metros": dist, "geocodificacao_nivel": "coordenadas_athena", **extra}
+    return {"id": i, "distancia_metros": dist, "geocodificacao_nivel": "coordenadas_athena",
+            "price": 300000 + i, "area": 100, **extra}
 
 
 # ---------------------------------------------------------------- _ampliar_raio
