@@ -262,6 +262,20 @@ def test_endereco_de_casa_em_condominio_marca_o_campo():
         assert any("condomínio" in a for a in lida["avisos"]) is esperado, lida["avisos"]
 
 
+def test_titulo_da_pagina_com_condominio_marca_o_campo():
+    # Campo Mourao (02/11/2026): so o titulo dizia "CONDOMINIO RESIDENCIAL CEREJEIRAS".
+    from services.caixa_pagina import valores_para_formulario
+    texto = ("Buscar\nCONDOMÍNIO RESIDENCIAL CEREJEIRAS\nValor de avaliação: R$ 1.355.000,00\n"
+             "Valor mínimo de venda: R$ 765.309,89\nTipo de imóvel: Casa\nNúmero do imóvel: 000001021733-1\n"
+             "Compra Direta\nEndereço:\nRUA DAS CEREJEIRAS,N. 46 QD 29, METADE LT 05, JARDIM RESIDENCIAL ARAUCARIA "
+             "- CEP: 87301-350, CAMPO MOURAO - PARANA\nDescrição:\n.\n")
+    lida = ler_pagina_caixa(texto)
+    assert valores_para_formulario(lida["campos"])["f_condominio"] is True
+    assert any("título da página" in a for a in lida["avisos"]), lida["avisos"]
+    outro = ler_pagina_caixa(texto.replace("CONDOMÍNIO RESIDENCIAL CEREJEIRAS", "CAMPO MOURAO - CENTRO"))
+    assert valores_para_formulario(outro["campos"])["f_condominio"] is False
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

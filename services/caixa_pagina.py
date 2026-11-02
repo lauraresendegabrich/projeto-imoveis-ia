@@ -157,6 +157,15 @@ def _linhas_depois(rotulo: str, linhas: list[str], fim: tuple[str, ...]) -> list
     return []
 
 
+def _titulo_da_pagina(linhas: list[str]) -> str | None:
+    """Nome do imovel na pagina: a linha nao vazia logo antes de "Valor de avaliacao"."""
+    for i, linha in enumerate(linhas):
+        if re.match(r"\s*Valor de avalia", linha, re.I):
+            anteriores = [l.strip() for l in linhas[:i] if l.strip()]
+            return anteriores[-1] if anteriores else None
+    return None
+
+
 def _endereco(linha: str | None) -> dict:
     """
     'RUA WALDIR PIRES,N. 643 APTO. 404 BL 01, CENTRO - CEP: 42702-270, LAURO DE FREITAS - BAHIA'
@@ -331,6 +340,10 @@ def ler_pagina_caixa(conteudo: str, agora: datetime | None = None) -> dict:
     # Unidade de condominio no endereco ("CS 16 CASA", "CASA 03", "COND"): marca o campo
     # "Casa em condominio fechado" (Campo Largo, 02/11/2026); a pessoa pode desmarcar.
     endereco_txt = _sem_acento(" ".join(str(campos.get(c) or "") for c in ("rua", "complemento", "bairro"))).upper()
+    # Titulo da pagina (a linha antes de "Valor de avaliacao"): "CONDOMINIO RESIDENCIAL
+    # CEREJEIRAS" (Campo Mourao, 02/11/2026) so dizia condominio ali.
+    titulo = _titulo_da_pagina(linhas)
+    titulo_txt = _sem_acento(titulo or "").upper()
     # "CS 14 LT 14 QD C" (Rio Largo) e casa de loteamento: com quadra/lote nao conta.
     unidade = (re.search(r"\b(?:CS|CASA)\s*\d+", endereco_txt)
                and not re.search(r"\b(?:QD|LT|QUADRA|LOTE)\b", endereco_txt))
@@ -338,6 +351,10 @@ def ler_pagina_caixa(conteudo: str, agora: datetime | None = None) -> dict:
         campos["condominio"] = True
         avisos.append("Endereço indica casa em condomínio: o campo \"Casa em condomínio fechado\" foi marcado. "
                       "Confira nas fotos.")
+    elif re.search(r"\bCOND\b|\bCONDOMINIO\b", titulo_txt):
+        campos["condominio"] = True
+        avisos.append(f"O título da página (\"{titulo}\") indica condomínio: o campo \"Casa em condomínio "
+                      f"fechado\" foi marcado. Confira nas fotos.")
     antigo = campos.pop("rua_nome_antigo", None)
     if antigo:
         avisos.append(f"Nome antigo da rua retirado do endereço: \"{antigo}\".")
