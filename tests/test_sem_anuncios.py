@@ -52,7 +52,7 @@ def test_texto_da_coleta_vazia():
 
 def test_texto():
     assert texto_sem_anuncios("Casa", "FEIJO", "ac") == (
-        "Não há casas nem terrenos à venda em Feijo/AC na base de anúncios; "
+        "Não há casas nem terrenos à venda em Feijo/AC na base de anúncios que sirvam para comparar; "
         "não é possível estimar o valor de mercado.")
     assert texto_sem_anuncios("Apartamento", "", "").startswith("Não há apartamentos nem terrenos à venda em nesta cidade")
 

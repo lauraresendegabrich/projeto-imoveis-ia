@@ -1945,9 +1945,16 @@ def coletar_imoveis(
 
         logger.info(f"[Ag1][Athena] queries_executadas={queries_executadas}")
 
-        # Se nenhuma busca local retornou nada, consulta TODOS os subtipos na cidade.
-        if not athena_imoveis and (bairro or rua):
-            logger.info("[Ag1][Athena] Nenhum resultado local; expandindo todos os subtipos para a cidade")
+        # Se a busca local nao trouxe nenhum anuncio util, consulta TODOS os subtipos na
+        # cidade. Anuncio de leilao/CAIXA nao conta: em Ibaiti (02/11/2026) os 5 da rua eram
+        # o proprio imovel, saiam no filtro e a cidade (com outras casas) nem era consultada.
+        uteis_locais = [im for im in athena_imoveis if not _eh_leilao(im)]
+        if not uteis_locais and (bairro or rua):
+            logger.info(
+                "[Ag1][Athena] Nenhum resultado local util"
+                + (f" ({len(athena_imoveis)} de leilao/CAIXA)" if athena_imoveis else "")
+                + "; expandindo todos os subtipos para a cidade"
+            )
             for tipo_sql, (nomes_tipo, limite_tipo) in limites.items():
                 try:
                     resultado_cidade = client.buscar_cidade(

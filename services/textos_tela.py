@@ -49,8 +49,10 @@ def texto_sem_anuncios(tipo: str, cidade: str, estado: str) -> str:
     """Nenhum anuncio coletado: o motivo, sem sugerir trocar de endereco (leilao)."""
     imoveis = "apartamentos" if str(tipo).lower().startswith("apart") else "casas"
     local = "/".join(p for p in (str(cidade or "").strip().title(), str(estado or "").strip().upper()) if p)
-    return (f"Não há {imoveis} nem terrenos à venda em {local or 'nesta cidade'} na base de anúncios; "
-            f"não é possível estimar o valor de mercado.")
+    # "que sirvam para comparar": a base pode ter anuncios na cidade, mas so de leilao/CAIXA
+    # ou de fora da regiao (Ibaiti, 02/11/2026). A tela lista quais vieram e por que sairam.
+    return (f"Não há {imoveis} nem terrenos à venda em {local or 'nesta cidade'} na base de anúncios que "
+            f"sirvam para comparar; não é possível estimar o valor de mercado.")
 
 
 def texto_coleta_vazia(resumo_coleta: dict | None) -> str:

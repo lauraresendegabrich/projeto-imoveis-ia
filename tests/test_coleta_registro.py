@@ -186,6 +186,33 @@ def test_conta_que_nao_fecha_falha():
     assert _v(r, "encontrados = mantidos + repetidos")["ok"] is False
 
 
+def test_rua_so_com_anuncios_da_caixa_amplia_para_a_cidade():
+    # Ibaiti (02/11/2026): os 5 anuncios da rua eram o proprio imovel (CAIXA) e a cidade
+    # nem era consultada; la havia casas comuns.
+    caixa = [linha(i, titulo="Imóvel selecionado Caixa — Casa", descricao="Baixar matrícula do imóvel")
+             for i in range(5)]
+    cidade = [linha(i, bairro="Vila Nova", rua=f"Rua Outra {i}") for i in range(10, 13)]
+
+    class AthenaRuaCaixa(AthenaFalso):
+        def buscar_bairro_rua(self, tipo, **_):
+            return [dict(l) for l in caixa if l["tipo"] in tipo]
+
+        def buscar_cidade(self, tipo, **_):
+            return [dict(l) for l in caixa + cidade if l["tipo"] in tipo]
+
+    originais = (athena_client.AthenaClient, ag1._coletar_ocrad, ag1.DATA_DIR)
+    athena_client.AthenaClient = AthenaRuaCaixa
+    ag1._coletar_ocrad = lambda *a, **k: []
+    try:
+        with tempfile.TemporaryDirectory() as pasta:
+            ag1.DATA_DIR = pasta
+            coletados = ag1.coletar_imoveis("Curitiba, PR", "house", bairro="Centro", rua="Rua 0",
+                                            id_execucao="exec-1")
+    finally:
+        athena_client.AthenaClient, ag1._coletar_ocrad, ag1.DATA_DIR = originais
+    assert sorted(c.get("street") or c.get("rua") for c in coletados) == ["Rua Outra 10", "Rua Outra 11", "Rua Outra 12"],         [c.get("street") for c in coletados]
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
