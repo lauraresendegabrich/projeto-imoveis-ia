@@ -235,7 +235,7 @@ def montar_resultado_final(ctx, resultado_ag5, id_registro=None):
 
 def resultado_sem_anuncios(motivo):
     """Resultado do Agente 5 quando a coleta nao trouxe nenhum anuncio (nao ha o que comparar)."""
-    return {"status_avaliacao": "sem_amostra", "avaliacao_confiavel": False,
+    return {"status_avaliacao": "sem_amostra", "avaliacao_confiavel": False, "sem_anuncios": True,
             "zona_calculada_nesta_avaliacao": False, "avisos": [motivo],
             "comparaveis_usados": {"construcao": [], "terreno": []}}
 

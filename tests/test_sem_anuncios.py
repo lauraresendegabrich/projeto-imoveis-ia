@@ -81,7 +81,12 @@ def test_tela_sem_anuncios_mostra_o_motivo_e_o_leilao():
     originais = (ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep, banco.gravar_em_segundo_plano)
     # Como em Atalaia: o banco trouxe 20, todos da CAIXA (resumo guardado pela coleta).
     ag1.coletar_imoveis = lambda **kw: (ag1._guardar_resumo_coleta(
-        kw["id_execucao"], {"contagem": {"brutos": 20, "removidos_leilao": 20}}), [])[1]
+        kw["id_execucao"], {"contagem": {"brutos": 20, "removidos_leilao": 20, "antes_dos_repetidos": 0, "unicos": 0,
+                                          "repetidos_juntados": 0, "mantidos": 0, "repetidos": 0,
+                                          "cortados_pelo_limite": 0, "repetidos_dos_cortados": 0},
+                             "descartados": [
+            {"url": "https://x/1", "tipo": "Casas", "preco": 387737.0, "area": 179.0, "rua": "Rua Curitiba, 125",
+             "anunciante": "SSI IMÓVEIS", "motivo": "leilão ou imóvel da CAIXA"}]}), [])[1]
     ag2._geocodificar_com_fallback = lambda **_: (-8.1766, -70.354, "rua", "Rua 21 de Dezembro")
     cep.buscar_cep = lambda _cep: (None, "nao_encontrado")
     gravados = []
@@ -117,6 +122,14 @@ def test_tela_sem_anuncios_mostra_o_motivo_e_o_leilao():
                 "ou da própria CAIXA (inclusive anúncios do próprio imóvel).") in textos, textos[:500]
         assert "Nenhum anúncio chegou a esta etapa: não há o que comparar." in textos
         assert "Todos foram analisados pela IA" not in textos and "Encontramos **0" not in textos
+        assert "**Anúncios que vieram do banco (1) e por que saíram**" in textos
+        assert "Rua Curitiba, 125" in textos and "leilão ou imóvel da CAIXA" in textos
+        # Conferencia: sem problema falso no Agente 4 e com o motivo certo.
+        from services.verificacoes import resumo_conferencia
+        conf = resumo_conferencia(gravado)
+        assert "problema" not in conf["titulo"], conf
+        assert conf["frases"][0].startswith("Agente 1: O banco de anúncios trouxe 20 anúncios"), conf["frases"]
+        assert all(f.endswith("não rodou: nenhum anúncio para comparar.") for f in conf["frases"][1:]), conf["frases"]
     finally:
         ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep, banco.gravar_em_segundo_plano = originais
 

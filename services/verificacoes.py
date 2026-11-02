@@ -345,7 +345,10 @@ def _agente4(resultado: dict) -> list[dict]:
     nivel = (resultado.get("imovel_alvo") or {}).get("geocodificacao_nivel") or resultado.get("localizacao_alvo")
     nota = (ag4.get("scores") or {}).get("score_final")
     aviso = preco.get("aviso_infraestrutura")
-    if ag4 and ag4.get("status") != "endereco_nao_localizado" and nota is not None:
+    if preco.get("sem_anuncios"):
+        # Sem nenhum anuncio a avaliacao para na coleta: o Agente 4 nao roda (esperado).
+        ok, encontrado, problema = True, "não rodou: nenhum anúncio para comparar", ""
+    elif ag4 and ag4.get("status") != "endereco_nao_localizado" and nota is not None:
         ok = isinstance(nota, (int, float)) and 0 <= nota <= 1 and (nivel is None or nivel in NIVEIS_PRECISOS)
         encontrado = f"rodou (localização: {nivel or 'não informada'}), nota {nota}"
         problema = "a nota de infraestrutura veio fora do esperado"
@@ -610,6 +613,12 @@ def _frase_ok(agente: str, resultado: dict) -> str:
     """O que o agente fez, em uma frase (sem fórmulas nem ids)."""
     alvo = resultado.get("imovel_alvo") or {}
     preco = resultado.get("preco_estimado") or {}
+    if preco.get("sem_anuncios"):
+        # Nenhum anuncio sobrou na coleta: so o Agente 1 rodou.
+        if agente == "Agente 1":
+            from services.textos_tela import texto_coleta_vazia
+            return texto_coleta_vazia(resultado.get("resumo_coleta"))
+        return "não rodou: nenhum anúncio para comparar."
     if agente == "Agente 1":
         c = (resultado.get("resumo_coleta") or {}).get("contagem") or {}
         encontrados = c.get("antes_dos_repetidos") or (len(_anuncios(resultado))

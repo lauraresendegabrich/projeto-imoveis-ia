@@ -234,6 +234,11 @@ def motivo_sem_valor(resultado: dict, imovel_alvo: dict | None = None) -> dict:
     nome, nomes = ("casa", "casas") if eh_casa else ("apartamento", "apartamentos")
     minimo = MIN_AMOSTRAS_CONFIAVEL
 
+    if preco.get("sem_anuncios"):
+        # Nenhum anuncio sobrou na coleta (agentes 2 a 5 nao rodaram).
+        motivo = texto_coleta_vazia(resultado.get("resumo_coleta")) + " Sem anúncios, não há como estimar o valor."
+        return {"motivo": motivo, "fazer": ["Avalie de novo mais tarde, quando houver novos anúncios na região."]}
+
     if not preco.get("zona_calculada_nesta_avaliacao", True):
         motivo = ("A zona homogênea (quais anúncios estão perto do imóvel) não foi calculada nesta "
                   "avaliação, e sem ela o valor não é estimado.")

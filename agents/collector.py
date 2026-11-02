@@ -667,6 +667,29 @@ def _guardar_resumo_coleta(id_execucao, resumo: dict) -> None:
         _RESUMOS_COLETA.pop(next(iter(_RESUMOS_COLETA)))
 
 
+MAX_DESCARTADOS_NA_TELA = 60
+
+
+def _anuncios_descartados(todos: list[dict]) -> list[dict]:
+    """Anuncios que vieram das fontes, com o motivo de terem saido (so quando nada sobrou)."""
+    saida = []
+    for im in todos[:MAX_DESCARTADOS_NA_TELA]:
+        if _eh_leilao(im):
+            motivo = "leilão ou imóvel da CAIXA"
+        elif not _campos_ok(im):
+            motivo = "sem preço ou localização"
+        else:
+            motivo = "fora da região do imóvel"
+        saida.append({
+            "url": im.get("url"), "tipo": im.get("propertyType") or im.get("tipo"),
+            "preco": _to_float_safe(im.get("price") or im.get("preco"), None),
+            "area": _to_float_safe(im.get("area"), None),
+            "rua": im.get("street") or im.get("rua"), "bairro": im.get("neighborhood") or im.get("bairro"),
+            "anunciante": im.get("anunciante_nome") or im.get("advertiser"), "motivo": motivo,
+        })
+    return saida
+
+
 def resumo_da_coleta(id_execucao) -> dict | None:
     """Resumo da coleta desta avaliacao (fontes e contagens), mesmo sem nenhum anuncio."""
     return _RESUMOS_COLETA.get(id_execucao)
@@ -2177,6 +2200,9 @@ def coletar_imoveis(
     # Resumo da coleta (o mesmo para todos os anuncios): situacao de cada fonte.
     resumo_coleta = {"id_execucao": id_execucao, "coletado_em": coletado_em, "fontes": fontes,
                      "contagem": contagem}
+    if not combinados:
+        # Nenhum sobrou: a tela lista os anuncios que vieram e por que sairam.
+        resumo_coleta["descartados"] = _anuncios_descartados(todos)
     for im in combinados:
         im["escopo_busca"] = escopo
         im["id_execucao"] = id_execucao

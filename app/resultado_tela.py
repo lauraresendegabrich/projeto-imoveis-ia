@@ -392,6 +392,19 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela, ao_responder_anuncio_
             else:
                 # Nenhum anuncio sobrou: quantos o banco trouxe e por que sairam.
                 st.write(texto_coleta_vazia(resultado.get("resumo_coleta")))
+                descartados = (resultado.get("resumo_coleta") or {}).get("descartados") or []
+                if descartados:
+                    import pandas as pd
+                    st.markdown(f"**Anúncios que vieram do banco ({len(descartados)}) e por que saíram**")
+                    st.markdown(pd.DataFrame([{
+                        "Tipo": d.get("tipo") or "-",
+                        "Preço": fmt_brl(d["preco"]) if d.get("preco") else "-",
+                        "Área": f"{float(d['area']):g} m²" if d.get("area") else "-",
+                        "Endereço": ", ".join(x for x in (d.get("rua"), d.get("bairro")) if x) or "-",
+                        "Anunciante": d.get("anunciante") or "-",
+                        "Motivo": d.get("motivo") or "-",
+                        "Anúncio": f"[ver]({d['url']})" if d.get("url") else "-",
+                    } for d in descartados]).to_markdown(index=False), unsafe_allow_html=True)
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
                 st.metric("Total", total_encontrados, f"{len(portais)} fontes")
