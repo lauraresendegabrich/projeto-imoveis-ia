@@ -502,12 +502,14 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela, ao_responder_anuncio_
                 if justificativa_zh:
                     st.write(f"- Justificativa: {justificativa_zh}")
 
-            # Imagem de satélite: usa o caminho que o Ag2 gravou no resultado da zona
-            # (suporta run_id); cai no caminho legado so se o campo nao existir.
-            import os
-            img_path = (zona.get("imagem_satelite") if zona else None) or "data/satelite_zona_homogenea_ag2.png"
-            if img_path and os.path.exists(img_path):
-                st.image(img_path, caption="Imagem de satélite com marcador no imóvel alvo", use_container_width=True)
+            # Imagem de satélite gravada junto do resultado (banco): todos veem a mesma.
+            # Avaliacao antiga, sem ela, fica sem imagem: o arquivo em disco e sobrescrito
+            # a cada avaliacao e mostraria a de outro imovel.
+            img_jpeg = (zona or {}).get("imagem_satelite_jpeg")
+            if img_jpeg:
+                import base64
+                st.image(base64.b64decode(img_jpeg), caption="Imagem de satélite com marcador no imóvel alvo",
+                         use_container_width=True)
 
         # Ag.3
         score_medio = resumo3.get("score_qualitativo_medio", 0) or 0

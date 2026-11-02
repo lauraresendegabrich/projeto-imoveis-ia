@@ -2392,6 +2392,33 @@ def identificar_comparaveis(
     logger.info(f"Salvo em: {caminho_saida}")
     return saida
 
+LARGURA_IMAGEM_GRAVADA = 800
+
+
+def _imagem_para_gravar(png: bytes | None) -> str | None:
+    """
+    Imagem de satelite da zona em JPEG reduzido (largura ate LARGURA_IMAGEM_GRAVADA), em
+    base64, para ir junto do resultado no banco (~100 KB; o PNG tem ~1,1 MB). Antes so o
+    caminho do arquivo era gravado: em outra maquina a imagem nao aparecia, e na mesma
+    aparecia a da ultima avaliacao (Cambe, 02/11/2026).
+    """
+    if not png:
+        return None
+    try:
+        import base64
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(png)).convert("RGB")
+        if img.width > LARGURA_IMAGEM_GRAVADA:
+            img = img.resize((LARGURA_IMAGEM_GRAVADA, round(img.height * LARGURA_IMAGEM_GRAVADA / img.width)))
+        saida = io.BytesIO()
+        img.save(saida, format="JPEG", quality=75, optimize=True)
+        return base64.b64encode(saida.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning(f"[Ag2][Zona] imagem nao convertida para gravar: {type(e).__name__}: {e}")
+        return None
+
+
 def _obter_imagem_satelite(endereco: str, lat: float = None, lon: float = None, zoom: int = 16) -> bytes:
     """
     Gera imagem de satelite via Google Maps Static API.
@@ -3825,6 +3852,9 @@ def analisar_zona_homogenea(
         "terrenos_fora_zona": terrenos_fora_zona,
         "terrenos_nao_verificados": terrenos_nao_verificados,
         "imagem_satelite": img_path,
+        # A imagem vai junto do resultado (banco): todos que abrirem a avaliacao veem a
+        # mesma. O arquivo em img_path e sobrescrito a cada avaliacao.
+        "imagem_satelite_jpeg": _imagem_para_gravar(imagem),
         "coordenadas_alvo": {"lat": lat_alvo, "lon": lon_alvo},
         "geocodificacao_alvo": {
             "nivel": nivel_geo_alvo,
