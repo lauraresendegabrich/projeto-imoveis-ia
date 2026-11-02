@@ -232,6 +232,28 @@ def montar_resultado_final(ctx, resultado_ag5, id_registro=None):
     return resultado
 
 
+def resultado_sem_anuncios(motivo):
+    """Resultado do Agente 5 quando a coleta nao trouxe nenhum anuncio (nao ha o que comparar)."""
+    return {"status_avaliacao": "sem_amostra", "avaliacao_confiavel": False,
+            "zona_calculada_nesta_avaliacao": False, "avisos": [motivo],
+            "comparaveis_usados": {"construcao": [], "terreno": []}}
+
+
+def contexto_sem_anuncios(*, id_execucao, imovel_alvo, dados_leilao, alvo_sem_localizacao, falhas,
+                          localizacao_alvo, entrada_usuario, tela_resultado, tempo_ag1, tempo_total):
+    """Contexto de montar_resultado_final sem anuncios: agentes 2 a 4 nao rodaram."""
+    return {
+        "id_execucao": id_execucao, "imovel_alvo": imovel_alvo, "imoveis_coletados": [],
+        "escopo_busca": None, "resumo": {"total_coletados": 0, "tempo_coleta_s": round(tempo_ag1, 1)},
+        "duplicatas_descartadas": [], "dados_leilao": dados_leilao, "alvo_sem_localizacao": alvo_sem_localizacao,
+        "comparaveis": [], "terrenos": [], "zona_resultado": {}, "resultado_ag2": {}, "resultado_ag3": {},
+        "resultado_ag4": {}, "falhas": falhas, "localizacao_alvo": localizacao_alvo,
+        "entrada_usuario": entrada_usuario, "tela_resultado": tela_resultado,
+        "tempos": {"total": round(tempo_total, 1), "agente1": round(tempo_ag1, 1), "agente2": 0.0,
+                   "zona": 0.0, "agentes3e4": 0.0},
+    }
+
+
 def _marcar_anuncio_do_alvo_na_tela(ctx, url, e_do_alvo):
     """Marca/desmarca o anuncio nas listas da tela (as tabelas mostram "seu anuncio")."""
     listas = [ctx["comparaveis"], ctx["terrenos"],
@@ -767,11 +789,22 @@ with area_principal.container():
             progress.empty()
             aviso_cancelar.empty()
             cabecalho.subheader("❌ Sem estimativa: nenhum anúncio para comparar")
-            st.error(texto_sem_anuncios(tipo, cidade, estado))
-            if dados_leilao:
+            motivo_sem_anuncios = texto_sem_anuncios(tipo, cidade, estado)
+            st.error(motivo_sem_anuncios)
+            # Gravada no banco como as outras (Atalaia/PR, 02/11/2026): aparece nos leiloes
+            # ativos como "Sem estimativa" e conta nas estatisticas. Agentes 2 a 5 vazios.
+            resultado = montar_resultado_final(
+                contexto_sem_anuncios(
+                    id_execucao=id_execucao, imovel_alvo=imovel_alvo, dados_leilao=dados_leilao,
+                    alvo_sem_localizacao=alvo_sem_localizacao, falhas=falhas_execucao,
+                    localizacao_alvo=localizacao_alvo, entrada_usuario=entrada_usuario,
+                    tela_resultado=tela_resultado, tempo_ag1=tempo_ag1, tempo_total=time.time() - inicio_total,
+                ),
+                resultado_sem_anuncios(motivo_sem_anuncios),
+            )
+            if resultado.get("leilao"):
                 from app.resultado_tela import mostrar_avaliacao_leilao
-                mostrar_avaliacao_leilao(avaliar_imovel_leilao(
-                    {"status_avaliacao": "sem_amostra", "avaliacao_confiavel": False}, dados_leilao))
+                mostrar_avaliacao_leilao(resultado["leilao"])
             st.stop()
 
         progress.progress(20)

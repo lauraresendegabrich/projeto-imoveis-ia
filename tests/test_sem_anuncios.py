@@ -66,11 +66,14 @@ def test_anuncio_copiado_da_pagina_da_caixa_e_leilao():
 def test_tela_sem_anuncios_mostra_o_motivo_e_o_leilao():
     import agents.collector as ag1
     import agents.comparables as ag2
+    import services.banco as banco
     import services.cep as cep
-    originais = (ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep)
+    originais = (ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep, banco.gravar_em_segundo_plano)
     ag1.coletar_imoveis = lambda **_: []
     ag2._geocodificar_com_fallback = lambda **_: (-8.1766, -70.354, "rua", "Rua 21 de Dezembro")
     cep.buscar_cep = lambda _cep: (None, "nao_encontrado")
+    gravados = []
+    banco.gravar_em_segundo_plano = lambda execucao, comparaveis: gravados.append((execucao, comparaveis))
     try:
         at = AppTest.from_file("app/interface.py", default_timeout=120).run()
         at.sidebar.text_area(key="caixa_texto").input(PAGINA_FEIJO)
@@ -84,8 +87,20 @@ def test_tela_sem_anuncios_mostra_o_motivo_e_o_leilao():
         assert "#### 🔨 Avaliação de leilão" in [m.value for m in at.markdown]
         captions = " ".join(c.value for c in at.caption)
         assert "148.492" in captions, captions          # valor minimo do 1o leilao
+        # Gravada no banco como "Sem estimativa", com o leilao e sem comparaveis.
+        assert len(gravados) == 1, gravados
+        execucao, comparaveis = gravados[0]
+        assert execucao["status_agente5"] == "sem_amostra" and comparaveis == []
+        assert execucao["decisao"] == "Sem estimativa" and execucao["valor_minimo"] == 148492.0, execucao["decisao"]
+        assert execucao["anuncios_encontrados"] == 0 and execucao["resultado_completo"]
+        # O "Ver avaliacao completa" (leiloes ativos) abre esse resultado sem erro.
+        tela = AppTest.from_file("app/interface.py", default_timeout=120)
+        tela.session_state["resultado"] = {**execucao["resultado_completo"], "registro": {"execucao": execucao}}
+        tela.session_state["imovel_alvo_dados"] = execucao["resultado_completo"].get("imovel_alvo") or {}
+        tela.run()
+        assert not tela.exception, [e.value for e in tela.exception]
     finally:
-        ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep = originais
+        ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep, banco.gravar_em_segundo_plano = originais
 
 
 if __name__ == "__main__":
