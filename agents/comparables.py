@@ -1109,7 +1109,12 @@ def _calcular_estatisticas_areas(candidatos: list[dict], imovel_alvo: dict) -> d
 # seguranca e lazer do condominio. Decisao da usuaria: com o alvo casa de rua, o
 # candidato em condominio sai na pre-classificacao. Alvo em condominio: nao se aplica.
 FRASES_CONDOMINIO = ("condominio fechado", "casa de condominio", "casa em condominio", "casas em condominio",
-                     "dos condominios", "em condominio fechado")
+                     "dos condominios", "em condominio fechado",
+                     # Cianorte (02/11/2026): "Vende-se casa no Condominio Century Park" passava. No
+                     # Athena, ~57 mil casas com estas frases e nenhuma das de cima.
+                     "casa no condominio", "sobrado no condominio", "localizada no condominio",
+                     "localizado no condominio", "situada no condominio", "situado no condominio",
+                     "casa condominio", "sobrado condominio")
 _NEGACAO_CONDOMINIO = re.compile(
     r"\b(?:sem|nao (?:e|fica|esta|tem|paga|possui) (?:em |de )?)condominio\w*"
     r"|\bvalores? de condominio\w* e iptu|\bcondominio\w*:? sob responsabilidade"

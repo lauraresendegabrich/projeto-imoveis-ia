@@ -53,6 +53,9 @@ def test_casa_em_condominio():
     assert _casa_em_condominio({"url": "https://www.vivareal.com.br/imovel/casa-de-condominio-3-quartos-x"})
     assert _casa_em_condominio({"title": "Imóvel em condomínio fechado no bairro Arnon de Melo"})
     assert _casa_em_condominio({"description": TEXTO})
+    # Cianorte: "casa no Condominio Century Park".
+    assert _casa_em_condominio({"title": "Vende-se casa no Condomínio Century Park"})
+    assert not _casa_em_condominio({"title": "Casa próxima ao condomínio Alphaville"})
     # Representante sem sinal, repetido juntado com o subtipo do portal.
     assert _casa_em_condominio({"duplicatas": [{"dados_identidade": {"property_sub_type": "CONDOMINIUM"}}]})
     # Nao e condominio.
