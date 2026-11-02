@@ -1133,7 +1133,12 @@ def _casa_em_condominio(im: dict) -> bool:
 
 
 def _alvo_em_condominio(alvo: dict) -> bool:
-    """O alvo diz que e em condominio (texto, rua ou "COND" no endereco da CAIXA)."""
+    """
+    O alvo e em condominio: marcado no formulario ("Casa em condominio fechado"), ou o
+    texto, a rua ou "COND" no endereco da CAIXA dizem.
+    """
+    if alvo.get("em_condominio"):
+        return True
     if _casa_em_condominio(alvo):
         return True
     endereco = _normalizar_texto(" ".join(str(alvo.get(c) or "") for c in ("rua", "street", "bairro", "neighborhood")))

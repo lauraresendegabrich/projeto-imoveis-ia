@@ -59,6 +59,7 @@ BANCOS_LEILAO = [ORIGEM_CAIXA]
 VALORES_INICIAIS_FORMULARIO = {
     "f_cep": "", "f_rua": "", "f_numero": "", "f_bairro": "", "f_cidade": "", "f_uf": "",
     "f_tipo": "Casa", "f_area": "", "f_quartos": 0, "f_vagas": None, "f_terreno": "", "f_banheiros": 0,
+    "f_condominio": False,
     "f_preco": "", "f_descricao": "", "f_fotos": "", "f_link_anuncio": "",
     "f_banco": ORIGEM_CAIXA, "f_modalidade": "",
     "f_valor_minimo": "", "f_valor_minimo_1": "", "f_data_1_leilao": "", "f_valor_minimo_2": "",
@@ -417,6 +418,14 @@ with st.sidebar:
             # Texto (e nao number_input) para aceitar "1.200.000" e "1.200.000,00".
             texto_preco_anunciado = st.text_input("Preço (R$, opcional)", placeholder="Ex.: 1.200.000",
                                                   key="f_preco")
+        # Marcado: casas de condominio servem de comparavel (sem ele, para casa de rua, saem).
+        # A pagina da CAIXA raramente diz; a leitura marca quando o endereco indica unidade
+        # ("CS 16 CASA", "COND"). Campo Largo, 02/11/2026: so as fotos mostravam.
+        em_condominio = st.checkbox(
+            "Casa em condomínio fechado", key="f_condominio",
+            help="Marque se a casa fica num condomínio fechado (portaria, muro, área comum). "
+                 "Assim, casas de condomínio parecidas entram na comparação.",
+        )
         st.caption("Casa: sem a área do terreno, o cálculo usa só o m² total das casas e fica menos preciso.")
 
         st.markdown("**📝 Descrição** (opcional)")
@@ -589,7 +598,7 @@ with area_principal.container():
         entrada_usuario = {
             "cep": cep_input or None,
             "rua": rua, "numero": numero, "bairro": bairro, "cidade": cidade, "estado": estado,
-            "tipo": tipo,
+            "tipo": tipo, "em_condominio": bool(em_condominio),
             "area_digitada": texto_area, "area_lida": area,
             "terreno_digitado": texto_area_terreno, "terreno_lido": area_terreno,
             "quartos": int(quartos), "banheiros": int(banheiros), "vagas": int(vagas) if vagas is not None else None,
@@ -635,6 +644,8 @@ with area_principal.container():
             "images": [],
             # Prova mais forte de que um comparavel e o anuncio do proprio imovel (Ag2).
             "link_anuncio": link_anuncio.strip() or None,
+            # Casa em condominio fechado (formulario): Ag2 nao tira os comparaveis de condominio.
+            "em_condominio": bool(em_condominio) if tipo == "Casa" else None,
         }
 
         # Processa fotos: links diretos informados pelo usuario

@@ -243,6 +243,25 @@ def test_endereco_com_nome_antigo_e_numero_que_nao_e_numero():
     assert "Número" not in lida["nao_encontrados"]
 
 
+def test_endereco_de_casa_em_condominio_marca_o_campo():
+    from services.caixa_pagina import valores_para_formulario
+    base = ("X\nValor de avaliação: R$ 1,00\nValor mínimo de venda: R$ 1,00\nTipo de imóvel: Casa\nQuartos: 3\n"
+            "Número do imóvel: 000001028414-1\nCompra Direta\nEndereço:\n{}\nDescrição:\n3 Quartos.\n")
+    casos = {
+        # Campo Largo: so as fotos diziam "ENTRADA CONDOMINIO"; o endereco tem "CS 16 CASA".
+        "RUA JOÃO TIGRINHO DE FREITAS/ ANTIGA UA 16,N. CS 16 CASA, MORADIAS BOM JESUS - CEP: 83602-566, "
+        "CAMPO LARGO - PARANA": True,
+        "RUA A,N. 10 COND RES JARDIM, CENTRO - CEP: 83602-566, CAMPO LARGO - PARANA": True,
+        # Casa de loteamento (quadra/lote) e rua com "Casa" no nome: nao.
+        "RUA DR EMILIO MAIA,N. SN CS 14 LT 14 QD C, LOURENÇO ALBUQUERQUE - CEP: 57100-000, RIO LARGO - ALAGOAS": False,
+        "RUA CASA BRANCA,N. 50, CENTRO - CEP: 86181-190, CAMBE - PARANA": False,
+    }
+    for endereco, esperado in casos.items():
+        lida = ler_pagina_caixa(base.format(endereco))
+        assert valores_para_formulario(lida["campos"])["f_condominio"] is esperado, endereco
+        assert any("condomínio" in a for a in lida["avisos"]) is esperado, lida["avisos"]
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0

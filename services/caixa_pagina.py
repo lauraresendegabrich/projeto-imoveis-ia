@@ -328,6 +328,16 @@ def ler_pagina_caixa(conteudo: str, agora: datetime | None = None) -> dict:
     if campos.pop("numero_nao_numerico", None):
         sem_numero = True
         avisos.append(f"Endereço sem número de rua na CAIXA (\"{campos['complemento']}\"): o número fica vazio.")
+    # Unidade de condominio no endereco ("CS 16 CASA", "CASA 03", "COND"): marca o campo
+    # "Casa em condominio fechado" (Campo Largo, 02/11/2026); a pessoa pode desmarcar.
+    endereco_txt = _sem_acento(" ".join(str(campos.get(c) or "") for c in ("rua", "complemento", "bairro"))).upper()
+    # "CS 14 LT 14 QD C" (Rio Largo) e casa de loteamento: com quadra/lote nao conta.
+    unidade = (re.search(r"\b(?:CS|CASA)\s*\d+", endereco_txt)
+               and not re.search(r"\b(?:QD|LT|QUADRA|LOTE)\b", endereco_txt))
+    if unidade or re.search(r"\bCOND\b|\bCONDOMINIO\b", endereco_txt):
+        campos["condominio"] = True
+        avisos.append("Endereço indica casa em condomínio: o campo \"Casa em condomínio fechado\" foi marcado. "
+                      "Confira nas fotos.")
     antigo = campos.pop("rua_nome_antigo", None)
     if antigo:
         avisos.append(f"Nome antigo da rua retirado do endereço: \"{antigo}\".")
@@ -394,6 +404,7 @@ def valores_para_formulario(campos: dict) -> dict:
         "f_cidade": campos.get("cidade"),
         "f_uf": campos.get("uf"),
         "f_tipo": campos.get("tipo"),
+        "f_condominio": bool(campos.get("condominio")),
         "f_area": _area_br(area) or None,
         "f_terreno": _area_br(campos.get("area_terreno")) if campos.get("tipo") == "Casa" else None,
         "f_quartos": campos.get("quartos"),

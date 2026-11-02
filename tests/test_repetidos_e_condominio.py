@@ -108,6 +108,14 @@ def test_terreno_com_menos_de_50_m2_e_erro_de_cadastro():
     assert calcular_valores_m2_terreno([{"propertyType": "Terrenos", "price": 60_000, "area": 50}]) == [1_200.0]
 
 
+def test_alvo_marcado_como_condominio_no_formulario():
+    alvo = {"tipo": "house", "propertyType": "Casas", "area": 547.75, "rua": "RUA JOÃO TIGRINHO DE FREITAS",
+            "description": "5 Quartos, 5 Wc", "em_condominio": True}
+    cond = casa(area=500, property_sub_type="CONDOMINIUM")
+    assert _alvo_em_condominio(alvo) and _pre_classificar(alvo, cond)["elegivel_llm"]
+    assert not _alvo_em_condominio(dict(alvo, em_condominio=False))
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
