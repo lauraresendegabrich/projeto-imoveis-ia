@@ -71,7 +71,9 @@ def test_venda_online_encerrada():
     assert c["data_encerramento"] == datetime(2026, 10, 26, 18, 0)
     assert (c["tipo"], c["quartos"]) == ("Casa", 3)
     assert (c["area_total"], c["area_privativa"], c["area_terreno"]) == (435.20, 355.93, 435.20)
-    assert c["rua"] == "RUA 15 DE JANEIRO (ANTIGA RUA CORONEL MESSIAS)" and c["numero"] == "890"
+    # O nome antigo da rua sai do endereco (vai para os avisos).
+    assert c["rua"] == "RUA 15 DE JANEIRO" and c["numero"] == "890"
+    assert "Nome antigo da rua retirado do endereço: \"ANTIGA RUA CORONEL MESSIAS\"." in r["avisos"]
     assert c["formas_pagamento"] == ["Recursos próprios (à vista)", "FGTS", "Financiamento"]
     assert c["edital"] is None and c["leiloeiro"] is None
     assert r["nao_encontrados"] == ["Garagem"]
@@ -214,6 +216,32 @@ def test_area_errada_da_caixa_nao_e_preenchida():
     assert "Área do terreno na CAIXA (0,01 m²) parece errada: não foi preenchida. Confira na matrícula." in r["avisos"]
     assert "Área do terreno" in r["nao_encontrados"]
     assert (c["tipo"], c["quartos"], c["banheiros"], c["valor_minimo"]) == ("Casa", 2, 2, 67049.76)
+
+def test_endereco_com_nome_antigo_e_numero_que_nao_e_numero():
+    # Campo Largo (02/11/2026): "RUA ... / ANTIGA UA 16,N. CS 16 CASA".
+    from services.caixa_pagina import _endereco
+    c = _endereco("RUA JOÃO TIGRINHO DE FREITAS/ ANTIGA UA 16,N. CS 16 CASA, MORADIAS BOM JESUS - CEP: 83602-566, "
+                  "CAMPO LARGO - PARANA")
+    assert (c["rua"], c["numero"], c["complemento"]) == ("RUA JOÃO TIGRINHO DE FREITAS", None, "CS 16 CASA"), c
+    assert c["rua_nome_antigo"] == "ANTIGA UA 16"
+    for linha, rua in (("RUA DOUTOR JULIO TEIXEIRA - ANTG RUA C,N. 40 APTO. 305, CAVALHADA - CEP: 91750-000, "
+                        "PORTO ALEGRE - RIO GRANDE DO SUL", "RUA DOUTOR JULIO TEIXEIRA"),
+                       ("RUA RUBEM PEREIRA TORELLY (ANTIGA RUA A),N. 25 APTO. 303, RESTINGA - CEP: 91790-482, "
+                        "PORTO ALEGRE - RIO GRANDE DO SUL", "RUA RUBEM PEREIRA TORELLY"),
+                       ("AVENIDA SANTA-ANTIGAMENTE,N. 10, X - CEP: 86181-190, CAMBE - PARANA", "AVENIDA SANTA-ANTIGAMENTE")):
+        assert _endereco(linha)["rua"] == rua, linha
+    # Na pagina inteira: avisos e numero vazio (nao "CS").
+    texto = ("CAMPO LARGO\nValor de avaliação: R$ 3.800.000,00\nValor mínimo de venda: R$ 2.300.704,62\n"
+             "Tipo de imóvel: Casa\nQuartos: 5\nNúmero do imóvel: 000001028414-1\nÁrea privativa = 547,75m2\n"
+             "Compra Direta\nEndereço:\n"
+             "RUA JOÃO TIGRINHO DE FREITAS/ ANTIGA UA 16,N. CS 16 CASA, MORADIAS BOM JESUS - CEP: 83602-566, "
+             "CAMPO LARGO - PARANA\nDescrição:\n5 Quartos, 5 Wc.\n")
+    lida = ler_pagina_caixa(texto)
+    assert lida["campos"].get("numero") is None and lida["campos"]["rua"] == "RUA JOÃO TIGRINHO DE FREITAS"
+    assert any("sem número de rua" in a and "CS 16 CASA" in a for a in lida["avisos"]), lida["avisos"]
+    assert any("Nome antigo da rua" in a for a in lida["avisos"]), lida["avisos"]
+    assert "Número" not in lida["nao_encontrados"]
+
 
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]

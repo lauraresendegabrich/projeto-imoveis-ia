@@ -178,8 +178,20 @@ def _endereco(linha: str | None) -> dict:
         if m:
             campos["rua"], campos["numero"] = m.group(1).strip(), m.group(2).strip()
             campos["complemento"] = m.group(3).strip() or None
+            # "N. CS 16 CASA" (Campo Largo, 02/11/2026): "CS" e casa, nao numero de rua.
+            if not re.match(r"\d", campos["numero"]) and campos["numero"].upper().replace("/", "") != "SN":
+                campos["complemento"] = " ".join(p for p in (campos["numero"], campos["complemento"]) if p)
+                campos["numero"] = None
+                campos["numero_nao_numerico"] = campos["complemento"]
         else:
             campos["rua"] = logradouro.strip() or None
+        # Nome antigo da rua ("/ ANTIGA UA 16", "- ANTG RUA C", "(ANTIGA RUA A)"): fora da
+        # rua, que vai para o mapa e para a busca de anuncios.
+        if campos["rua"]:
+            m = re.search(r"\s*(?:/|-|\()\s*(?:ANTIGA|ANTG|ANT\.)\b.*$", campos["rua"], re.I)
+            if m and m.start() > 0:
+                campos["rua_nome_antigo"] = campos["rua"][m.start():].strip(" /-()")
+                campos["rua"] = campos["rua"][:m.start()].strip()
     return campos
 
 
@@ -313,6 +325,12 @@ def ler_pagina_caixa(conteudo: str, agora: datetime | None = None) -> dict:
         # "N. SN" = sem numero: nao e o numero do imovel.
         campos["numero"] = None
         avisos.append("Endereço sem número na CAIXA (S/N): o número fica vazio.")
+    if campos.pop("numero_nao_numerico", None):
+        sem_numero = True
+        avisos.append(f"Endereço sem número de rua na CAIXA (\"{campos['complemento']}\"): o número fica vazio.")
+    antigo = campos.pop("rua_nome_antigo", None)
+    if antigo:
+        avisos.append(f"Nome antigo da rua retirado do endereço: \"{antigo}\".")
     descricao = _linhas_depois("Descrição:", linhas, ("FORMAS DE PAGAMENTO", "REGRAS PARA PAGAMENTO"))
     campos["descricao"] = " ".join(descricao).strip(" .") or None
     campos["banheiros"] = _banheiros_da_descricao(campos["descricao"])
