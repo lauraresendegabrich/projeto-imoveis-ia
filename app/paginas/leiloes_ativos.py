@@ -23,8 +23,8 @@ from services.banco import obter_database_url
 from services.registro_execucao import ROTULOS_STATUS_ZONA, ROTULOS_TIPO_COMPARAVEL, excel_resultado
 from services.leilao import (
     DECISAO_DESCARTAR, DECISAO_MARGEM_APERTADA, DECISAO_OPORTUNIDADE, DECISAO_SEM_ESTIMATIVA, MODALIDADES_CAIXA,
-    SITUACAO_ATIVO, SITUACOES_LEILAO, agora_brasilia, html_decisao, texto_cabecalho, texto_lance_descarte,
-    texto_lance_maximo, texto_percentual,
+    ORIGEM_CAIXA, SITUACAO_ATIVO, SITUACOES_LEILAO, agora_brasilia, html_decisao, texto_cabecalho, texto_lance_descarte,
+    link_caixa, texto_lance_maximo, texto_percentual,
 )
 
 SEM_AVALIACAO = "Sem avaliação"
@@ -148,7 +148,9 @@ def mostrar_imovel(l: dict) -> None:
         col_info, col_resposta = st.columns([3, 2])
         with col_info:
             numero = f" · nº {l['numero_imovel']}" if l.get("numero_imovel") else ""
-            link = f" · [ver no site]({l['link']})" if l.get("link") else ""
+            # Registro sem link (texto colado da CAIXA): monta pelo numero do imovel.
+            url = l.get("link") or (link_caixa(l.get("numero_imovel")) if (l.get("banco") or ORIGEM_CAIXA) == ORIGEM_CAIXA else None)
+            link = f" · [ver no site]({url})" if url else ""
             st.markdown(f"**{texto_cabecalho(l)}**{numero}{link}")
             endereco = ", ".join(x for x in (l.get("endereco"), l.get("bairro")) if x)
             cidade = "/".join(x for x in (l.get("cidade"), l.get("uf")) if x)

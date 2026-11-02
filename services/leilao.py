@@ -233,6 +233,21 @@ CAMPOS_TEXTO_LEILAO = (
 )
 
 
+URL_IMOVEL_CAIXA = "https://venda-imoveis.caixa.gov.br/sistema/detalhe-imovel.asp?hdnimovel={}"
+
+
+def link_caixa(numero_imovel) -> str | None:
+    """
+    Link da pagina do imovel na CAIXA pelo numero: o hdnimovel e o numero sem pontuacao
+    nem zeros a esquerda ("000001028941-7" -> 10289417). Conferido nos links gravados.
+    O texto colado da pagina nao traz o link (Atalaia e Cambe, 02/11/2026).
+    """
+    digitos = "".join(ch for ch in str(numero_imovel or "") if ch.isdigit())
+    if len(digitos) < 8 or not int(digitos):
+        return None
+    return URL_IMOVEL_CAIXA.format(int(digitos))
+
+
 def campos_da_modalidade(modalidade: str) -> set:
     """Campos do formulario que valem para a modalidade (os outros sao ignorados)."""
     campos = {"valor_avaliacao", "numero_imovel", "link", "matricula", "averbacao_leiloes_negativos",
@@ -279,6 +294,8 @@ def ler_formulario_leilao(textos: dict, banco: str, modalidade: str) -> tuple[di
     for campo in CAMPOS_TEXTO_LEILAO:
         if campo in validos:
             dados[campo] = str(textos.get(campo) or "").strip() or None
+    if not dados.get("link") and dados["banco"] == ORIGEM_CAIXA:
+        dados["link"] = link_caixa(dados.get("numero_imovel"))
     dados["gravame"] = bool(textos.get("gravame")) or bool(dados.get("gravame_texto"))
     dados["formas_pagamento"] = list(textos.get("formas_pagamento") or []) or None
     return dados, erros

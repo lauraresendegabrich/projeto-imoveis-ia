@@ -409,6 +409,22 @@ def test_sem_valor_minimo_da_etapa_nao_avalia():
     assert avaliar_imovel_leilao(ag5(liquidez=LIQ), so_1o, agora=datetime(2026, 11, 20)) is None
 
 
+def test_link_caixa_pelo_numero_do_imovel():
+    from services.leilao import link_caixa, ler_formulario_leilao, MODALIDADES_CAIXA
+    base = "https://venda-imoveis.caixa.gov.br/sistema/detalhe-imovel.asp?hdnimovel="
+    # Links conferidos (Atalaia, Cambe e Alvorada do Sul).
+    assert link_caixa("000001028941-7") == base + "10289417"
+    assert link_caixa("000001031673-0") == base + "10316730"
+    assert link_caixa("855552405590-7") == base + "8555524055907"
+    assert link_caixa("") is None and link_caixa(None) is None and link_caixa("000-0") is None
+    # Texto colado sem link: o formulario monta pelo numero; link informado e mantido.
+    modalidade = MODALIDADES_CAIXA[0]
+    dados, _ = ler_formulario_leilao({"numero_imovel": "000001031673-0"}, "CAIXA", modalidade)
+    assert dados["link"] == base + "10316730", dados["link"]
+    dados, _ = ler_formulario_leilao({"numero_imovel": "000001031673-0", "link": "https://x/1"}, "CAIXA", modalidade)
+    assert dados["link"] == "https://x/1"
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
