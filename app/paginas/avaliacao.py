@@ -186,7 +186,8 @@ def montar_resultado_final(ctx, resultado_ag5, id_registro=None):
         # Para as verificacoes automaticas (services/verificacoes.py).
         "imovel_alvo": ctx["imovel_alvo"],
         # Situacao de cada fonte e contagens da coleta (Agente 1).
-        "resumo_coleta": imoveis_coletados[0].get("resumo_coleta") if imoveis_coletados else None,
+        "resumo_coleta": (imoveis_coletados[0].get("resumo_coleta") if imoveis_coletados
+                          else ctx.get("resumo_coleta")),
         "falhas": ctx["falhas"],
         "localizacao_alvo": ctx["localizacao_alvo"],
     }
@@ -242,6 +243,7 @@ def resultado_sem_anuncios(motivo):
 def contexto_sem_anuncios(*, id_execucao, imovel_alvo, dados_leilao, alvo_sem_localizacao, falhas,
                           localizacao_alvo, entrada_usuario, tela_resultado, tempo_ag1, tempo_total):
     """Contexto de montar_resultado_final sem anuncios: agentes 2 a 4 nao rodaram."""
+    from agents.collector import resumo_da_coleta
     return {
         "id_execucao": id_execucao, "imovel_alvo": imovel_alvo, "imoveis_coletados": [],
         "escopo_busca": None, "resumo": {"total_coletados": 0, "tempo_coleta_s": round(tempo_ag1, 1)},
@@ -249,6 +251,8 @@ def contexto_sem_anuncios(*, id_execucao, imovel_alvo, dados_leilao, alvo_sem_lo
         "comparaveis": [], "terrenos": [], "zona_resultado": {}, "resultado_ag2": {}, "resultado_ag3": {},
         "resultado_ag4": {}, "falhas": falhas, "localizacao_alvo": localizacao_alvo,
         "entrada_usuario": entrada_usuario, "tela_resultado": tela_resultado,
+        # Quantos anuncios o banco trouxe e por que nenhum sobrou (agents/collector.py).
+        "resumo_coleta": resumo_da_coleta(id_execucao),
         "tempos": {"total": round(tempo_total, 1), "agente1": round(tempo_ag1, 1), "agente2": 0.0,
                    "zona": 0.0, "agentes3e4": 0.0},
     }

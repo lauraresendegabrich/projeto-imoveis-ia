@@ -53,6 +53,31 @@ def texto_sem_anuncios(tipo: str, cidade: str, estado: str) -> str:
             f"não é possível estimar o valor de mercado.")
 
 
+def texto_coleta_vazia(resumo_coleta: dict | None) -> str:
+    """
+    Nenhum anuncio sobrou para comparar: quantos o banco trouxe e por que sairam.
+    Atalaia/PR (02/11/2026): 20 anuncios, todos do proprio imovel ou de lotes da CAIXA;
+    a tela dizia so "Encontramos 0 imoveis".
+    """
+    c = (resumo_coleta or {}).get("contagem") or {}
+    brutos = int(c.get("brutos") or 0)
+    if not brutos:
+        return "O banco de anúncios não tem casas nem terrenos à venda nesta região."
+    motivos = []
+    for chave, um, varios in (
+        ("removidos_leilao", "era de leilão ou da própria CAIXA (inclusive anúncios do próprio imóvel)",
+         "eram de leilão ou da própria CAIXA (inclusive anúncios do próprio imóvel)"),
+        ("sem_preco_ou_local", "não tinha preço ou localização", "não tinham preço ou localização"),
+        ("fora_da_regiao", "era de fora da região do imóvel", "eram de fora da região do imóvel"),
+    ):
+        n = int(c.get(chave) or 0)
+        if n:
+            motivos.append(f"{n} {um if n == 1 else varios}")
+    texto = (f"O banco de anúncios trouxe {contagem(brutos, 'anúncio', 'anúncios')}, mas nenhum serve "
+             f"para comparar")
+    return texto + (": " + "; ".join(motivos) + "." if motivos else ".")
+
+
 def texto_comparaveis_na_zona(n: int, n_alvo: int) -> str:
     """'5 comparáveis na zona (1 é o anúncio do próprio imóvel e saiu do cálculo)'."""
     return f"{contagem(n, 'comparável', 'comparáveis')} na zona" + nota_anuncio_do_alvo(n_alvo)

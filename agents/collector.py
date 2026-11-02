@@ -655,6 +655,23 @@ def _marcar_provaveis_lancamentos(unicos: list[dict], descartados: list[dict]) -
     return grupos
 
 
+_RESUMOS_COLETA: dict = {}
+_LIMITE_RESUMOS_COLETA = 50
+
+
+def _guardar_resumo_coleta(id_execucao, resumo: dict) -> None:
+    if not id_execucao:
+        return
+    _RESUMOS_COLETA[id_execucao] = resumo
+    while len(_RESUMOS_COLETA) > _LIMITE_RESUMOS_COLETA:
+        _RESUMOS_COLETA.pop(next(iter(_RESUMOS_COLETA)))
+
+
+def resumo_da_coleta(id_execucao) -> dict | None:
+    """Resumo da coleta desta avaliacao (fontes e contagens), mesmo sem nenhum anuncio."""
+    return _RESUMOS_COLETA.get(id_execucao)
+
+
 def _eh_leilao(imovel: dict) -> bool:
     """
     Verifica se o anuncio e de leilao pelo titulo, tipo e descricao.
@@ -2017,12 +2034,17 @@ def coletar_imoveis(
     logger.info(
         f"Total combinado: {len(athena_imoveis)} Athena + {len(ocrad)} Apify = {len(todos)} imoveis"
     )
+    # Quantos saem e por que (resumo da coleta: a tela explica mesmo quando nada sobra).
+    n_leilao = sum(1 for i in todos if _eh_leilao(i))
+    n_invalidos = sum(1 for i in todos if not _eh_leilao(i) and not _campos_ok(i))
     combinados = [i for i in todos if not _eh_leilao(i) and _campos_ok(i)]
     combinados = _remover_duplicatas_url(combinados)
     logger.info(f"Apos filtros (validos, sem leilao, sem duplicatas fortes): {len(combinados)}")
 
     # ── ESCOPO ────────────────────────────────────────────────────────
+    antes_escopo = len(combinados)
     combinados, escopo = _aplicar_escopo(combinados, rua=rua, bairro=bairro, cidade=cidade_nome)
+    n_fora_escopo = antes_escopo - len(combinados)
     logger.info(f"Escopo final: {escopo.upper()} | {len(combinados)} candidatos para o Agente 2")
 
     # ── ENRIQUECIMENTO ────────────────────────────────────────────────
@@ -2075,7 +2097,9 @@ def coletar_imoveis(
     # duplicatas_descartadas_ag1.json, com quem ficou no lugar e o motivo.
     # Contagens da coleta (verificacoes: encontrados = mantidos + repetidos).
     contagem = {"brutos": len(todos), "removidos_leilao_apos_enriquecimento": removidos_leilao,
-                "antes_dos_repetidos": len(combinados)}
+                "antes_dos_repetidos": len(combinados),
+                "removidos_leilao": n_leilao + removidos_leilao, "sem_preco_ou_local": n_invalidos,
+                "fora_da_regiao": n_fora_escopo}
     combinados, duplicatas_descartadas = deduplicar(combinados)
     # Mesma casa (rua, numero, area, quartos) de imobiliarias diferentes, com precos
     # diferentes: 1 anuncio com a mediana dos precos (agents/identidade.py).
@@ -2158,6 +2182,9 @@ def coletar_imoveis(
         im["id_execucao"] = id_execucao
         im["coletado_em"] = coletado_em
         im["resumo_coleta"] = resumo_coleta
+    # Tambem guardado a parte: sem nenhum anuncio que sobre, o resumo nao chega a tela
+    # pelos anuncios (Atalaia/PR, 02/11/2026: 20 do banco, todos da CAIXA, tela "0").
+    _guardar_resumo_coleta(id_execucao, resumo_coleta)
 
     # JSONs continuam como snapshots/debug. O pipeline deve usar o retorno em memoria.
     # Sempre sobrescreve, inclusive com [], para nunca servir dados de outra coleta:

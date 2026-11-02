@@ -18,7 +18,8 @@ from services.leilao import linhas_laudo as linhas_laudo_leilao
 from services.textos_tela import (
     anuncios_do_alvo_na_zona, anuncios_do_proprio_imovel, contagem, imobiliaria_proxima,
     linhas_laudo_imobiliaria, linhas_referencia, motivo_sem_valor, motivo_terreno_fora,
-    marcados_pela_usuaria, nota_anuncio_do_alvo, suspeitos_do_proprio_imovel, texto_sem_imobiliaria,
+    marcados_pela_usuaria, nota_anuncio_do_alvo, suspeitos_do_proprio_imovel, texto_coleta_vazia,
+    texto_sem_imobiliaria,
 )
 from services.verificacoes import resumo_conferencia
 
@@ -385,8 +386,12 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela, ao_responder_anuncio_
         terrenos_sep = _resumo_ag2.get("terrenos_separados", _resumo_ag2.get("terrenos_excluidos", 0))
         with st.expander("🔍 Agente Coletor de Dados"):
             # "Na regiao": a busca vai alem do bairro (rua, bairro e ate 1,5 km).
-            st.write(f"Encontramos **{contagem(total_encontrados, 'imóvel', 'imóveis')}** à venda na região do imóvel "
-                     f"({bairro}, {cidade}/{estado}).")
+            if total_encontrados:
+                st.write(f"Encontramos **{contagem(total_encontrados, 'imóvel', 'imóveis')}** à venda na região do imóvel "
+                         f"({bairro}, {cidade}/{estado}).")
+            else:
+                # Nenhum anuncio sobrou: quantos o banco trouxe e por que sairam.
+                st.write(texto_coleta_vazia(resultado.get("resumo_coleta")))
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
                 st.metric("Total", total_encontrados, f"{len(portais)} fontes")
@@ -402,6 +407,8 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela, ao_responder_anuncio_
         with st.expander("📊 Agente Identificador de Comparáveis"):
             # Monta texto compacto em um único bloco markdown
             linhas = [f"Dos {contagem(total_encontrados, 'imóvel encontrado', 'imóveis encontrados')}:"]
+            if not total_encontrados:
+                linhas = ["- Nenhum anúncio chegou a esta etapa: não há o que comparar."]
             if terrenos_sep > 0:
                 linhas.append(f"- {contagem(terrenos_sep, 'é terreno', 'são terrenos')} (não entram na comparação direta)")
             # Quantos sairam ja na comparacao de area/caracteristicas (Python, sem IA) e
@@ -415,15 +422,18 @@ def mostrar_resultado(resultado, imovel_alvo_export, tela, ao_responder_anuncio_
                 if n_ia:
                     linhas.append(f"- {contagem(n_ia, 'foi analisado', 'foram analisados')} pela IA para identificar "
                                   f"os mais parecidos com o seu")
+            elif not total_encontrados:
+                pass
             elif terrenos_sep > 0:
                 analisados = total_encontrados - terrenos_sep
                 linhas.append(f"- {contagem(analisados, 'foi analisado', 'foram analisados')} pela IA para identificar os mais parecidos com o seu")
             else:
                 linhas.append(f"- Todos foram analisados pela IA para identificar os mais parecidos com o seu")
-            linhas.append(
-                f"- **{cluster_a}** {'classificado como comparável' if cluster_a == 1 else 'classificados como comparáveis'} "
-                f"(perfil similar ao seu)"
-            )
+            if total_encontrados:
+                linhas.append(
+                    f"- **{cluster_a}** {'classificado como comparável' if cluster_a == 1 else 'classificados como comparáveis'} "
+                    f"(perfil similar ao seu)"
+                )
             if cluster_b > 0:
                 linhas.append(f"- {contagem(cluster_b, 'descartado', 'descartados')} (perfil muito diferente: área, quartos ou padrão incompatível)")
             st.markdown("\n".join(linhas))

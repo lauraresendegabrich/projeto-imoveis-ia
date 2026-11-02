@@ -40,6 +40,16 @@ Descrição:
 """
 
 
+def test_texto_da_coleta_vazia():
+    from services.textos_tela import texto_coleta_vazia
+    assert texto_coleta_vazia(None) == "O banco de anúncios não tem casas nem terrenos à venda nesta região."
+    c = {"contagem": {"brutos": 5, "removidos_leilao": 1, "sem_preco_ou_local": 2, "fora_da_regiao": 2}}
+    assert texto_coleta_vazia(c) == (
+        "O banco de anúncios trouxe 5 anúncios, mas nenhum serve para comparar: 1 era de leilão ou da própria "
+        "CAIXA (inclusive anúncios do próprio imóvel); 2 não tinham preço ou localização; 2 eram de fora da "
+        "região do imóvel.")
+
+
 def test_texto():
     assert texto_sem_anuncios("Casa", "FEIJO", "ac") == (
         "Não há casas nem terrenos à venda em Feijo/AC na base de anúncios; "
@@ -69,7 +79,9 @@ def test_tela_sem_anuncios_mostra_o_motivo_e_o_leilao():
     import services.banco as banco
     import services.cep as cep
     originais = (ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep, banco.gravar_em_segundo_plano)
-    ag1.coletar_imoveis = lambda **_: []
+    # Como em Atalaia: o banco trouxe 20, todos da CAIXA (resumo guardado pela coleta).
+    ag1.coletar_imoveis = lambda **kw: (ag1._guardar_resumo_coleta(
+        kw["id_execucao"], {"contagem": {"brutos": 20, "removidos_leilao": 20}}), [])[1]
     ag2._geocodificar_com_fallback = lambda **_: (-8.1766, -70.354, "rua", "Rua 21 de Dezembro")
     cep.buscar_cep = lambda _cep: (None, "nao_encontrado")
     gravados = []
@@ -95,10 +107,16 @@ def test_tela_sem_anuncios_mostra_o_motivo_e_o_leilao():
         assert execucao["anuncios_encontrados"] == 0 and execucao["resultado_completo"]
         # O "Ver avaliacao completa" (leiloes ativos) abre esse resultado sem erro.
         tela = AppTest.from_file("app/interface.py", default_timeout=120)
-        tela.session_state["resultado"] = {**execucao["resultado_completo"], "registro": {"execucao": execucao}}
-        tela.session_state["imovel_alvo_dados"] = execucao["resultado_completo"].get("imovel_alvo") or {}
+        gravado = execucao["resultado_completo"]["resultado"]          # como os leiloes ativos abrem
+        tela.session_state["resultado"] = {**gravado, "registro": {"execucao": execucao}}
+        tela.session_state["imovel_alvo_dados"] = gravado.get("imovel_alvo") or {}
         tela.run()
         assert not tela.exception, [e.value for e in tela.exception]
+        textos = " ".join(m.value for m in tela.markdown)
+        assert ("O banco de anúncios trouxe 20 anúncios, mas nenhum serve para comparar: 20 eram de leilão "
+                "ou da própria CAIXA (inclusive anúncios do próprio imóvel).") in textos, textos[:500]
+        assert "Nenhum anúncio chegou a esta etapa: não há o que comparar." in textos
+        assert "Todos foram analisados pela IA" not in textos and "Encontramos **0" not in textos
     finally:
         ag1.coletar_imoveis, ag2._geocodificar_com_fallback, cep.buscar_cep, banco.gravar_em_segundo_plano = originais
 
