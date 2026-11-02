@@ -41,7 +41,7 @@ def fmt_brl(valor, decimais=0):
 # Alertas (os mesmos gravados no banco) mostrados na tela com explicacao e anuncios.
 ALERTAS_NA_TELA = (
     "amostra_concentrada", "terreno_fora_do_padrao", "possivel_repetido_no_calculo",
-    "area_diferente_entre_portais", "mesma_casa_precos_diferentes",
+    "area_diferente_entre_portais", "mesma_casa_precos_diferentes", "area_da_descricao",
 )
 
 

@@ -504,6 +504,84 @@ def _to_float_safe(valor: object, default: float | None = None) -> float | None:
         return default
 
 
+# Area construida escrita na descricao quando o campo de area do anuncio e o terreno
+# (Campo Largo, 02/11/2026: sobrado com "area" 455 m2 e a descricao "455,00 m2 de area de
+# terreno e 180,00 m2 de area construida"; o R$/m2 saia R$ 1.560 em vez de ~R$ 3.900).
+# So troca com tres confirmacoes: a descricao diz a area construida com todas as letras;
+# o campo de area e o terreno (igual ao campo de terreno, chamado de terreno/area total
+# na descricao, ou igual as medidas do lote "7,5x18"); e a area escrita e menor.
+_NUM_M2 = r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:m2|m²|mts|metros(?: quadrados)?)"
+_AREA_CONSTRUIDA = (
+    re.compile(_NUM_M2 + r"\s*(?:de\s+)?(?:área|area)\s+(?:construída|construida|edificada)", re.I),
+    re.compile(r"(?:área|area)\s+(?:construída|construida|edificada)\s*(?:total\s*)?(?:de|:|=|-)?\s*(?:aprox\.?\s*)?"
+               + _NUM_M2, re.I),
+    re.compile(r"(?:construída|construida)\s+(?:de|com)\s+" + _NUM_M2, re.I),
+)
+_MEDIDAS_LOTE = re.compile(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*[xX×]\s*(\d{1,3}(?:[.,]\d{1,2})?)")
+
+
+def _numero_m2(texto: str) -> float | None:
+    texto = texto.strip()
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?", texto):
+        texto = texto.replace(".", "")
+    return _to_float_safe(texto.replace(",", "."), None)
+
+
+def _area_construida_na_descricao(descricao: str) -> float | None:
+    """Area construida escrita na descricao ("180,00 m2 de area construida"); None se nao houver ou divergir."""
+    achadas = set()
+    for padrao in _AREA_CONSTRUIDA:
+        for m in padrao.finditer(descricao or ""):
+            valor = _numero_m2(m.group(1))
+            if valor and 20 <= valor <= 5000:
+                achadas.add(round(valor, 2))
+    return achadas.pop() if len(achadas) == 1 else None
+
+
+def _campo_area_e_o_terreno(area: float, imovel: dict, descricao: str) -> bool:
+    terreno = _to_float_safe(imovel.get("area_terreno") or imovel.get("landArea"), None)
+    if terreno and abs(terreno - area) <= 0.02 * area:
+        return True
+    texto = (descricao or "").lower()
+    for m in re.finditer(_NUM_M2 + r"\s*(?:de\s+)?(?:área\s+|area\s+)?(?:de\s+)?(?:terreno|total)", texto):
+        valor = _numero_m2(m.group(1))
+        if valor and abs(valor - area) <= 0.02 * area:
+            return True
+    for m in re.finditer(r"(?:terreno|área total|area total)\s*(?:de|:|com)?\s*" + _NUM_M2, texto):
+        valor = _numero_m2(m.group(1))
+        if valor and abs(valor - area) <= 0.02 * area:
+            return True
+    for m in _MEDIDAS_LOTE.finditer(texto):
+        a, b = _numero_m2(m.group(1)), _numero_m2(m.group(2))
+        if a and b and abs(a * b - area) <= 0.03 * area:
+            return True
+    return False
+
+
+def _corrigir_area_pela_descricao(imovel: dict) -> bool:
+    """Casa com o terreno no campo de area e a area construida na descricao: usa a da descricao."""
+    if grupo_de(imovel) != "casa":
+        return False
+    area = _to_float_safe(imovel.get("area"), None)
+    descricao = str(imovel.get("description") or imovel.get("descricao") or "")
+    if not area or not descricao:
+        return False
+    escrita = _area_construida_na_descricao(descricao)
+    if not escrita or escrita >= area * 0.95 or not _campo_area_e_o_terreno(area, imovel, descricao):
+        return False
+    imovel["area_original"] = area
+    imovel["area_corrigida_pela_descricao"] = escrita
+    imovel["area"] = escrita
+    if imovel.get("area_construida") not in (None, ""):
+        imovel["area_construida"] = escrita
+    if not imovel.get("area_terreno"):
+        imovel["area_terreno"] = area
+    preco = _to_float_safe(imovel.get("price") or imovel.get("preco"), None)
+    if preco and imovel.get("pricePerSqm") not in (None, ""):
+        imovel["pricePerSqm"] = round(preco / escrita, 2)
+    return True
+
+
 def _to_int_safe(valor: object, default: int = 0) -> int:
     convertido = _to_float_safe(valor, None)
     return int(convertido) if convertido is not None else default
@@ -2112,6 +2190,12 @@ def coletar_imoveis(
         )
     combinados, escopo = _aplicar_escopo(combinados, rua=rua, bairro=bairro, cidade=cidade_nome)
     logger.info(f"[Ag1][Re-filtro] escopo reaplicado: {escopo.upper()} | {len(combinados)} candidatos")
+
+    # Area construida da descricao quando o campo de area e o terreno (casas).
+    n_area_corrigida = sum(1 for im in combinados if _corrigir_area_pela_descricao(im))
+    if n_area_corrigida:
+        logger.info(f"[Ag1] area construida tirada da descricao (o campo de area era o terreno): "
+                    f"{n_area_corrigida} anuncio(s)")
 
     # ── MESMO IMOVEL EM VARIOS ANUNCIOS ───────────────────────────────
     # O mesmo imovel costuma estar em 2-3 portais (ou anunciado por 2 imobiliarias)

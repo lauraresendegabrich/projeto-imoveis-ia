@@ -341,4 +341,20 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
             sum(len(c["precos_entre_imobiliarias"]) for c in juntadas), 0, detalhe,
         ))
 
+    # 14. Casa com o terreno no campo de area: o Agente 1 usou a area construida escrita
+    #     na descricao (o R$/m2 com o terreno saia muito baixo).
+    corrigidas = [c for c in usados_todos if c.get("area_corrigida_pela_descricao")]
+    if corrigidas:
+        alertas.append(_alerta(
+            "area_da_descricao",
+            ("Área tirada da descrição: " + (
+                "em 1 casa usada no cálculo, o campo de área do anúncio era o terreno" if len(corrigidas) == 1 else
+                f"em {len(corrigidas)} casas usadas no cálculo, o campo de área do anúncio era o terreno")
+             + "; foi usada a área construída escrita na descrição. Confira os anúncios."),
+            len(corrigidas), 0,
+            [{**_anuncio(c), "motivo": f"campo de área {float(c['area_original']):g} m² (terreno); "
+                                       f"descrição: {float(c['area_corrigida_pela_descricao']):g} m² construídos"}
+             for c in corrigidas if c.get("area_original")],
+        ))
+
     return alertas

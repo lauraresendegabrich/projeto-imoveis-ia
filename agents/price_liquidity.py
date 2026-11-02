@@ -848,6 +848,8 @@ def executar_agente5(
             # com precos diferentes (Ag1): conta como 1, com a mediana dos precos.
             "precos_entre_imobiliarias": im.get("precos_entre_imobiliarias"),
             "preco_original": im.get("preco_original"),
+            # Casa com o terreno no campo de area: area construida tirada da descricao (Ag1).
+            "area_corrigida_pela_descricao": im.get("area_corrigida_pela_descricao"),
             # Grupo de anuncios iguais de imobiliarias diferentes (Ag1): conta como 1.
             "provavel_lancamento": im.get("provavel_lancamento"),
             "area_original": im.get("area_original"),
