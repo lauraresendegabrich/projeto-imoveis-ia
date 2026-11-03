@@ -42,6 +42,7 @@ def fmt_brl(valor, decimais=0):
 ALERTAS_NA_TELA = (
     "amostra_concentrada", "terreno_fora_do_padrao", "possivel_repetido_no_calculo",
     "area_diferente_entre_portais", "mesma_casa_precos_diferentes", "area_da_descricao",
+    "diferente_avaliacao_caixa",
 )
 
 
@@ -112,7 +113,9 @@ def mostrar_alertas_na_tela(resultado):
             _mostrar_grupos_de_repetidos(alerta)
             continue
         anuncios = _anuncios_do_alerta(alerta)
-        rotulo = (f"Ver os {len(anuncios)} anúncios iguais" if alerta.get("codigo") == "amostra_concentrada"
+        if not anuncios:       # ex.: diferente da avaliacao CAIXA (so valores)
+            continue
+        rotulo =(f"Ver os {len(anuncios)} anúncios iguais" if alerta.get("codigo") == "amostra_concentrada"
                   else "Ver os anúncios")
         with st.expander(rotulo):
             com_motivo = any(a.get("motivo") for a in anuncios)

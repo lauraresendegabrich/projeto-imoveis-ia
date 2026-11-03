@@ -106,6 +106,16 @@ def test_motivo_exato_avaliacao_caixa_com_valores_e_limite():
     a = calcular_alertas(execucao(valor_mercado=1_500_000.0, valor_avaliacao=990_000.0), ag5())[0]
     assert a["mensagem"].startswith("Valor de mercado R$ 1.500.000 está 52% acima do valor de avaliação CAIXA (R$ 990.000)")
     assert a["limite"] == 0.40 and a["detalhe"] == {"valor_mercado": 1_500_000.0, "valor_avaliacao_caixa": 990_000.0}
+    assert a["mensagem"].endswith("Confira os comparáveis e o terreno antes de confiar na decisão.")
+
+
+def test_alerta_avaliacao_caixa_aparece_na_tela():
+    # Estancia Velha, 03/11/2026: R$ 1,02 mi contra R$ 507 mil da CAIXA, gravado mas sem aviso na tela.
+    from app.resultado_tela import alertas_na_tela
+    a = calcular_alertas(execucao(valor_mercado=1_016_736.0, valor_avaliacao=507_000.0), ag5())
+    resultado = {"registro": {"execucao": {"alertas": a}}}
+    assert [x["codigo"] for x in alertas_na_tela(resultado)] == ["diferente_avaliacao_caixa"]
+    assert "101% acima" in a[0]["mensagem"], a[0]["mensagem"]
 
 
 def test_motivo_exato_precos_espalhados_mostra_extremos():

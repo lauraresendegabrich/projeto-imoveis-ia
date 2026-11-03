@@ -152,7 +152,8 @@ def calcular_alertas(execucao: dict, resultado_ag5: dict | None, falhas: list | 
                 "diferente_avaliacao_caixa",
                 f"Valor de mercado {_brl(mercado)} está {abs(diferenca):.0%} "
                 f"{'acima' if diferenca > 0 else 'abaixo'} do valor de avaliação CAIXA "
-                f"({_brl(avaliacao)}); limite: {LIMITE_DIFERENCA_AVALIACAO_CAIXA:.0%}.",
+                f"({_brl(avaliacao)}); limite: {LIMITE_DIFERENCA_AVALIACAO_CAIXA:.0%}. Confira os "
+                f"comparáveis e o terreno antes de confiar na decisão.",
                 round(diferenca, 3), LIMITE_DIFERENCA_AVALIACAO_CAIXA,
                 {"valor_mercado": mercado, "valor_avaliacao_caixa": avaliacao},
             ))
