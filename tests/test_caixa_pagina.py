@@ -254,6 +254,10 @@ def test_endereco_de_casa_em_condominio_marca_o_campo():
         "RUA A,N. 10 COND RES JARDIM, CENTRO - CEP: 83602-566, CAMPO LARGO - PARANA": True,
         # Casa de loteamento (quadra/lote) e rua com "Casa" no nome: nao.
         "RUA DR EMILIO MAIA,N. SN CS 14 LT 14 QD C, LOURENÇO ALBUQUERQUE - CEP: 57100-000, RIO LARGO - ALAGOAS": False,
+        # Guaiba (03/11/2026): casa 110 dentro do numero 151 (condominio Reserva das Figueiras).
+        "RUA DOS PARDAIS,N. 151 CS 110 LT 40 QD B, CORONEL NASSUCA - CEP: 92701-456, GUAIBA - RIO GRANDE DO SUL": True,
+        # Mesmo numero da rua e da casa, com quadra/lote: loteamento.
+        "RUA DAS FLORES,N. 14 CS 14 LT 14 QD C, CENTRO - CEP: 57100-000, RIO LARGO - ALAGOAS": False,
         "RUA CASA BRANCA,N. 50, CENTRO - CEP: 86181-190, CAMBE - PARANA": False,
     }
     for endereco, esperado in casos.items():

@@ -344,9 +344,13 @@ def ler_pagina_caixa(conteudo: str, agora: datetime | None = None) -> dict:
     # CEREJEIRAS" (Campo Mourao, 02/11/2026) so dizia condominio ali.
     titulo = _titulo_da_pagina(linhas)
     titulo_txt = _sem_acento(titulo or "").upper()
-    # "CS 14 LT 14 QD C" (Rio Largo) e casa de loteamento: com quadra/lote nao conta.
-    unidade = (re.search(r"\b(?:CS|CASA)\s*\d+", endereco_txt)
-               and not re.search(r"\b(?:QD|LT|QUADRA|LOTE)\b", endereco_txt))
+    # "CS 14 LT 14 QD C" (Rio Largo) e casa de loteamento: com quadra/lote nao conta,
+    # salvo quando a casa tem numero proprio dentro do numero da rua: "N. 151 CS 110 LT 40
+    # QD B" (Guaiba, 03/11/2026: casa 110 do condominio Reserva das Figueiras).
+    casa = re.search(r"\b(?:CS|CASA)\s*(\d+)", endereco_txt)
+    numero_rua = re.sub(r"\D", "", str(campos.get("numero") or ""))
+    unidade = casa and (not re.search(r"\b(?:QD|LT|QUADRA|LOTE)\b", endereco_txt)
+                        or (numero_rua and int(numero_rua) != int(casa.group(1))))
     if unidade or re.search(r"\bCOND\b|\bCONDOMINIO\b", endereco_txt):
         campos["condominio"] = True
         avisos.append("Endereço indica casa em condomínio: o campo \"Casa em condomínio fechado\" foi marcado. "
