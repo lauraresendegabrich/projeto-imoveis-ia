@@ -2870,10 +2870,12 @@ def _motivo_parcial_outro_bairro(item: dict, bairro_esperado: str | None) -> str
         return None
     devolvido = _bairro_google(item)
     # O Google as vezes completa o nome entre parenteses: "Praia do Sonho (Ens Brito)"
-    # para "Praia do Sonho" (Palhoca, 29/10/2026). O nome sem o parentese conta.
-    if devolvido and _normalizar_texto(bairro_esperado) in {
-        _normalizar_texto(devolvido), _normalizar_texto(re.sub(r"\s*\(.*?\)\s*", " ", devolvido)),
-    }:
+    # para "Praia do Sonho" (Palhoca, 29/10/2026). O nome sem o parentese conta, dos
+    # dois lados: a CAIXA escreve "VILA IMPERIAL (BARRO VERMELHO)" e o Google devolve
+    # "Vila Imperial" (Gravatai, 03/11/2026: o alvo caiu no centro do bairro, a 3,9 km).
+    def _nomes(texto):
+        return {_normalizar_texto(texto), _normalizar_texto(re.sub(r"\s*\(.*?\)\s*", " ", texto))}
+    if devolvido and _nomes(bairro_esperado) & _nomes(devolvido):
         return None
     return f"partial_match com bairro diferente (informado={bairro_esperado!r}, devolvido={devolvido!r})"
 

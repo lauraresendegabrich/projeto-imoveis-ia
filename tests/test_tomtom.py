@@ -206,6 +206,16 @@ def test_google_com_bairro_entre_parenteses_e_aceito():
     (r, n) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
                                                         bairro_esperado="Praia Do Sonho"), tomtom("Street"), google=g)
     assert r == (-22.84, -42.80, "rua") and n == 0, (r, n)
+    # Gravatai: o parentese vem do lado da CAIXA ("VILA IMPERIAL (BARRO VERMELHO)").
+    g = google_rua("Vila Imperial")
+    (r, n) = _rodar(lambda: ag2._geocodificar_detalhado(END_P, cidade_esperada="Palhoça",
+                                                        bairro_esperado="VILA IMPERIAL (BARRO VERMELHO)"),
+                    tomtom("Street"), google=g)
+    assert r == (-22.84, -42.80, "rua") and n == 0, (r, n)
+    # Bairro de fato diferente continua recusado.
+    from agents.comparables import _motivo_parcial_outro_bairro
+    assert _motivo_parcial_outro_bairro({"partial_match": True, "address_components": [
+        {"types": ["sublocality"], "long_name": "Centro"}]}, "VILA IMPERIAL (BARRO VERMELHO)")
 
 
 def test_nominatim_highway_residential_e_rua():
