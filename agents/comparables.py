@@ -152,6 +152,7 @@ TOP_N_FALLBACK_PYTHON = 20
 # Pre-classificacao de area (Agente 2).
 # Limite padrao: candidato incompativel quando a area difere mais que isto do alvo.
 LIMITE_AREA_PRE_CLASSIFICACAO = 0.30
+AREA_MINIMA_ANUNCIO = 10.0  # m2; igual ao AREA_MINIMA_VALIDA do Agente 5
 # Relaxamento adaptativo: se o limite padrao deixar menos elegiveis que este minimo,
 # a pre-classificacao e refeita com um limite mais generoso (abaixo) para nao
 # estrangular a amostra em bairros com poucos anuncios comparaveis.
@@ -1184,7 +1185,13 @@ def _pre_classificar(
     area_cand = _obter_area_construida(candidato)
     diferenca_area_pct = None
 
-    if area_alvo is not None and area_cand is not None:
+    # Anuncio sem area (ou com area de cadastro errado, < 10 m2) nao vai para a IA:
+    # o Agente 5 nao calcula R$/m2 sem area, mas a IA o aprovava e a zona o contava
+    # para o minimo (Araucaria/South Dakota, nov/2026: 9 de 12 aprovados sem area).
+    if area_alvo is not None and (area_cand is None or area_cand < AREA_MINIMA_ANUNCIO):
+        comparacoes_realizadas += 1
+        motivos.append("anuncio sem area construida (nao entra no calculo do valor)")
+    elif area_alvo is not None and area_cand is not None:
         comparacoes_realizadas += 1
         diferenca_area_pct = abs(area_cand - area_alvo) / area_alvo
         if diferenca_area_pct > limite_area_pct:

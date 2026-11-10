@@ -119,6 +119,17 @@ def test_alvo_marcado_como_condominio_no_formulario():
     assert not _alvo_em_condominio(dict(alvo, em_condominio=False))
 
 
+def test_anuncio_sem_area_nao_vai_para_a_ia():
+    # Araucaria/South Dakota (nov/2026): 9 casas sem area aprovadas pela IA e contadas na zona.
+    alvo = {"tipo": "casa", "propertyType": "Casas", "area": 48.06, "bedrooms": 2}
+    for area in (None, 1):
+        r = _pre_classificar(alvo, casa(area=area))
+        assert not r["elegivel_llm"]
+        assert "anuncio sem area construida" in r["motivos_incompatibilidade"][0]
+    assert _pre_classificar(alvo, casa(area=50))["elegivel_llm"]
+
+
+
 if __name__ == "__main__":
     testes = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     falhas = 0
