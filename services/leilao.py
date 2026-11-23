@@ -45,7 +45,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from services.formatos import ler_numero_br
 
 # Conta do investimento (regra do professor). Unico lugar destes percentuais.
-CUSTOS_ANTES_DA_VENDA = 0.33   # sobre a arrematacao (ITBI, registro, debitos, reforma...)
+CUSTOS_ANTES_DA_VENDA = 0.33   # sobre a arrematacao (comissao do leiloeiro, ITBI, registro, debitos, reforma...)
 CORRETAGEM = 0.05              # sobre a venda
 ALIQUOTA_IR = 0.15             # sobre venda - custos antes da venda
 
@@ -64,8 +64,8 @@ MODALIDADE_COMPRA_DIRETA = "Compra Direta"
 MODALIDADES_CAIXA = [MODALIDADE_SFI, MODALIDADE_LICITACAO, MODALIDADE_VENDA_ONLINE, MODALIDADE_COMPRA_DIRETA]
 
 # Comissao: no Leilao SFI e na Licitacao Aberta o comprador paga ao leiloeiro; na Venda
-# Online e na Compra Direta a corretagem e da CAIXA. So registrada e mostrada: nao entra
-# na conta (os custos antes da venda ja cobrem a aquisicao).
+# Online e na Compra Direta a corretagem e da CAIXA. Ja coberta pelos custos antes da
+# venda (33%); aqui so para mostrar e para a calculadora detalhada.
 COMISSAO_LEILOEIRO = 0.05
 MODALIDADES_COM_LEILOEIRO = (MODALIDADE_SFI, MODALIDADE_LICITACAO)
 
@@ -117,11 +117,18 @@ def html_decisao(decisao: str, tamanho: str = "1.35rem") -> str:
             f'font-size:{tamanho};font-weight:700;">{icone} {decisao}</div>')
 
 
-def conta_investimento(arrematacao: float, venda: float) -> dict:
-    """A conta do professor, linha a linha (tela, laudo e testes usam a mesma)."""
-    custos_antes = arrematacao * (1 + CUSTOS_ANTES_DA_VENDA)
-    corretagem = venda * CORRETAGEM
-    ir = max(0.0, (venda - custos_antes) * ALIQUOTA_IR)
+def conta_investimento(arrematacao: float, venda: float, custos_pct: float = CUSTOS_ANTES_DA_VENDA,
+                       corretagem_pct: float = CORRETAGEM, ir_pct: float = ALIQUOTA_IR,
+                       custos_fixos: float = 0.0) -> dict:
+    """
+    A conta do professor, linha a linha (tela, laudo e testes usam a mesma). Os
+    parametros opcionais sao da calculadora de simulacao (app/calculadora.py); sem eles,
+    e a regra do professor. `custos_fixos`: custos em R$ antes da venda (reforma,
+    dividas...), somados aos `custos_pct` da arrematacao.
+    """
+    custos_antes = arrematacao * (1 + custos_pct) + custos_fixos
+    corretagem = venda * corretagem_pct
+    ir = max(0.0, (venda - custos_antes) * ir_pct)
     custos_totais = custos_antes + corretagem + ir
     resultado = venda - custos_totais
     return {
@@ -132,18 +139,32 @@ def conta_investimento(arrematacao: float, venda: float) -> dict:
         "ir": ir,
         "custos_totais": custos_totais,
         "resultado": resultado,
-        "roi": resultado / custos_antes,
+        "roi": resultado / custos_antes if custos_antes else 0.0,
     }
 
 
-def lance_para_roi(venda: float, roi: float) -> float:
+def lance_para_roi(venda: float, roi: float, custos_pct: float = CUSTOS_ANTES_DA_VENDA,
+                   corretagem_pct: float = CORRETAGEM, ir_pct: float = ALIQUOTA_IR,
+                   custos_fixos: float = 0.0) -> float:
     """
     Maior arrematacao que ainda da o ROI pedido. Invertendo a conta (com IR positivo,
     o que vale para qualquer ROI >= 0):
         ROI = venda x (1 - corretagem - IR) / custos_antes - (1 - IR)
+    Com custos em R$, a arrematacao e o que sobra deles; 0 se nem pagando 0 da o ROI.
     """
-    custos_antes = venda * (1 - CORRETAGEM - ALIQUOTA_IR) / (roi + 1 - ALIQUOTA_IR)
-    return custos_antes / (1 + CUSTOS_ANTES_DA_VENDA)
+    custos_antes = venda * (1 - corretagem_pct - ir_pct) / (roi + 1 - ir_pct)
+    return max(0.0, (custos_antes - custos_fixos) / (1 + custos_pct))
+
+
+def venda_para_empatar(arrematacao: float, custos_pct: float = CUSTOS_ANTES_DA_VENDA,
+                       corretagem_pct: float = CORRETAGEM, ir_pct: float = ALIQUOTA_IR,
+                       custos_fixos: float = 0.0) -> float:
+    """
+    Menor venda sem prejuizo (ROI 0). Resultado = (venda - C)(1 - IR) - venda x corretagem = 0
+    -> venda = C (1 - IR) / (1 - IR - corretagem), com C = custos antes da venda.
+    """
+    custos_antes = arrematacao * (1 + custos_pct) + custos_fixos
+    return custos_antes * (1 - ir_pct) / (1 - ir_pct - corretagem_pct)
 
 
 def texto_percentual(valor: float, casas: int = 2) -> str:
@@ -775,12 +796,12 @@ def titulo_estimativa_2o_leilao(estimativa: dict) -> str:
 
 
 def texto_comissao(leilao: dict) -> str | None:
-    """Quem paga a comissao (so registrado: nao entra na conta)."""
+    """Quem paga a comissao (ja dentro dos custos antes da venda)."""
     if not leilao.get("modalidade"):
         return None
     if leilao.get("comissao_leiloeiro"):
         return (f"Comissão do leiloeiro: {texto_percentual(leilao['comissao_leiloeiro'], 0)} do lance, "
-                f"paga pelo comprador (não entra na conta do ROI).")
+                f"paga pelo comprador.")
     return "Corretagem por conta da CAIXA."
 
 

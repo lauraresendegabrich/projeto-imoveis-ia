@@ -16,6 +16,7 @@ import streamlit.components.v1 as components
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.blocos_leilao import mostrar_estimativa_2o_leilao
+from app.calculadora import mostrar_calculadora, pedir_simulacao
 from app.cronometro import mostrar_cronometro
 from app.resultado_tela import fmt_brl, mostrar_avaliacao_leilao, mostrar_resultado
 from services import detalhe_leilao, leiloes_ativos
@@ -179,8 +180,19 @@ def mostrar_imovel(l: dict) -> None:
                                f"do {l['etapa']}º leilão (mesma liquidez).")
                 if l.get("avaliado_em"):
                     st.caption(f"Avaliado em {l['avaliado_em'].strftime('%d/%m/%Y')}")
-                st.button("🔎 Ver avaliação completa", key=f"detalhe_{l['id']}", on_click=abrir_detalhe,
-                          args=(l["ultima_execucao"], l["id"]), use_container_width=True)
+                col_ver, col_simular = st.columns([3, 2])
+                with col_ver:
+                    st.button("🔎 Ver avaliação completa", key=f"detalhe_{l['id']}", on_click=abrir_detalhe,
+                              args=(l["ultima_execucao"], l["id"]), use_container_width=True)
+                with col_simular:
+                    # Calculadora do menu lateral com o minimo da etapa atual e a liquidez.
+                    if l.get("roi") is not None:
+                        st.button("🧮 Simular", key=f"simular_{l['id']}", on_click=pedir_simulacao,
+                                  use_container_width=True, args=({
+                                      "id": f"{l['id']}:{l.get('etapa')}", "arrematacao": l["valor_minimo_atual"],
+                                      "venda": l["liquidez"], "modalidade": l.get("modalidade"),
+                                      "rotulo": " · ".join(x for x in (texto_cabecalho(l), l.get("cidade")) if x),
+                                  }, True))
             col_sit, col_botao = st.columns([3, 2])
             with col_sit:
                 st.selectbox("Situação", SITUACOES_LEILAO, key=f"situacao_{l['id']}",
@@ -190,7 +202,11 @@ def mostrar_imovel(l: dict) -> None:
                           use_container_width=True)
 
 
-st.set_page_config(page_title="Leilões ativos", page_icon="🔨", layout="wide")
+st.set_page_config(page_title="Leilões ativos", page_icon="🔨", layout="wide", initial_sidebar_state="expanded")
+# Calculadora fixa no menu lateral: fica visivel enquanto a pessoa ve os cards e abre
+# uma avaliacao completa.
+with st.sidebar:
+    mostrar_calculadora()
 st.title("🔨 Leilões ativos")
 st.caption("Imóveis de leilão avaliados, do encerramento mais próximo ao mais distante. "
            "A resposta usa o valor mínimo da etapa atual e a liquidez da última avaliação.")

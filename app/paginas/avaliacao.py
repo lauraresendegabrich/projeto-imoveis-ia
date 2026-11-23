@@ -16,6 +16,7 @@ from pathlib import Path
 # Adiciona raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from app.calculadora import mostrar_calculadora, pedir_simulacao, sugestao_da_avaliacao
 from app.resultado_tela import mostrar_resultado
 from services.cep import buscar_cep, limpar_cep, texto_endereco_cep
 from services.detalhe_leilao import resultado_para_gravar
@@ -1132,3 +1133,17 @@ with area_principal.container():
 
         mostrar_resultado(resultado, imovel_alvo_export, tela_resultado,
                           ao_responder_anuncio_do_alvo=responder_anuncio_do_alvo)
+
+# ============================================================
+# CALCULADORA DE SIMULACAO (menu lateral, embaixo do formulario)
+# ============================================================
+# Fica no fim do arquivo para pegar o resultado desta mesma rodada: depois de uma
+# avaliacao de leilao, ja vem com o valor minimo da etapa e a liquidez.
+
+_resultado_calc = st.session_state.get("resultado") or {}
+_sugestao_calc = sugestao_da_avaliacao(_resultado_calc.get("leilao"), _resultado_calc.get("id_execucao"))
+if _sugestao_calc:
+    pedir_simulacao(_sugestao_calc)
+with st.sidebar:
+    st.divider()
+    mostrar_calculadora()
