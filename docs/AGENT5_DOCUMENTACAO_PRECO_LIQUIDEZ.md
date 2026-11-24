@@ -233,6 +233,15 @@ score = 0.35 × score_ag3 + 0.40 × score_ag4 + 0.25 × (1 - desconto)
 
 ---
 
+## Uso no leilão
+
+O valor de liquidez (90% do valor médio) é a venda na conta do ROI dos imóveis da
+CAIXA. Só entra quando o status é `ok` e a avaliação é confiável (`MIN_AMOSTRAS_CONFIAVEL`
+= 5 comparáveis). Nos outros casos, a resposta é "Sem estimativa". A conta, as decisões e
+a calculadora estão em `LEILAO_DOCUMENTACAO.md`.
+
+---
+
 ## Dependências
 
 Nenhuma LLM. Apenas Python puro (`statistics`, `json`, `math`).

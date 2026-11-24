@@ -11,6 +11,57 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   rodou em 19/09 antes do commit `e2c843e`, que criou a regra dos 3 comparáveis.
   Rodar os IDs 4 e 5 de novo para confirmar.
 
+Questões de método do lote de 33 imóveis da CAIXA (nov/2026). **Não mudar o cálculo
+nestes pontos sem a resposta do professor.**
+
+- [ ] **Separação do terreno superavalia lote grande.** Em Estância Velha, o sistema deu
+  R$ 1,02 mi, contra R$ 507 mil da CAIXA. Houve casos parecidos em Cambé e Gravataí. Em
+  Guaíba (condomínio), deu R$ 1,97 mi, contra R$ 1,63 mi sem separar. O filtro de área dos
+  terrenos (1/3 a 3×) e o "mesmo m² no desconto e na soma" foram testados em 03/11/2026 e
+  quase não mudam o resultado.
+- [ ] **Método evolutivo ou aceitar menos de 5 comparáveis** nas cidades com poucos
+  anúncios (General Câmara e Gravataí ficaram sem estimativa).
+- [ ] **Imóvel em construção ou inacabado** (Guaíba, 19/33): o sistema avalia como casa
+  pronta. O registro `9692b705` ficou como está até a resposta.
+- [ ] **Mistura das séries de m²**, terrenos com preço de casa ou condomínio na amostra e
+  "alto padrão".
+
+Pontos de atenção do teste do Leilão SFI (10 imóveis, nov/2026; planilha
+`Testes_Leilao_SFI.xlsx`, fora do repositório):
+
+- [ ] **Comparáveis diferentes do imóvel** (uma das duas causas principais).
+  - Padrão ou idade diferentes: Campina da Barra, Colombo e Soledade.
+  - Casas maiores: Cambé.
+  - Imóveis muito fora do padrão: Campina Grande do Sul.
+  - A nota do Agente 3 só afeta a liquidez, não o valor. O valor sai de R$ 18 mil a
+    R$ 134 mil maior.
+- [ ] **Terreno avaliado com lotes diferentes do imóvel** (a outra causa principal). O
+  R$/m² vem de lotes maiores, comerciais, de avenida ou de outros bairros, porque o raio
+  dos terrenos chegou a 675–1.500 m.
+  - Em casas pequenas, geminadas ou de condomínio, soma de R$ 35 mil a R$ 91 mil.
+  - Em lote grande soma bem mais: R$ 581 mil em Astorga, com 1.400 m². Lote grande também
+    não tem desconto por m².
+- [ ] **Valor alto vira "Oportunidade" falsa no 2º leilão.** Isso é consequência dos dois
+  itens acima. Com o lance do 2º bem abaixo da avaliação, um valor inflado vira Oportunidade.
+  - Campina da Barra deu ROI de 44%, Cambé de 84% e Colombo de 62%. Com o valor real, o ROI
+    fica entre 0% e 30%.
+  - Astorga deu "Margem apertada", com ROI real negativo.
+  - A conta não inclui reforma.
+- [ ] **Cidade pequena:** Astorga teve só 6 casas (4 sem distância verificada), e Cruz
+  Machado só 1 anúncio. Cruz Machado ficou sem estimativa, o que está certo. O Apify, que é
+  a busca reserva, estava sem crédito.
+- [ ] **2º leilão mais caro que o 1º:** em Soledade e South Dakota, o mínimo do 2º passa
+  da avaliação (é a dívida do antigo dono). O sistema calcula certo e mostra o ROI das duas
+  etapas. Fica para explicar na apresentação.
+
+## Leilão e telas
+
+- [ ] **Cronômetro dos leilões** (`app/cronometro.py`) usa `st.components.v1.html`. O
+  Streamlit avisava que esse recurso seria removido depois de 01/06/2026. Conferir se o
+  cronômetro ainda aparece e trocar pelo substituto indicado pelo Streamlit.
+- [ ] **Botão "Salvar" dos cards** (grava a situação: ativo, vendido...). O texto sozinho
+  confunde; sugestão: "Salvar situação".
+
 ## Infraestrutura e segurança
 
 - [ ] **`DATABASE_URL` nos Secrets do Streamlit Cloud** (Settings → Secrets). Sem
@@ -106,6 +157,13 @@ Itens identificados e ainda não resolvidos. Ao resolver um item, mova-o para
   anúncios, 0 casas no círculo, +114 s). Substituído pela busca por proximidade.
 
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
+
+- [ ] **Modelo de visão da NVIDIA desativado** (`meta/llama-3.2-11b-vision-instruct`,
+  erro 410 desde 05/11/2026). Não muda o valor, mas a reserva do Agente 3 para fotos
+  precisa de outro modelo do NVIDIA NIM, ou a NVIDIA sai da cadeia.
+- [ ] **Créditos do Apify acabaram** (erro 403). O Apify é só reserva do Agente 1 (a
+  Athena é a fonte principal). Sem ele, cidade com menos de 10 anúncios na Athena fica sem
+  o socorro do VivaReal.
 
 - [ ] **Ordem dos provedores para comparáveis.** Hoje Groq → NVIDIA → Gemini. No
   teste: Groq recusou 7 de 11 por limite de uso (429, modelo qwen3.8-27b); NVIDIA

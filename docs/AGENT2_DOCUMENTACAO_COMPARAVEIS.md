@@ -208,11 +208,25 @@ parecidas a 600 m.
 consegue calcular o R$/m² dele. Em Arapiraca (31/10/2026), um anúncio sem área completou os
 5 da zona de 900 m, o raio parou de crescer e o cálculo ficou com 4.
 
+**Anúncio sem área nem vai para a IA** (nov/2026). Na pré-classificação (`_pre_classificar`),
+anúncio sem área construída, ou com menos de 10 m² (`AREA_MINIMA_ANUNCIO`, igual ao
+`AREA_MINIMA_VALIDA` do Agente 5), é reprovado com o motivo "anuncio sem area construida (nao
+entra no calculo do valor)". Antes a IA aprovava esses anúncios. Em Araucária, 9 dos 12
+aprovados não tinham área.
+
 **Casa em condomínio fechado x casa de rua** (`_casa_em_condominio`, na pré-classificação):
 com o imóvel em casa de rua, o candidato em condomínio fechado sai (subtipo do portal,
 link "casa-de-condominio" ou texto, inclusive nos repetidos juntados). Imóvel em condomínio
 (texto ou "COND" no endereço): a regra não se aplica. Arapiraca: casas do condomínio
 Sierra, de R$ 1,1 mi, eram comparáveis de uma casa popular de rua.
+
+As frases que marcam condomínio ficam em `FRASES_CONDOMINIO`. Em nov/2026 entraram "casa no
+condomínio", "sobrado no condomínio", "localizada/situada no condomínio", "casa condomínio"
+e variações. Em Cianorte, "Vende-se casa no Condomínio Century Park" passava pela regra.
+
+O formulário tem o campo **"Casa em condomínio fechado"**. A leitura da página da CAIXA
+marca esse campo quando o endereço ou o título indicam condomínio (ver
+`LEILAO_DOCUMENTACAO.md`), e a pessoa pode desmarcar.
 
 **Área no prompt da IA:** o prompt diz que todos os candidatos já estão dentro do limite de
 área da pré-classificação, e que essa diferença sozinha não é motivo para B. Antes a IA
@@ -228,8 +242,12 @@ em pontos a 2,1 km um do outro em dois dias. Correções:
   rua pesquisada (comparação de `_mesma_rua`) não é aceito. Pesquisada a Avenida
   Caravelas, a TomTom devolvia a Estrada Geral Praia do Sonho. Só nas tentativas que
   pesquisam a rua; Cross Street ("A & B") vale se uma das duas bater.
-- **Bairro do Google entre parênteses:** "Praia do Sonho (Ens Brito)" conta como "Praia do
-  Sonho" na checagem do `partial_match`.
+- **Bairro entre parênteses, dos dois lados:** "Praia do Sonho (Ens Brito)", devolvido pelo
+  Google, conta como "Praia do Sonho" na checagem do `partial_match`. Desde nov/2026, vale
+  também para o bairro informado. A CAIXA escreve "VILA IMPERIAL (BARRO VERMELHO)" e o Google
+  devolve "Vila Imperial". Em Gravataí (03/11/2026), a rua certa era recusada, e o imóvel
+  caía no centro do bairro, a 3,9 km. Os comparáveis vinham de outros bairros (R$ 858 mil,
+  contra R$ 404 mil da CAIXA).
 - **Nominatim `class=highway`** é rua, mesmo com `addresstype=residential` (antes saía
   como bairro).
 - **Falha do Nominatim** (HTTP diferente de 200 ou exceção) agora aparece no log. Antes
@@ -338,9 +356,16 @@ O JSON também traz `terrenos_confirmados`, `terrenos_fora_zona` e `terrenos_nao
 
 ### `data/satelite_zona_homogenea_ag2.png`
 
-Imagem de satélite 1280×1280px com marcador vermelho no imóvel alvo.
+Imagem de satélite 1280×1280px com marcador vermelho no imóvel alvo. O arquivo é
+sobrescrito a cada avaliação.
 
-**Usado por:** Interface Streamlit (exibe pro usuário)
+**Usado por:** a tela usa a cópia gravada no resultado (abaixo), não este arquivo.
+
+**Cópia gravada no resultado (nov/2026):** `imagem_satelite_jpeg` traz a mesma imagem em
+JPEG reduzido (até 800 px de largura, ~100 KB, em base64), gravada no banco junto do
+resultado. Assim, todos que abrem a avaliação veem a imagem certa. Antes só o caminho do
+arquivo era gravado: em outra máquina a imagem não aparecia, e na mesma aparecia a da
+última avaliação (Cambé, 02/11/2026).
 
 ---
 

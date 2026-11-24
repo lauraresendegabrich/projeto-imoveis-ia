@@ -132,10 +132,15 @@ input e no banco.
 
 ### Quando o fallback cidade ativa
 
-Só quando **nenhum tipo** encontrou nada localmente (rua + bairro = 0 para TODOS os
-subtipos). Nesse caso, todos os subtipos são reconsultados por cidade inteira
+Só quando **nenhum tipo** encontrou nada útil localmente (rua + bairro = 0 para TODOS
+os subtipos). Nesse caso, todos os subtipos são reconsultados por cidade inteira
 (também com `ROW_NUMBER` para não duplicar). Se pelo menos 1 subtipo trouxe
-resultado local, o fallback cidade NÃO ativa.
+resultado local útil, o fallback cidade NÃO ativa.
+
+**Anúncio de leilão ou da CAIXA não conta como resultado local** (`_eh_leilao`, nov/2026).
+Em Ibaiti (02/11/2026), os 5 anúncios da rua eram o próprio imóvel da CAIXA. Eles saíam
+no filtro de leilão, e a cidade, que tinha outras casas, nem era consultada. Agora,
+se a rua e o bairro só trazem anúncios de leilão ou da CAIXA, a busca vai para a cidade.
 
 ---
 
@@ -267,6 +272,24 @@ Se sim → mantém. Se nenhum → descarta.
 Normaliza acentos antes de comparar.
 
 Se NENHUM imóvel passar → fallback: usa todos (cidade toda).
+
+### Casa com o terreno no campo de área (nov/2026)
+
+Depois do escopo, `_corrigir_area_pela_descricao` corrige casas em que o campo de área
+do anúncio é, na verdade, o terreno. Em Campo Largo (02/11/2026), um sobrado tinha
+"área" 455 m², e a descrição dizia "455,00 m² de área de terreno e 180,00 m² de área
+construída". O R$/m² saía R$ 1.560, em vez de ~R$ 3.900.
+
+A área só é trocada com três confirmações:
+1. a descrição escreve a área construída com todas as letras ("área construída",
+   "edificada"), um único valor entre 20 e 5.000 m²;
+2. o campo de área é o terreno: igual ao campo de terreno, chamado de terreno ou área
+   total na descrição, ou igual às medidas do lote ("7,5x18");
+3. a área escrita é menor que 95% do campo de área.
+
+O anúncio guarda `area_original` e `area_corrigida_pela_descricao`. O preço/m² é
+recalculado. A tela mostra o alerta `area_da_descricao` ("Área tirada da descrição"),
+para a pessoa conferir os anúncios.
 
 ---
 

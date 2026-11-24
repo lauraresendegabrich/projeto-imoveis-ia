@@ -1,10 +1,12 @@
 # Sistema Multiagente de Precificação Imobiliária
 
-Sistema que estima o valor de mercado e liquidez de imóveis usando 5 agentes inteligentes em pipeline.
+Estima o valor de mercado e o valor de liquidez de um imóvel a partir de anúncios
+parecidos da região, usando 5 agentes em sequência. Para imóveis em leilão da CAIXA,
+também calcula o retorno (ROI) de arrematar e até quanto vale a pena dar de lance.
 
-**🌐 Acesse a aplicação online:** https://projeto-imoveis-ia-sd5kashfzhslavnmflkcyq.streamlit.app/
+**App publicado:** https://projeto-imoveis-ia-sd5kashfzhslavnmflkcyq.streamlit.app/
 
-## Como Rodar
+## Como rodar
 
 ### Pré-requisitos
 
@@ -14,151 +16,136 @@ Sistema que estima o valor de mercado e liquidez de imóveis usando 5 agentes in
 ### Instalação
 
 ```bash
-# Clone o repositório
 git clone https://github.com/lauraresendegabrich/projeto-imoveis-ia.git
 cd projeto-imoveis-ia
-
-# Crie o ambiente virtual
 python -m venv .venv
-
-# Ative o ambiente
-.venv\Scripts\activate
-
-# Instale as dependências
-pip install -r requirements.txt
-pip install streamlit
+.venv\Scripts\pip install -r requirements.txt
 ```
 
-### Configuração do .env
+### Arquivo `.env`
 
-Crie um arquivo `.env` na raiz com as seguintes chaves:
+Fica na raiz e **nunca vai para o GitHub**. Peça o arquivo para quem já trabalha no projeto.
 
-```env
-# Obrigatório — Apify (coleta de imóveis)
-APIFY_TOKEN_2=seu_token_aqui
+| Chave | Para quê |
+|---|---|
+| `DATABASE_URL` | Banco Postgres no Neon: grava e lê as avaliações (ver `docs/BANCO.md`) |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Base de anúncios na Amazon Athena (fonte principal do Agente 1) |
+| `APIFY_TOKEN_2` | Coleta reserva no VivaReal/LugarCerto. **Créditos esgotados (403).** |
+| `GROQ_API_KEY`, `GROQ_API_KEY_2` | IA dos Agentes 2, 3 e 4 (Groq) |
+| `GOOGLE_API_KEY`, `GOOGLE_API_KEY_2` | IA dos Agentes 2, 3 e 4 (Gemini) |
+| `GOOGLE_MAPS_KEY` | Geocodificação, imagem de satélite e Google Places |
+| `TOMTOM_API_KEY` | Geocodificação |
+| `GEOAPIFY_API_KEY` | Pontos de interesse do entorno (Agente 4) |
+| `NVIDIA_API_KEY` | IA de reserva dos Agentes 2, 3 e 4. **O modelo de visão do Agente 3 foi desativado em 05/11/2026.** |
+| `QWEN_API_URL`, `QWEN_API_KEY` | Qwen no Colab (Agentes 3 e 4). Lento: deixar comentado (ver `docs/PENDENCIAS.md`) |
 
-# Obrigatório — Groq (LLM para classificação)
-GROQ_API_KEY=seu_token_aqui
+No Streamlit Cloud, as mesmas chaves ficam em Settings → Secrets.
 
-# Obrigatório — NVIDIA (análise de fotos)
-NVIDIA_API_KEY=seu_token_aqui
-
-# Opcional — Google Maps (zona homogênea com imagem de satélite)
-GOOGLE_MAPS_KEY=seu_token_aqui
-```
-
-**Onde obter:**
-- Apify: https://console.apify.com/account/integrations (plano free: $5/mês)
-- Groq: https://console.groq.com (grátis, 14.400 req/dia)
-- NVIDIA: https://build.nvidia.com (grátis com limite)
-- Google Maps: https://console.cloud.google.com
-
----
-
-## Opção 1: Interface Web (recomendado para testar)
+### Interface web
 
 ```bash
 .venv\Scripts\streamlit.exe run app/interface.py
 ```
 
-Acesse http://localhost:8501 no navegador.
+Abra http://localhost:8501. O menu tem duas páginas:
 
-**Preencha os campos:**
-- Rua, Número, Bairro, Cidade, Estado
-- Tipo (Casa, Apartamento ou Terreno)
-- Área construída, Área do terreno
-- Quartos, Banheiros, Vagas
-- Descrição (opcional)
-- URLs de fotos (opcional, melhora análise qualitativa)
+- **Avaliação de imóvel:** formulário do imóvel (rua, número, bairro, cidade, tipo, áreas,
+  quartos, banheiros, vagas, descrição, fotos). Para um imóvel da CAIXA, cole o texto da
+  página do imóvel no site da CAIXA (ou o .html salvo), e os campos são preenchidos. Uma
+  avaliação leva de 4 a 10 minutos.
+- **Leilões ativos:** um card por imóvel de leilão já avaliado, com a decisão, o ROI, o
+  cronômetro, a avaliação completa e a **calculadora de simulação** no menu lateral.
 
-Clique em **Avaliar Imóvel** e aguarde ~5 minutos.
+### Testes
 
-**Resultado exibido:**
-- Valor médio estimado
-- Valor de liquidez (-10%)
-- Tempo estimado de venda
-- Detalhes do cálculo (m²/terreno, m²/construção)
-- Infraestrutura da região
-- Comparáveis encontrados
+Cada arquivo de teste roda sozinho e imprime OK/FALHA e o total. Não usamos pytest.
+
+```bash
+.venv\Scripts\python.exe -m tests.test_leilao
+.venv\Scripts\python.exe -m tests.test_calculadora
+```
+
+Rode os testes da área que você mudou antes de fazer o commit.
 
 ---
 
-## Opção 2: Pipeline via Terminal
+## Pipeline (5 agentes)
 
-```bash
-.venv\Scripts\python.exe -m app.main
+```
+Entrada → Agente 1 (Coleta) → Agente 2 (Comparáveis e zona) → Agentes 3 + 4 (juntos)
+        → Agente 5 (Preço e liquidez) → ROI e decisão do leilão → banco Neon e telas
 ```
 
-Edite o dicionário `IMOVEL_ALVO` em `app/main.py` com os dados do imóvel desejado.
+| Agente | Função | Fontes |
+|--------|--------|--------|
+| 1 - Coletor | Busca anúncios da rua, do bairro ou da cidade; tira leilões e repetidos | Amazon Athena (principal), Apify (reserva) |
+| 2 - Comparáveis | Filtra e classifica os parecidos; zona homogênea no mapa | IA (Groq, Gemini, NVIDIA), Google/TomTom/Nominatim, imagem de satélite |
+| 3 - Analisador | Estado e padrão pelas fotos e pela descrição | IA (Qwen Colab, Gemini, Groq, NVIDIA) |
+| 4 - Infraestrutura | Pontos de interesse do entorno | Geoapify, Google Places, IA (Qwen Colab, Gemini, Groq, NVIDIA) |
+| 5 - Preço/Liquidez | Valor de mercado (planilha do professor) e liquidez (90%) | Cálculo local |
+
+**Leilão CAIXA:** a venda é o valor de liquidez. Custos antes da venda de 33% da
+arrematação, corretagem de 5% e IR de 15% sobre o lucro.
+
+| ROI pagando o mínimo | Decisão |
+|---|---|
+| 30% ou mais | Oportunidade |
+| 15% a 30% | Margem apertada |
+| menos de 15% | Descartar |
+| estimativa não confiável (por exemplo, menos de 5 comparáveis) | Sem estimativa |
+
+Detalhes em `docs/LEILAO_DOCUMENTACAO.md`.
 
 ---
 
-## Opção 3: Rodar a Avaliação Completa
-
-### Avaliação de Liquidez (15 imóveis)
-
-```bash
-.venv\Scripts\python.exe tests/avaliacao_liquidez.py
-```
-
-Resultado salvo em `data/avaliacao/resultado_avaliacao.json`
-
-### Avaliação de Filtragem (Precisão/Revocação)
-
-```bash
-# Calcula métricas a partir das rotulagens já feitas
-.venv\Scripts\python.exe tests/calcular_filtragem_final.py
-```
-
-Resultado salvo em `data/avaliacao/resultado_filtragem_final.json`
-
----
-
-## Estrutura do Projeto
+## Estrutura do projeto
 
 ```
 projeto-imoveis-ia/
 ├── app/
-│   ├── interface.py          # Interface Streamlit
+│   ├── interface.py          # Entrada do Streamlit (menu das páginas)
+│   ├── paginas/
+│   │   ├── avaliacao.py      # Página "Avaliação de imóvel"
+│   │   └── leiloes_ativos.py # Página "Leilões ativos"
+│   ├── calculadora.py        # Calculadora de simulação (menu lateral)
+│   ├── resultado_tela.py     # Tela do resultado
+│   ├── cronometro.py         # Contagem regressiva do leilão
 │   ├── graph.py              # Orquestrador do pipeline
 │   └── main.py               # Execução via terminal
 ├── agents/
-│   ├── collector.py          # Agente 1: Coleta (Apify)
-│   ├── comparables.py        # Agente 2: Comparáveis (LLM)
-│   ├── text_analyzer.py      # Agente 3: Análise qualitativa (NVIDIA Vision)
-│   ├── infra_evaluator.py    # Agente 4: Infraestrutura (OSM + LLM)
-│   └── price_liquidity.py    # Agente 5: Preço e Liquidez
-├── data/
-│   └── avaliacao/            # Resultados das avaliações
-├── docs/
-│   ├── DOCUMENTACAO_PROJETO.md
-│   └── DOCUMENTACAO_METRICAS_AVALIACAO.md
-├── tests/
-│   ├── avaliacao_liquidez.py
-│   └── calcular_filtragem_final.py
-├── .env                      # Chaves de API (não commitado)
-└── requirements.txt
+│   ├── collector.py          # Agente 1
+│   ├── identidade.py         # Agente 1: mesmo imóvel em vários anúncios
+│   ├── comparables.py        # Agente 2
+│   ├── text_analyzer.py      # Agente 3
+│   ├── infra_evaluator.py    # Agente 4
+│   └── price_liquidity.py    # Agente 5
+├── services/
+│   ├── leilao.py             # Conta do ROI, decisão e etapas do leilão
+│   ├── caixa_pagina.py       # Leitura da página da CAIXA
+│   ├── leiloes_ativos.py     # Lista de leilões do banco
+│   ├── detalhe_leilao.py     # Avaliação completa gravada
+│   ├── banco.py              # Gravação no Neon
+│   └── alertas.py            # Alertas do resultado
+├── db/                       # schema.sql e migrações
+├── docs/                     # Documentação (abaixo)
+└── tests/
 ```
+
+## Documentação
+
+| Arquivo | Assunto |
+|---|---|
+| `docs/AGENT1_...` a `docs/AGENT5_...` | Cada agente, com as regras e os casos que as motivaram |
+| `docs/ORQUESTRADOR_DOCUMENTACAO.md` | Como os agentes são chamados |
+| `docs/LEILAO_DOCUMENTACAO.md` | ROI, decisão, modalidades, leitura da CAIXA, telas e calculadora |
+| `docs/BANCO.md` | Tabelas, views e alertas do banco Neon |
+| `docs/HOSPEDAGEM.md` | Streamlit Cloud |
+| `docs/PENDENCIAS.md` | O que está em aberto, incluindo as perguntas para o professor |
+| `docs/DOCUMENTACAO_METRICAS_AVALIACAO.md` | Métricas da avaliação acadêmica |
 
 ---
 
-## Pipeline (5 Agentes)
-
-```
-Agente 1 (Coleta) → Agente 2 (Comparáveis) → Agentes 3+4 (paralelo) → Agente 5 (Preço)
-```
-
-| Agente | Função | API |
-|--------|--------|-----|
-| 1 - Coletor | Scraping de portais imobiliários | Apify |
-| 2 - Comparáveis | Classificação de similaridade | Groq (Llama-3.3-70b) |
-| 3 - Analisador | Avaliação qualitativa (fotos + texto) | NVIDIA Vision |
-| 4 - Infraestrutura | POIs do entorno | OpenStreetMap + Groq |
-| 5 - Preço/Liquidez | Cálculo final (TRIMMEAN) | Cálculo local |
-
----
-
-## Resultados da Avaliação
+## Resultados da avaliação (jun–ago/2026)
 
 ### Liquidez (15 imóveis, 11 válidos)
 
@@ -179,24 +166,17 @@ Agente 1 (Coleta) → Agente 2 (Comparáveis) → Agentes 3+4 (paralelo) → Age
 | Acurácia média | 77.3% |
 | Concordância humana | 85% |
 
----
-
-## Tempo de Execução
-
-- Interface (1 imóvel): ~5 minutos
-- Avaliação completa (15 imóveis): ~80 minutos
-- Custo por avaliação: ~$0.15-0.30 (Apify)
+Para refazer: `tests/avaliacao_liquidez.py` e `tests/calcular_filtragem_final.py`
+(resultados em `data/avaliacao/`).
 
 ---
 
-## Observações para os Orientadores
+## Observações
 
-1. **APIs necessárias**: O sistema depende de APIs externas (Apify, Groq, NVIDIA). Sem elas, não funciona. Os tokens no `.env` têm limite mensal.
-
-2. **Cobertura geográfica**: Funciona melhor em capitais e cidades grandes. Cidades pequenas podem não ter dados suficientes nos portais.
-
-3. **Tempo**: Cada avaliação leva ~5 minutos (coleta via scraping é o gargalo).
-
-4. **Reprodutibilidade**: Os resultados podem variar ligeiramente entre execuções (dados dos portais mudam, LLM tem aleatoriedade).
-
-5. **Documentação detalhada**: Ver `docs/DOCUMENTACAO_METRICAS_AVALIACAO.md` para explicação completa das métricas e fórmulas.
+1. **APIs externas:** o sistema depende delas. As chaves do `.env` têm limite mensal.
+2. **Cidades pequenas** podem não ter anúncios suficientes. Nesses casos, a resposta é
+   "Sem estimativa".
+3. **Reprodutibilidade:** os resultados podem variar um pouco entre execuções, porque os
+   anúncios mudam e a IA tem aleatoriedade.
+4. **Método:** as regras de cálculo seguem a planilha do professor. Mudanças de método
+   são combinadas com ele antes (ver `docs/PENDENCIAS.md`).

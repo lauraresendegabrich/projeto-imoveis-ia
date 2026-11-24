@@ -1,5 +1,10 @@
 # Documentação do Projeto — Pipeline Multiagente de Precificação Imobiliária
 
+> **Visão geral de junho/2026, mantida como registro.** Algumas fontes e regras mudaram
+> depois: a coleta passou a usar a Amazon Athena, e entraram o leilão CAIXA, o banco Neon
+> e as páginas do app. O estado atual está no `README.md`, nos documentos de cada agente
+> (`AGENT1_...` a `AGENT5_...`) e em `LEILAO_DOCUMENTACAO.md`.
+
 ## Visão Geral
 
 Sistema multiagente que coleta imóveis comparáveis, identifica os mais similares ao imóvel alvo e estima o valor de mercado com base em dados reais de portais imobiliários brasileiros.
