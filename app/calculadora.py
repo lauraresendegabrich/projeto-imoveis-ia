@@ -23,7 +23,7 @@ from services.leilao import (
     texto_percentual, venda_para_empatar,
 )
 
-SIMPLES, DETALHADO = "Simples (regra do professor)", "Detalhado"
+SIMPLES, DETALHADO = "Simples", "Detalhado"
 ITBI_PADRAO, REGISTRO_PADRAO = 0.03, 0.015
 
 # Campos (chave no session_state -> valor inicial). Percentuais em % (33.0 = 33%).
@@ -130,7 +130,7 @@ def mostrar_calculadora() -> None:
                                  "Sobre a arrematação: comissão do leiloeiro, ITBI, registro, dívidas, reforma...")
         custos_fixos = 0.0
     else:
-        st.caption("Os padrões somam 33%, como na regra do professor. Ao informar dívidas ou reforma em R\\$, "
+        st.caption("Os padrões somam 33%, como no modo simples. Ao informar dívidas ou reforma em R\\$, "
                    "diminua a reserva.")
         itens_pct = {
             "comissao": _percentual("Comissão do leiloeiro (%)", "calc_comissao", arrematacao,
