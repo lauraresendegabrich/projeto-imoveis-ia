@@ -255,6 +255,19 @@ variação de 5% entre rodadas é aceitável para o trabalho.
 
 ## Resolvido
 
+- **Zona estendida no mesmo bairro nunca rodava** (25/11/2026, `d64990c`). A regra de
+  29/10 (completar a amostra com casas do mesmo bairro até 2,5 km, com distância medida, antes
+  dos anúncios sem localização) só roda com `bairro_alvo`, que nem a tela nem o pipeline
+  passavam. Os testes chamavam a função direto e não pegaram. Agora o pipeline passa o bairro
+  e `tests/test_pipeline_unico.py` confere. Muda o valor só quando faltam casas na zona mesmo
+  com o raio em 1.500 m.
+- **Terrenos relidos do disco na zona, sem `id_execucao`** (25/11/2026, `d64990c`). O pipeline
+  mandava os terrenos misturados com as casas; a zona os tirava e relia
+  `imoveis_comparaveis_ag2.json`, sem conferir a avaliação (com duas avaliações ao mesmo tempo,
+  podiam entrar terrenos de outro imóvel). A distância era gravada nas cópias do disco, e o
+  funil dizia "posição não pôde ser medida" para todo terreno fora da zona. Agora vão por
+  `terrenos=`; o valor não muda.
+
 - **Terminal desatualizado em relação à tela → fluxo único** (24/11/2026). O `app/graph.py`
   não mudava desde 07/10 e tinha fluxo próprio. Ele não localizava o alvo antes da coleta,
   mandava os terrenos para a zona por outro caminho, não passava o imóvel ao Agente 3 e não
