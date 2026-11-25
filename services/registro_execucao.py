@@ -67,12 +67,19 @@ def _modelos_ia(resultado_ag2, zona_resultado, resultado_ag3, resultado_ag4) -> 
     ag3_analises = [((resultado_ag3 or {}).get("imovel_alvo") or {}).get("analise_qualitativa") or {}]
     ag3_analises += [c.get("analise_qualitativa") or {} for c in (resultado_ag3 or {}).get("comparaveis", [])]
     ag3 = Counter(a.get("llm_usada") for a in ag3_analises if a.get("llm_usada"))
+    zona = (zona_resultado or {}).get("zona_homogenea") or {}
+    scores4 = (resultado_ag4 or {}).get("scores") or {}
     return {
         "agente2_classificacao": dict(ag2),
-        "agente2_zona_visao": ((zona_resultado or {}).get("zona_homogenea") or {}).get("provider_visao"),
+        "agente2_zona_visao": _provedor_modelo(zona.get("provider_visao"), zona.get("modelo_visao")),
         "agente3": dict(ag3),
-        "agente4": ((resultado_ag4 or {}).get("scores") or {}).get("provider_llm"),
+        "agente4": _provedor_modelo(scores4.get("provider_llm"), scores4.get("modelo_llm")),
     }
+
+
+def _provedor_modelo(provedor, nome_modelo):
+    """'gemini/gemini-3.5-flash-lite'; so o provedor quando o modelo nao foi gravado (registros antigos)."""
+    return f"{provedor}/{nome_modelo}" if provedor and nome_modelo else provedor
 
 
 def _linhas_comparaveis(id_execucao: str, resultado_ag5: dict) -> list[dict]:

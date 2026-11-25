@@ -1,127 +1,77 @@
-# Modelos LLM Utilizados no Pipeline
+# Modelos de IA usados no pipeline
 
-## Resumo Geral
+Todas as IAs são de planos gratuitos. Os nomes dos modelos ficam no `.env` (ou nos
+Secrets do Streamlit Cloud). Sem a variável, vale o padrão de `services/ia.py`.
 
-| Agente | Tarefa | Modelo Principal | Fallbacks | Provider |
-|--------|--------|-----------------|-----------|----------|
-| Ag.2 | Clustering de comparáveis | openai/gpt-oss-120b | gpt-oss-20b → Gemini 2.5 Flash → numérico | Groq |
-| Ag.2 | Zona homogênea (visão) | qwen/qwen3.8-27b | fallback regex | Groq |
-| Ag.3 | Análise qualitativa (visão) | Gemini 2.5 Flash | qwen/qwen3.8-27b → NVIDIA NIM llama-3.2-11b | Google / Groq / NVIDIA |
-| Ag.4 | Interpretação infraestrutura | openai/gpt-oss-20b | — | Groq |
+## Provedores e modelos (nov/2026)
 
----
+| Variável | Padrão | Provedor | Usado em |
+|---|---|---|---|
+| `GROQ_MODELO_TEXTO_GRANDE` | `openai/gpt-oss-120b` | Groq | Ag.2 comparáveis |
+| `GROQ_MODELO_TEXTO_PEQUENO` | `openai/gpt-oss-20b` | Groq | Ag.4 região |
+| `GROQ_MODELO_VISAO` | `qwen/qwen3.8-27b` | Groq | Ag.2 zona no satélite, Ag.3 fotos |
+| `GEMINI_MODELO` | `gemini-3.5-flash-lite` | Google | Ag.2, Ag.3 e Ag.4 |
+| `NVIDIA_MODELO_TEXTO` | `nvidia/nemotron-3.5-lightning-30b-a3b` | NVIDIA NIM | Ag.2 comparáveis, Ag.4 região |
+| `NVIDIA_MODELO_VISAO` | `nvidia/nemotron-3.5-super-vl-120b-a12b` | NVIDIA NIM | Ag.2 zona no satélite, Ag.3 fotos |
+| `ZAI_MODELO_TEXTO` | `glm-4.7-flash` | Z.AI | ainda não usado nas cadeias |
+| `ZAI_MODELO_VISAO` | `glm-4.6v-flash` | Z.AI | ainda não usado (sobrecarregado no plano gratuito, 24/11/2026) |
 
-## Agente 2 — Clustering (texto)
+O Qwen do Google Colab (`QWEN_API_URL`, `QWEN_API_KEY`) está **desligado**. O Colab
+está fora do ar, e as duas linhas estão comentadas no `.env`. Sem elas, o código
+pula o Qwen.
 
-### Cadeia de fallback:
-```
-1. openai/gpt-oss-120b (KEY 1)    → 200k tokens/dia
-   ↓ se falhar
-2. openai/gpt-oss-20b (KEY 1)     → 200k tokens/dia (limite separado)
-   ↓ se falhar
-3. openai/gpt-oss-120b (KEY 2)    → 200k tokens/dia (outra conta)
-   ↓ se falhar
-4. Gemini 2.5 Flash               → 20 requests/minuto
-   ↓ se falhar
-5. Fallback numérico              → score >= 0.60 = A, < 0.60 = B
-```
+### NVIDIA e Z.AI: o "pensar" desligado
 
-### Detalhes:
-- Processa em lotes de 20 imóveis
-- Cada lote gasta ~6.000-7.000 tokens
-- Total típico: 5-13 lotes = 30k-91k tokens por execução
-- Com 400k tokens/dia disponíveis, suporta 4-5 execuções/dia sem esgotar
+Os modelos novos da NVIDIA e da Z.AI "pensam" antes de responder. Com o pensar ligado,
+2 de 5 respostas vieram vazias no teste (24/11/2026), porque o limite de tokens acabou
+antes da resposta. A chamada única `services/ia.chamar_openai_compativel` desliga o
+pensar:
+- NVIDIA: `reasoning_effort: "none"`;
+- Z.AI: `thinking: {"type": "disabled"}`.
 
-### Por que GPT-OSS:
-- Suporta JSON Object Mode e JSON Schema Mode (respostas estruturadas)
-- Limites mais generosos que o Llama antigo (200k vs 100k/dia)
-- Recomendado pela Groq como substituto do llama-3.3-70b
+Ela também usa um tempo máximo por chamada e nenhuma repetição automática da biblioteca.
 
----
+## Ordem de tentativa (hoje)
 
-## Agente 2 — Zona Homogênea (visão)
+Se uma IA falha ou responde algo inválido, o agente tenta a próxima.
 
-### Modelo: qwen/qwen3.8-27b (Groq)
-- Envia 1 imagem de satélite (1280x1280 JPEG 85%)
-- Limite: 20MB por request (imagem fica ~400KB)
-- Máximo 5 imagens por request (usa apenas 1)
-- Context window: 131k tokens
-- Responde com bloco `<think>` antes do JSON — parser remove
+| Tarefa | Ordem |
+|---|---|
+| Ag.2 comparáveis | Groq (chave 1) → Groq (chave 2) → Gemini → NVIDIA → 20 melhores pelo cálculo |
+| Ag.2 zona no satélite | Gemini → Groq → NVIDIA → raio padrão de 500 m |
+| Ag.3 fotos do imóvel da CAIXA | Gemini → Groq → NVIDIA → melhor resultado parcial |
+| Ag.3 fotos dos comparáveis | Groq → NVIDIA → Gemini → melhor resultado parcial |
+| Ag.4 região | Gemini → Groq → NVIDIA → texto montado pelo cálculo |
 
-### Prompt reduzido (evita truncamento):
-- Pede análise de padrão construtivo, homogeneidade, densidade, transições
-- Raios discretos: 300, 500, 700, 1000 ou 1500 metros
-- Resposta: JSON com campos padronizados
+Com o Qwen ligado, ele entra em primeiro em todas as tarefas.
 
----
+## Fotos por chamada (Agente 3)
 
-## Agente 3 — Análise Qualitativa (visão)
+| Provedor | Fotos (`MAX_FOTOS_*` em `agents/text_analyzer.py`) |
+|---|---|
+| Gemini | 4 |
+| Groq | 2 |
+| NVIDIA | 1 (o nemotron aceitou 4 no teste) |
 
-### Cadeia de fallback:
-```
-1. Gemini 2.5 Flash    → 8 fotos + texto (1 chamada, ~15-25s)
-   ↓ se falhar (429 quota / 500 erro)
-2. Groq qwen3.8-27b   → 2 fotos + texto curto (1 chamada, ~10s)
-   ↓ se falhar (413 payload)
-3. NVIDIA NIM llama-3.2-11b → 1 foto principal + 7 extras (~30-90s)
-```
+## Onde fica registrado quem respondeu
 
-### Gemini 2.5 Flash (principal):
-- Aceita múltiplas imagens por chamada (até 8)
-- Prompt completo com critérios detalhados de avaliação
-- Limite: 20 requests/minuto no free tier
-- Retry automático quando der 500
+- **Ag.2 comparáveis:** `provider_llm` e `modelo_llm` em cada comparável.
+- **Ag.2 zona:** `provider_visao` e `modelo_visao`.
+- **Ag.3:** `llm_usada` em cada análise (`provedor/modelo`).
+- **Ag.4:** `provider_llm` e `modelo_llm` nos scores.
 
-### Groq qwen3.8-27b (fallback 1):
-- Aceita imagens via URL
-- Limite: 8000 tokens/minuto (TPM)
-- Usa apenas 2 fotos (primeira + do meio) pra caber no limite
-- Prompt simplificado (200 chars descrição, 150 chars título)
+O banco guarda o resumo em `execucoes.modelos_ia` (ex.: `"agente4": "NVIDIA/nvidia/nemotron-3.5-lightning-30b-a3b"`).
 
-### NVIDIA NIM (fallback 2):
-- Modelo: meta/llama-3.2-11b-vision-instruct
-- Sem limite rígido de requests
-- 1 chamada principal (texto + 1 foto) + 7 chamadas extras (1 foto cada)
-- Mais lento (~30-90s por imóvel) mas sempre funciona
+## Limites dos planos gratuitos
 
-### Limite de comparáveis:
-- Máximo 20 imóveis analisados (top por ranking_llm)
-- + 1 imóvel alvo = 21 chamadas total
-- Tempo estimado: 5-8 minutos (Gemini + Groq), 15-20 min (pior caso NVIDIA)
+| Provedor | Limite |
+|---|---|
+| Groq | por modelo e por conta: tokens por minuto (8 mil no gpt-oss-120b e no qwen3.8-27b) e tokens por dia |
+| Gemini | pedidos por minuto e por dia |
+| NVIDIA NIM | ~40 pedidos por minuto; créditos gratuitos da conta |
+| Z.AI | 1 pedido por vez |
 
----
-
-## Agente 4 — Infraestrutura (texto)
-
-### Modelo: openai/gpt-oss-20b (Groq)
-- Tarefa leve: apenas interpreta scores já calculados pelo Python
-- Não altera valores — gera texto descritivo (perfil, pontos fortes, atenção)
-- 1 chamada por execução (~500 tokens)
-
----
-
-## Limites e Quotas (Free Tier - Agosto 2026)
-
-| Provider | Modelo | Limite |
-|----------|--------|--------|
-| Groq | openai/gpt-oss-120b | 200k tokens/dia |
-| Groq | openai/gpt-oss-20b | 200k tokens/dia |
-| Groq | qwen/qwen3.8-27b | 200k tokens/dia, 8k TPM |
-| Google | Gemini 2.5 Flash | 20 requests/minuto |
-| NVIDIA | llama-3.2-11b-vision | Sem limite documentado |
-
-### Chaves necessárias no .env:
-```
-GROQ_API_KEY=...           # Conta principal
-GROQ_API_KEY_2=...         # Conta secundária (opcional, dobra quota)
-GOOGLE_API_KEY=...         # Gemini (análise qualitativa + fallback clustering)
-NVIDIA_API_KEY=...         # NVIDIA NIM (último fallback visão)
-GOOGLE_MAPS_KEY=...        # Google Maps (imagem satélite zona homogênea)
-```
-
----
-
-## Histórico de Migrações
+## Histórico de migrações
 
 | Data | Mudança | Motivo |
 |------|---------|--------|
@@ -129,15 +79,11 @@ GOOGLE_MAPS_KEY=...        # Google Maps (imagem satélite zona homogênea)
 | 13/08/2026 | Ag.3: NVIDIA NIM → Gemini 2.5 Flash | 8 fotos por chamada, muito mais rápido |
 | 13/08/2026 | Ag.2 clustering: llama-3.3-70b → gpt-oss-120b | Llama desligado 16/08, GPT-OSS tem 200k/dia |
 | 13/08/2026 | Ag.4: llama-3.1-8b → gpt-oss-20b | Llama desligado 16/08 |
-| 03/09/2026 | Ag.2 clustering (NVIDIA fallback): meta/llama-3.3-70b-instruct → openai/gpt-oss-20b | Modelo NVIDIA morto (EOL 26/08, erro 410). gpt-oss-20b é o texto vivo no NVIDIA (120b não é servido lá) |
-| 03/09/2026 | Ag.2 zona (NVIDIA visão): google/gemma-4-31b-it → meta/llama-3.2-11b-vision-instruct | gemma-4 dava timeout/indisponível; llama-3.2-11b-vision é o VLM gratuito vivo no NVIDIA |
-| 03/09/2026 | Ag.2 e Ag.3 (visão Groq): qwen/qwen3.6-27b → qwen/qwen3.8-27b | Groq descontinuou o 3.6 (decommission 14/09/2026); 3.8-27b é o substituto oficial e aceita imagem (testado) |
-
----
-
-## Observações
-
-- O qwen3.8-27b usa modo "thinking" (`<think>...</think>`) — o parser remove automaticamente
-- O Gemini pode dar 403 quando não consegue acessar URLs de imagem do VivaReal
-- O Groq free tier reseta quotas diariamente (meia-noite UTC)
-- O Gemini reseta a cada minuto (rolling window de 20 requests)
+| 03/09/2026 | Ag.2 clustering (NVIDIA): llama-3.3-70b-instruct → gpt-oss-20b | EOL 26/08 (erro 410) |
+| 03/09/2026 | Ag.2 zona (NVIDIA visão): gemma-4-31b-it → llama-3.2-11b-vision-instruct | gemma-4 indisponível |
+| 03/09/2026 | Ag.2 e Ag.3 (visão Groq): qwen3.6-27b → qwen3.8-27b | Groq descontinuou o 3.6 (14/09/2026) |
+| nov/2026 | Gemini: 2.5 Flash → 3.5 Flash Lite | — |
+| 24/11/2026 | NVIDIA texto: gpt-oss-20b → nemotron-3.5-lightning-30b-a3b | gpt-oss-20b da NVIDIA saiu do ar em 18/11/2026 |
+| 24/11/2026 | NVIDIA visão: llama-3.2-11b-vision → nemotron-3.5-super-vl-120b-a12b | llama-3.2-11b-vision desativado (erro 410) |
+| 24/11/2026 | Nomes dos modelos no `.env` (`services/ia.py`) | Trocar modelo sem mexer no código |
+| 24/11/2026 | Qwen do Colab desligado | Colab fora do ar; lento para tarefas reais desde 06/10/2026 |

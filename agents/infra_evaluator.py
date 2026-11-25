@@ -50,6 +50,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from agents.execucao import ler_json_da_execucao
+from services import ia
 
 load_dotenv()
 
@@ -3757,7 +3758,7 @@ Retorne JSON:
                 client.models.generate_content(
 
                     model=
-                    "gemini-3.5-flash-lite",
+                    ia.modelo("GEMINI_MODELO"),
 
                     contents=[
 
@@ -3805,7 +3806,8 @@ Retorne JSON:
                 )
 
 
-                return {**json.loads(m.group(0)), "_provider_llm": "Gemini"}
+                return {**json.loads(m.group(0)), "_provider_llm": "Gemini",
+                        "_modelo_llm": ia.modelo("GEMINI_MODELO")}
 
 
     except Exception as e:
@@ -3850,7 +3852,7 @@ Retorne JSON:
                 .create(
 
                     model=
-                    "openai/gpt-oss-20b",
+                    ia.modelo("GROQ_MODELO_TEXTO_PEQUENO"),
 
                     messages=[{
                         "role":
@@ -3893,7 +3895,8 @@ Retorne JSON:
                 )
 
 
-                return {**json.loads(m.group(0)), "_provider_llm": "Groq"}
+                return {**json.loads(m.group(0)), "_provider_llm": "Groq",
+                        "_modelo_llm": ia.modelo("GROQ_MODELO_TEXTO_PEQUENO")}
 
 
     except Exception as e:
@@ -3914,11 +3917,6 @@ Retorne JSON:
     try:
 
 
-        from openai import OpenAI
-
-        import httpx
-
-
         nvidia_key = os.getenv(
             "NVIDIA_API_KEY",
             ""
@@ -3928,56 +3926,16 @@ Retorne JSON:
         if nvidia_key:
 
 
-            client_nv = OpenAI(
-
-                base_url=
-                "https://integrate.api.nvidia.com/v1",
-
-                api_key=
-                nvidia_key,
-
-                timeout=
-                httpx.Timeout(
-                    60.0,
-                    connect=10.0
-                ),
-
-                max_retries=0,
-            )
-
-
-            response = (
-                client_nv
-                .chat
-                .completions
-                .create(
-
-                    model=
-                    "openai/gpt-oss-20b",
-
-                    messages=[{
-                        "role":
-                        "user",
-
-                        "content":
-                        prompt
-                    }],
-
-                    max_tokens=1500,
-
-                    temperature=0,
-                )
-            )
-
-
-            conteudo = (
-
-                response
-                .choices[0]
-                .message
-                .content
-
-                or ""
+            # NVIDIA_MODELO_TEXTO (o gpt-oss-20b da NVIDIA saiu do ar em 18/11/2026;
+            # o do Groq, acima, continua). "Pensar" desligado em services/ia.py.
+            conteudo = ia.chamar_openai_compativel(
+                "nvidia",
+                ia.modelo("NVIDIA_MODELO_TEXTO"),
+                [{"role": "user", "content": prompt}],
+                max_tokens=1500,
+                temperature=0,
+                timeout_s=60.0,
+                chave=nvidia_key,
             )
 
 
@@ -3998,7 +3956,8 @@ Retorne JSON:
                 )
 
 
-                return {**json.loads(m.group(0)), "_provider_llm": "NVIDIA"}
+                return {**json.loads(m.group(0)), "_provider_llm": "NVIDIA",
+                        "_modelo_llm": ia.modelo("NVIDIA_MODELO_TEXTO")}
 
 
     except Exception as e:
@@ -4652,6 +4611,8 @@ def avaliar_infraestrutura(
             # Servico de IA que fez o ajuste (None = nenhum respondeu).
             "provider_llm":
             (analise or {}).get("_provider_llm"),
+            "modelo_llm":
+            (analise or {}).get("_modelo_llm"),
 
             # Perfil da regiao classificado pela LLM (Nivel 2).
             "perfil_regiao":

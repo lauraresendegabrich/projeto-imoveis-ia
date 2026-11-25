@@ -137,6 +137,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from agents import identidade
+from services import ia
 
 load_dotenv()
 
@@ -1776,28 +1777,29 @@ def _chamar_llm(prompt: str, candidatos: list[dict]) -> dict | None:
             lambda: _chamar_qwen_colab(prompt, max_new_tokens=1600),
         ))
 
+    modelo_groq = ia.modelo("GROQ_MODELO_TEXTO_GRANDE")
     tentativas.append((
-        "groq", "openai/gpt-oss-120b", "GROQ_API_KEY",
-        lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model="openai/gpt-oss-120b"),
+        "groq", modelo_groq, "GROQ_API_KEY",
+        lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model=modelo_groq),
     ))
 
     if os.getenv("GROQ_API_KEY_2", ""):
         tentativas.append((
-            "groq", "openai/gpt-oss-120b", "GROQ_API_KEY_2",
-            lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY_2", ""), model="openai/gpt-oss-120b"),
+            "groq", modelo_groq, "GROQ_API_KEY_2",
+            lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY_2", ""), model=modelo_groq),
         ))
 
     google_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
     if google_key:
         tentativas.append((
-            "gemini", "gemini-3.5-flash-lite", "GOOGLE_API_KEY_2/GOOGLE_API_KEY",
+            "gemini", ia.modelo("GEMINI_MODELO"), "GOOGLE_API_KEY_2/GOOGLE_API_KEY",
             lambda: _chamar_gemini(prompt, google_key),
         ))
 
     nvidia_key = os.getenv("NVIDIA_API_KEY", "")
     if nvidia_key:
         tentativas.append((
-            "nvidia", "openai/gpt-oss-20b", "NVIDIA_API_KEY",
+            "nvidia", ia.modelo("NVIDIA_MODELO_TEXTO"), "NVIDIA_API_KEY",
             lambda: _chamar_nvidia(prompt, nvidia_key),
         ))
 
@@ -1835,46 +1837,36 @@ def _chamar_llm(prompt: str, candidatos: list[dict]) -> dict | None:
     return None
 
 def _chamar_nvidia(prompt: str, api_key: str) -> str:
-    """Chama NVIDIA NIM (openai/gpt-oss-20b). Timeout 30s, sem retries longos.
+    """Chama NVIDIA NIM (NVIDIA_MODELO_TEXTO). Timeout 30s, sem retries longos.
 
-    O antigo meta/llama-3.3-70b-instruct foi descontinuado (EOL 2026-08-26).
-    O openai/gpt-oss-20b e o modelo de texto gratuito vivo no endpoint NVIDIA.
+    Antes: meta/llama-3.3-70b-instruct (EOL 26/08/2026) e openai/gpt-oss-20b (EOL
+    18/11/2026). Hoje o nemotron de texto, com o "pensar" desligado (services/ia.py).
     """
     if not api_key:
         return ""
+    nome_modelo = ia.modelo("NVIDIA_MODELO_TEXTO")
     try:
-        from openai import OpenAI
-        import httpx
-        client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
-            api_key=api_key,
-            timeout=httpx.Timeout(30.0, connect=10.0),
-            max_retries=0,
-        )
-
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[
+        texto = ia.chamar_openai_compativel(
+            "nvidia", nome_modelo,
+            [
                 {"role": "system", "content": "Responda SOMENTE com JSON valido, sem markdown, sem texto extra."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.1,
-            max_tokens=4096,
+            max_tokens=4096, temperature=0.1, timeout_s=30.0, chave=api_key,
         )
-
-        texto = response.choices[0].message.content or ""
         if texto:
-            logger.info(f"    [LLM] NVIDIA NIM openai/gpt-oss-20b respondeu OK")
+            logger.info(f"    [LLM] NVIDIA NIM {nome_modelo} respondeu OK")
         return texto
     except Exception as e:
         logger.warning(f"    [LLM] NVIDIA NIM falhou: {e}")
         return ""
 
 
-def _chamar_groq(prompt: str, api_key: str, model: str = "openai/gpt-oss-120b") -> str:
+def _chamar_groq(prompt: str, api_key: str, model: str | None = None) -> str:
     """Chama Groq com Structured Outputs (JSON Schema strict). Retorna "" se falhar."""
     if not api_key:
         return ""
+    model = model or ia.modelo("GROQ_MODELO_TEXTO_GRANDE")
     try:
         from groq import Groq
         client = Groq(api_key=api_key)
@@ -1934,14 +1926,14 @@ def _chamar_gemini(prompt: str, api_key: str) -> str:
         from google.genai import types
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
+            model=ia.modelo("GEMINI_MODELO"),
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(
                 temperature=0,
                 response_mime_type="application/json",
             ),
         )
-        logger.info("    [LLM] Gemini 3.5 Flash Lite respondeu OK")
+        logger.info(f"    [LLM] Gemini {ia.modelo('GEMINI_MODELO')} respondeu OK")
         return response.text or ""
     except Exception as e:
         logger.warning(f"    [LLM] Gemini falhou: {e}")
@@ -2564,44 +2556,37 @@ RESPONDA SOMENTE JSON:
         resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
         if resultado:
             resultado["provider_visao"] = "gemini"
-            resultado["modelo_visao"] = "gemini-3.5-flash-lite"
+            resultado["modelo_visao"] = ia.modelo("GEMINI_MODELO")
             return resultado
 
     if groq_key:
         resultado = _chamar_groq_visao(prompt, img_b64, img_mime, groq_key)
         if resultado:
             resultado["provider_visao"] = "groq"
-            resultado["modelo_visao"] = "qwen/qwen3.8-27b"
+            resultado["modelo_visao"] = ia.modelo("GROQ_MODELO_VISAO")
             return resultado
 
     if nvidia_key:
         resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
         if resultado:
             resultado["provider_visao"] = "nvidia"
-            resultado["modelo_visao"] = "meta/llama-3.2-11b-vision-instruct"
+            resultado["modelo_visao"] = ia.modelo("NVIDIA_MODELO_VISAO")
             return resultado
 
     return fallback
 
 def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
-    """Chama NVIDIA NIM (meta/llama-3.2-11b-vision-instruct) para analise visual.
+    """Chama NVIDIA NIM (NVIDIA_MODELO_VISAO) para analise visual.
 
-    O antigo google/gemma-4-31b-it foi descontinuado. O llama-3.2-11b-vision-instruct
-    e o VLM gratuito vivo no endpoint NVIDIA. Timeout 30s, sem retries.
+    Antes: google/gemma-4-31b-it e meta/llama-3.2-11b-vision-instruct, ambos
+    desativados. Hoje o nemotron de visao, com o "pensar" desligado. Timeout 60s:
+    com a imagem de satelite ele leva ~25s (24/11/2026), e 30s cortava a resposta.
     """
+    nome_modelo = ia.modelo("NVIDIA_MODELO_VISAO")
     try:
-        from openai import OpenAI
-        import httpx
-        client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
-            api_key=api_key,
-            timeout=httpx.Timeout(30.0, connect=10.0),
-            max_retries=0,
-        )
-
-        response = client.chat.completions.create(
-            model="meta/llama-3.2-11b-vision-instruct",
-            messages=[
+        texto = ia.chamar_openai_compativel(
+            "nvidia", nome_modelo,
+            [
                 {
                     "role": "user",
                     "content": [
@@ -2613,12 +2598,9 @@ def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str)
                     ]
                 }
             ],
-            temperature=0.1,
-            max_tokens=1024,
+            max_tokens=1024, temperature=0.1, timeout_s=60.0, chave=api_key,
         )
-
-        texto = response.choices[0].message.content or ""
-        logger.info(f"NVIDIA NIM (llama-3.2-11b-vision-instruct) respondeu ({len(texto)} chars)")
+        logger.info(f"NVIDIA NIM ({nome_modelo}) respondeu ({len(texto)} chars)")
 
         return _validar_zona_llm(texto)
 
@@ -2638,7 +2620,7 @@ def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -
         client = Groq(api_key=api_key)
 
         response = client.chat.completions.create(
-            model="qwen/qwen3.8-27b",
+            model=ia.modelo("GROQ_MODELO_VISAO"),
             messages=[
                 {
                     "role": "user",
@@ -2680,7 +2662,7 @@ def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -
         )
 
         texto = response.choices[0].message.content or ""
-        logger.info(f"Groq Vision (qwen3.8-27b) respondeu ({len(texto)} chars)")
+        logger.info(f"Groq Vision ({ia.modelo('GROQ_MODELO_VISAO')}) respondeu ({len(texto)} chars)")
 
         return _validar_zona_llm(texto)
 
@@ -2703,7 +2685,7 @@ def _chamar_gemini_visao(prompt: str, imagem_bytes: bytes, api_key: str) -> dict
         ]
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
+            model=ia.modelo("GEMINI_MODELO"),
             contents=[types.Content(role="user", parts=parts)],
             config=types.GenerateContentConfig(
                 temperature=0,

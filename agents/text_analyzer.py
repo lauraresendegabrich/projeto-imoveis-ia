@@ -107,6 +107,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from agents.execucao import ler_json_da_execucao
+from services import ia
 
 load_dotenv()
 
@@ -1496,7 +1497,7 @@ Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSO
 
         try:
             response = client.models.generate_content(
-                model="gemini-3.5-flash-lite",
+                model=ia.modelo("GEMINI_MODELO"),
                 contents=[types.Content(role="user", parts=parts)],
                 config=types.GenerateContentConfig(
                     temperature=0,
@@ -1513,7 +1514,7 @@ Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSO
                 return {}
 
             resultado["fotos_analisadas"] = qtd_fotos
-            resultado["llm_usada"] = "gemini-3.5-flash-lite"
+            resultado["llm_usada"] = f"gemini/{ia.modelo('GEMINI_MODELO')}"
             _provider_state["gemini"]["sucessos"] += 1
             _provider_state["gemini"]["available"] = True
             _provider_state["gemini"]["reason"] = None
@@ -1627,7 +1628,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
 
         def _executar(client_obj):
             return client_obj.chat.completions.create(
-                model="qwen/qwen3.8-27b",
+                model=ia.modelo("GROQ_MODELO_VISAO"),
                 messages=[{"role": "user", "content": content}],
                 temperature=0,
                 max_completion_tokens=1400,
@@ -1643,7 +1644,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
             return {}
 
         resultado["fotos_analisadas"] = len(fotos_selecionadas)
-        resultado["llm_usada"] = "groq-qwen3.8-27b"
+        resultado["llm_usada"] = f"groq/{ia.modelo('GROQ_MODELO_VISAO')}"
         return resultado
 
     except Exception as e:
@@ -1669,7 +1670,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
                     resultado2 = _validar_saida_llm(_parse_json_obj(texto_resp2))
                     if resultado2:
                         resultado2["fotos_analisadas"] = len(fotos_selecionadas)
-                        resultado2["llm_usada"] = "groq-qwen3.8-27b"
+                        resultado2["llm_usada"] = f"groq/{ia.modelo('GROQ_MODELO_VISAO')}"
                         return resultado2
                 except Exception as retry_error:
                     logger.warning(f"[Ag3][Groq] retry falhou: {retry_error}")
@@ -1689,9 +1690,6 @@ def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
     _provider_state["nvidia"]["chamadas"] += 1
 
     try:
-        import httpx
-        from openai import OpenAI
-
         api_key = os.getenv("NVIDIA_API_KEY", "")
         if not api_key:
             logger.warning("[Ag3][NVIDIA] NVIDIA_API_KEY nao configurada")
@@ -1699,13 +1697,9 @@ def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
 
         # Sem timeout, o cliente espera ate 10 min e repete 2x: num teste, duas
         # chamadas travaram ~5 min cada ate o servidor devolver 504. Mesmo padrao
-        # do Ag2/Ag4: desiste em 60s e o roteador segue para o proximo provedor.
-        client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
-            api_key=api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-            max_retries=0,
-        )
+        # do Ag2/Ag4: desiste em 60s e o roteador segue para o proximo provedor
+        # (timeout e max_retries=0 em services/ia.chamar_openai_compativel).
+        nome_modelo = ia.modelo("NVIDIA_MODELO_VISAO")
 
         images = imovel.get("images", []) or []
         fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_NVIDIA)
@@ -1753,14 +1747,10 @@ Nao escreva explicacoes fora do JSON.
                 {"type": "image_url", "image_url": {"url": fotos_selecionadas[0]}}
             )
 
-        response = client.chat.completions.create(
-            model="meta/llama-3.2-11b-vision-instruct",
-            messages=[{"role": "user", "content": content}],
-            max_tokens=450,
-            temperature=0,
+        texto_resp = ia.chamar_openai_compativel(
+            "nvidia", nome_modelo, [{"role": "user", "content": content}],
+            max_tokens=450, temperature=0, timeout_s=60.0, chave=api_key,
         )
-
-        texto_resp = response.choices[0].message.content or ""
         logger.info(f"[Ag3][NVIDIA] resposta bruta ({len(texto_resp)} chars): {texto_resp[:500]}")
         bruto = _parse_json_obj(texto_resp)
         if not bruto:
@@ -1790,7 +1780,7 @@ Nao escreva explicacoes fora do JSON.
             return {}
 
         resultado_nim["fotos_analisadas"] = len(fotos_selecionadas)
-        resultado_nim["llm_usada"] = "nvidia-llama-3.2-11b-vision"
+        resultado_nim["llm_usada"] = f"nvidia/{nome_modelo}"
         _provider_state["nvidia"]["sucessos"] += 1
 
         logger.info(

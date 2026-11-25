@@ -33,14 +33,14 @@ Analisa fotos e descrição dos imóveis comparáveis para determinar estado de 
 
 ## Cadeia de Fallback (LLMs)
 
-Modelos (nomes como estão em `agents/text_analyzer.py`):
+Modelos (os nomes vêm do `.env`; padrões em `services/ia.py` e em `docs/MODELOS_LLM.md`):
 
-| Modelo | Provider | Fotos por chamada |
+| Modelo (variável) | Provider | Fotos por chamada |
 |---|---|---|
-| Qwen (Colab) | `QWEN_API_URL` / `QWEN_API_KEY` | — |
-| gemini-3.5-flash-lite | Google (`GOOGLE_API_KEY`) | até 8 |
-| qwen/qwen3.8-27b | Groq (`GROQ_API_KEY`) | até 3 |
-| meta/llama-3.2-11b-vision-instruct | NVIDIA NIM (`NVIDIA_API_KEY`) | 1 por vez |
+| Qwen (Colab) | `QWEN_API_URL` / `QWEN_API_KEY` | 4 |
+| `GEMINI_MODELO` (gemini-3.5-flash-lite) | Google (`GOOGLE_API_KEY`) | 4 |
+| `GROQ_MODELO_VISAO` (qwen/qwen3.8-27b) | Groq (`GROQ_API_KEY`) | 2 |
+| `NVIDIA_MODELO_VISAO` (nemotron-3.5-super-vl-120b-a12b) | NVIDIA NIM (`NVIDIA_API_KEY`) | 1 |
 
 A ordem muda conforme o imóvel (`_analisar_imovel_vision`):
 
@@ -52,10 +52,12 @@ Resposta inconclusiva ou falha passa para o próximo. Se nenhum responder, fica 
 resultado parcial; sem nenhum, score neutro 0,50.
 
 **Situação em nov/2026:**
-- O Qwen do Colab está lento e fica desligado (`QWEN_API_URL` comentada no `.env`; ver
-  `PENDENCIAS.md`). Sem ele, a cadeia começa no Gemini (alvo) ou no Groq (comparáveis).
-- O modelo da NVIDIA (`llama-3.2-11b-vision-instruct`) foi desativado em 05/11/2026
-  (erro 410). A cadeia segue para o próximo, mas falta trocar o modelo.
+- O Qwen do Colab está desligado (`QWEN_API_URL` comentada no `.env`). Sem ele, a
+  cadeia começa no Gemini (alvo) ou no Groq (comparáveis).
+- A NVIDIA usa o `nemotron-3.5-super-vl-120b-a12b` desde 24/11/2026, com o "pensar"
+  desligado. O `llama-3.2-11b-vision-instruct` foi desativado em 05/11/2026 (erro 410).
+- `llm_usada` grava `provedor/modelo` (ex.: `groq/qwen/qwen3.8-27b`). Registros
+  anteriores usam o formato antigo (`groq-qwen3.8-27b`).
 
 ---
 
