@@ -29,13 +29,14 @@ FLUXO:
     4. Imovel alvo: analisado separadamente
     5. Salva em data/imoveis_analisados_ag3.json
 
-CADEIA DE FALLBACK (LLMs):
-    ALVO: Qwen3-VL-8B Colab -> Gemini (ate 2 tentativas em 429 curto) -> Groq -> NVIDIA
-    COMPARAVEIS: Qwen3-VL-8B Colab -> Groq -> NVIDIA -> Gemini (ultimo fallback, sem retry)
-    Qwen3-VL-8B Colab: ate 4 fotos por URL + JSON solicitado no prompt
+CADEIA DE FALLBACK (LLMs), configuravel no .env (services/ia.py):
+    ALVO (ORDEM_FOTOS_ALVO): Gemini -> Groq -> NVIDIA
+    COMPARAVEIS (ORDEM_FOTOS_COMPARAVEIS): Groq -> NVIDIA -> Gemini
+    Erro 429: regra unica (por minuto ate 30 s: espera e tenta 1x; por dia: proxima IA)
+    Qwen3-VL-8B Colab (desligado; entra se "qwen" estiver na ordem): ate 4 fotos por URL
     Gemini: ate 4 fotos + JSON
     Groq: ate 2 fotos + JSON Object Mode
-    NVIDIA NIM meta/llama-3.2-11b-vision-instruct: 1 foto + JSON solicitado no prompt
+    NVIDIA nemotron (e Z.AI, se posto na ordem): 1 foto + JSON solicitado no prompt
 
 SAIDA ESTRUTURADA:
     - Qwen3-VL-8B Colab: JSON solicitado no prompt; validacao final em Python
@@ -123,12 +124,9 @@ LIMITACOES_PADRAO = [
 
 # Limites operacionais do Agente 3.
 # A interface pode continuar aceitando ate 8 URLs, mas cada provedor recebe
-# somente a quantidade adequada ao seu perfil de uso.
+# somente a quantidade adequada ao seu perfil de uso: FOTOS_QWEN/GEMINI/GROQ/
+# NVIDIA/ZAI no .env (padroes 4/4/2/1/1 em services/ia.PADROES_FOTOS).
 MAX_FOTOS_INTERFACE = 8
-MAX_FOTOS_QWEN = 4
-MAX_FOTOS_GEMINI = 4
-MAX_FOTOS_GROQ = 2
-MAX_FOTOS_NVIDIA = 1
 MAX_DESC_CHARS = 1500
 MAX_AMENITIES = 20
 
@@ -938,13 +936,6 @@ _provider_state = {
 
 GROQ_INTERVALO_PREVENTIVO = 8.0  # segundos entre chamadas ao Groq Vision
 
-# Qwen do Colab e priorizado para alvo e comparaveis.
-# Gemini continua com no maximo 2 tentativas no alvo quando for usado como fallback
-# e o 429 pedir uma espera curta.
-GEMINI_MAX_TENTATIVAS_ALVO = 2
-GEMINI_RETRY_CURTO_MAX_SEGUNDOS = 15.0
-GEMINI_RETRY_PADRAO_SEGUNDOS = 5.0
-
 
 def _reset_provider_state():
     """Reseta o estado dos provedores (chamado no inicio de cada execucao)."""
@@ -952,6 +943,7 @@ def _reset_provider_state():
     _provider_state["gemini"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros_429": 0, "puladas": 0}
     _provider_state["groq"] = {"available": True, "reason": None, "last_request": 0.0, "chamadas": 0, "sucessos": 0, "erros_429": 0}
     _provider_state["nvidia"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0}
+    _provider_state["zai"] = {"available": True, "reason": None, "chamadas": 0, "sucessos": 0, "erros": 0}
 
 
 # =============================================================================
@@ -1023,7 +1015,7 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
 
     images = imovel.get("images", []) or []
     fotos_selecionadas = [
-        u.strip() for u in _selecionar_fotos(images, MAX_FOTOS_QWEN)
+        u.strip() for u in _selecionar_fotos(images, ia.fotos("qwen"))
         if isinstance(u, str) and u.strip()
     ]
     qtd_fotos = len(fotos_selecionadas)
@@ -1035,7 +1027,7 @@ def _tentar_qwen_colab(imovel: dict) -> dict:
     }
 
     if fotos_selecionadas:
-        payload["imagens_urls"] = fotos_selecionadas[:MAX_FOTOS_QWEN]
+        payload["imagens_urls"] = fotos_selecionadas
 
     headers = {
         "Authorization": f"Bearer {api_key}"
@@ -1209,104 +1201,47 @@ def _melhor_resultado(*resultados: dict) -> dict:
 
 def _analisar_imovel_vision(imovel: dict, is_alvo: bool = False) -> dict:
     """
-    Roteamento centralizado dos provedores.
+    Roteamento centralizado dos provedores, na ordem do .env (services/ia.py):
 
-    ALVO:
-        Qwen Colab -> Gemini -> Groq -> NVIDIA
-
-    COMPARAVEIS:
-        Qwen Colab -> Groq -> NVIDIA -> Gemini
+    ALVO (ORDEM_FOTOS_ALVO), padrao:               Gemini -> Groq -> NVIDIA
+    COMPARAVEIS (ORDEM_FOTOS_COMPARAVEIS), padrao: Groq -> NVIDIA -> Gemini
 
     Resposta "desconhecido/desconhecido" com confianca baixa nao encerra
-    prematuramente o fluxo: o proximo provedor ainda e tentado.
+    prematuramente o fluxo: o proximo provedor ainda e tentado. Se nenhum for
+    conclusivo, fica a resposta mais completa entre as que vieram. No alvo, a
+    resposta da ULTIMA IA da lista vale mesmo inconclusiva (como era com a NVIDIA).
     """
-    if is_alvo:
+    tarefa = "ORDEM_FOTOS_ALVO" if is_alvo else "ORDEM_FOTOS_COMPARAVEIS"
+    rotulo = "Alvo" if is_alvo else "Comparavel"
+    ordem = ia.ordem(tarefa)
+    logger.info(f"[Ag3][Roteamento][{rotulo}] prioridade: {' -> '.join(ordem)}")
+
+    respostas = []
+    for i, nome in enumerate(ordem):
+        resultado = _tentar_provedor(nome, imovel, is_alvo)
+        if _resultado_conclusivo(resultado):
+            return resultado
+        if is_alvo and resultado and i == len(ordem) - 1:
+            return resultado
         logger.info(
-            "[Ag3][Roteamento][Alvo] prioridade: "
-            "Qwen Colab -> Gemini -> Groq -> NVIDIA"
+            f"[Ag3][Roteamento][{rotulo}] {nome} "
+            + ("inconclusivo" if resultado else "falhou/indisponivel") + " -> proximo"
         )
+        respostas.append(resultado)
 
-        qwen = _tentar_qwen_colab(imovel)
-        if _resultado_conclusivo(qwen):
-            return qwen
-        if qwen:
-            logger.info(
-                "[Ag3][Roteamento][Alvo] Qwen respondeu, mas foi inconclusivo"
-            )
-        else:
-            logger.info(
-                "[Ag3][Roteamento][Alvo] Qwen falhou/indisponivel -> tentando Gemini"
-            )
+    return _melhor_resultado(*respostas)
 
-        gemini = _tentar_gemini(
-            imovel,
-            permitir_retry_429=True,
-            max_tentativas=GEMINI_MAX_TENTATIVAS_ALVO,
-        )
-        if _resultado_conclusivo(gemini):
-            return gemini
-        if gemini:
-            logger.info("[Ag3][Roteamento][Alvo] Gemini respondeu, mas foi inconclusivo")
 
-        logger.info("[Ag3][Roteamento][Alvo] tentando Groq")
-        groq = _tentar_groq(imovel)
-        if _resultado_conclusivo(groq):
-            return groq
-        if groq:
-            logger.info("[Ag3][Roteamento][Alvo] Groq respondeu, mas foi inconclusivo")
-
-        logger.info("[Ag3][Roteamento][Alvo] tentando NVIDIA")
-        nvidia = _analisar_imovel_vision_nvidia(imovel)
-        if nvidia:
-            return nvidia
-
-        return _melhor_resultado(qwen, gemini, groq)
-
-    logger.info(
-        "[Ag3][Roteamento][Comparavel] prioridade: "
-        "Qwen Colab -> Groq -> NVIDIA -> Gemini"
-    )
-
-    qwen = _tentar_qwen_colab(imovel)
-    if _resultado_conclusivo(qwen):
-        return qwen
-
-    if qwen:
-        logger.info(
-            "[Ag3][Roteamento][Comparavel] Qwen inconclusivo -> tentando Groq"
-        )
-    else:
-        logger.info(
-            "[Ag3][Roteamento][Comparavel] Qwen falhou/indisponivel -> tentando Groq"
-        )
-
-    groq = _tentar_groq(imovel)
-    if _resultado_conclusivo(groq):
-        return groq
-
-    if groq:
-        logger.info("[Ag3][Roteamento][Comparavel] Groq inconclusivo -> tentando NVIDIA")
-    else:
-        logger.info("[Ag3][Roteamento][Comparavel] Groq falhou/indisponivel -> tentando NVIDIA")
-
-    nvidia = _analisar_imovel_vision_nvidia(imovel)
-    if _resultado_conclusivo(nvidia):
-        return nvidia
-
-    if nvidia:
-        logger.info("[Ag3][Roteamento][Comparavel] NVIDIA inconclusiva -> Gemini ultimo fallback")
-    else:
-        logger.info("[Ag3][Roteamento][Comparavel] NVIDIA falhou -> Gemini ultimo fallback")
-
-    gemini = _tentar_gemini(
-        imovel,
-        permitir_retry_429=False,
-        max_tentativas=1,
-    )
-    if _resultado_conclusivo(gemini):
-        return gemini
-
-    return _melhor_resultado(qwen, gemini, nvidia, groq)
+def _tentar_provedor(nome: str, imovel: dict, is_alvo: bool = False) -> dict:
+    if nome == "qwen":
+        return _tentar_qwen_colab(imovel)
+    if nome == "gemini":
+        return _tentar_gemini(imovel)
+    if nome in ("groq1", "groq2"):
+        return _tentar_groq(imovel, nome)
+    if nome in ia.PROVEDORES_OPENAI:
+        return _analisar_imovel_vision_openai(imovel, nome)
+    return {}
 
 def _extrair_retry_after_segundos(erro: str):
     """
@@ -1333,27 +1268,11 @@ def _extrair_retry_after_segundos(erro: str):
     return None
 
 
-def _tentar_gemini(
-    imovel: dict,
-    permitir_retry_429: bool = False,
-    max_tentativas: int = 1,
-) -> dict:
+def _tentar_gemini(imovel: dict) -> dict:
     """
-    Chama Gemini com JSON Schema.
-
-    Para o imovel alvo:
-      - max_tentativas=2;
-      - se houver 429 com retry curto (<= 15s), espera e tenta mais 1 vez;
-      - se o retry indicado for longo, nao prende a execucao: retorna {} e
-        o roteador segue para Groq/NVIDIA.
-
-    Para comparaveis:
-      - Gemini e apenas ultimo fallback;
-      - faz uma unica tentativa;
-      - nao espera 429.
-
-    Esta funcao NAO chama outro provedor por dentro. O roteamento fica
-    centralizado em _analisar_imovel_vision().
+    Chama Gemini com resposta JSON. Erros 429 e 500/502/503: regra unica de
+    services/ia.py (tenta 1x; senao devolve {} e o roteador segue).
+    Esta funcao NAO chama outro provedor por dentro.
     """
     try:
         from google import genai
@@ -1362,7 +1281,7 @@ def _tentar_gemini(
         logger.error(f"[Ag3][Gemini] erro ao importar SDK: {e}")
         return {}
 
-    api_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
+    api_key = ia.chave_gemini()
     if not api_key:
         logger.warning("[Ag3][Gemini] chave nao configurada")
         return {}
@@ -1381,7 +1300,7 @@ def _tentar_gemini(
     amenities = _normalizar_amenities(imovel.get("amenities"))
     amenities_txt = "; ".join(amenities) if amenities else "nao informado"
     images = imovel.get("images", []) or []
-    fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_GEMINI)
+    fotos_selecionadas = _selecionar_fotos(images, ia.fotos("gemini"))
 
     # Baixa as fotos ANTES de montar o prompt e envia como BYTES. O Part.from_uri
     # com URL publica causa 403 PERMISSION_DENIED (o Google recusa buscar URLs
@@ -1485,110 +1404,39 @@ Responda SOMENTE com um objeto JSON valido, sem Markdown e sem texto fora do JSO
         except Exception as e:
             logger.debug(f"[Ag3][Gemini] falha ao anexar imagem: {e}")
 
-    max_tentativas = max(1, int(max_tentativas))
+    _provider_state["gemini"]["chamadas"] += 1
+    logger.info(
+        f"[Ag3][Gemini] fotos={qtd_fotos} | desc_chars={min(len(descricao), MAX_DESC_CHARS)}"
+    )
 
-    for tentativa in range(1, max_tentativas + 1):
-        _provider_state["gemini"]["chamadas"] += 1
+    # Erro 500/502/503 e 429 curto: regra unica de services/ia.py (tenta 1x).
+    try:
+        response = ia.com_regra_429(lambda: client.models.generate_content(
+            model=ia.modelo("GEMINI_MODELO"),
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                response_mime_type="application/json",
+            ),
+        ), "Ag3 gemini")
+    except Exception as e:
+        if ia.analisar_limite(e)[0]:
+            _provider_state["gemini"]["erros_429"] += 1
+        logger.warning(f"[Ag3][Gemini] falhou: {e}")
+        return {}
 
-        logger.info(
-            f"[Ag3][Gemini] tentativa={tentativa}/{max_tentativas} | "
-            f"fotos={qtd_fotos} | desc_chars={min(len(descricao), MAX_DESC_CHARS)}"
-        )
+    resultado = _validar_saida_llm(_parse_json_obj(response.text or ""))
+    if not resultado:
+        logger.warning("[Ag3][Gemini] resposta estruturada vazia/invalida")
+        return {}
 
-        try:
-            response = client.models.generate_content(
-                model=ia.modelo("GEMINI_MODELO"),
-                contents=[types.Content(role="user", parts=parts)],
-                config=types.GenerateContentConfig(
-                    temperature=0,
-                    response_mime_type="application/json",
-                ),
-            )
+    resultado["fotos_analisadas"] = qtd_fotos
+    resultado["llm_usada"] = f"gemini/{ia.modelo('GEMINI_MODELO')}"
+    _provider_state["gemini"]["sucessos"] += 1
+    return resultado
 
-            texto_resp = response.text or ""
-            resultado = _validar_saida_llm(_parse_json_obj(texto_resp))
-            if not resultado:
-                logger.warning(
-                    "[Ag3][Gemini] resposta estruturada vazia/invalida"
-                )
-                return {}
-
-            resultado["fotos_analisadas"] = qtd_fotos
-            resultado["llm_usada"] = f"gemini/{ia.modelo('GEMINI_MODELO')}"
-            _provider_state["gemini"]["sucessos"] += 1
-            _provider_state["gemini"]["available"] = True
-            _provider_state["gemini"]["reason"] = None
-            return resultado
-
-        except Exception as e:
-            err_str = str(e)
-            err_lower = err_str.lower()
-
-            # Retry de erro interno 500 somente uma vez, sem exceder o limite
-            # total de tentativas definido para esta chamada.
-            if "500" in err_lower and tentativa < max_tentativas:
-                logger.warning("[Ag3][Gemini] erro 500 -> retry em 3s")
-                time.sleep(3)
-                continue
-
-            eh_429 = (
-                "429" in err_lower
-                or "resource_exhausted" in err_lower
-                or "quota" in err_lower
-            )
-
-            if eh_429:
-                _provider_state["gemini"]["erros_429"] += 1
-                retry_after = _extrair_retry_after_segundos(err_str)
-
-                if retry_after is not None:
-                    logger.warning(
-                        f"[Ag3][Gemini] 429 | retry_after={retry_after:.2f}s"
-                    )
-                else:
-                    logger.warning("[Ag3][Gemini] 429 | retry_after=nao_informado")
-
-                pode_repetir = (
-                    permitir_retry_429
-                    and tentativa < max_tentativas
-                    and (
-                        retry_after is None
-                        or retry_after <= GEMINI_RETRY_CURTO_MAX_SEGUNDOS
-                    )
-                )
-
-                if pode_repetir:
-                    espera = (
-                        retry_after + 1.0
-                        if retry_after is not None
-                        else GEMINI_RETRY_PADRAO_SEGUNDOS
-                    )
-                    logger.info(
-                        f"[Ag3][Gemini] aguardando {espera:.1f}s antes da "
-                        f"tentativa {tentativa + 1}/{max_tentativas}"
-                    )
-                    time.sleep(espera)
-                    continue
-
-                # Nao mata o Gemini pela execucao inteira. Apenas registra
-                # que esta chamada nao conseguiu prosseguir.
-                _provider_state["gemini"]["available"] = True
-                if retry_after is not None and retry_after > GEMINI_RETRY_CURTO_MAX_SEGUNDOS:
-                    _provider_state["gemini"]["reason"] = (
-                        f"429_retry_longo_{retry_after:.1f}s"
-                    )
-                else:
-                    _provider_state["gemini"]["reason"] = "429_sem_retry"
-
-                return {}
-
-            logger.error(f"[Ag3][Gemini] falhou: {e}")
-            return {}
-
-    return {}
-
-def _tentar_groq(imovel: dict) -> dict:
-    """Wrapper Groq com intervalo preventivo e controle de 429."""
+def _tentar_groq(imovel: dict, nome: str = "groq1") -> dict:
+    """Wrapper Groq com intervalo preventivo (a regra do 429 fica em services/ia.py)."""
     # Intervalo preventivo entre chamadas
     elapsed = time.time() - _provider_state["groq"]["last_request"]
     if elapsed < GROQ_INTERVALO_PREVENTIVO and _provider_state["groq"]["last_request"] > 0:
@@ -1598,28 +1446,28 @@ def _tentar_groq(imovel: dict) -> dict:
 
     _provider_state["groq"]["chamadas"] += 1
     _provider_state["groq"]["last_request"] = time.time()
-    resultado = _analisar_imovel_vision_groq(imovel)
+    resultado = _analisar_imovel_vision_groq(imovel, ia.chave_groq(nome))
     if resultado:
         _provider_state["groq"]["sucessos"] += 1
     return resultado
 
 
-def _analisar_imovel_vision_groq(imovel: dict) -> dict:
+def _analisar_imovel_vision_groq(imovel: dict, api_key: str | None = None) -> dict:
     """
-    Chamada Groq pura: ate 2 fotos + JSON Object Mode.
+    Chamada Groq pura: FOTOS_GROQ fotos (padrao 2) + JSON Object Mode.
     Nao chama NVIDIA internamente. O fallback fica centralizado no roteador.
     """
     try:
         from groq import Groq
 
-        api_key = os.getenv("GROQ_API_KEY", "")
+        api_key = api_key if api_key is not None else ia.chave_groq("groq1")
         if not api_key:
             logger.warning("[Ag3][Groq] chave nao configurada")
             return {}
 
         client = Groq(api_key=api_key, max_retries=0)
         images = imovel.get("images", []) or []
-        fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_GROQ)
+        fotos_selecionadas = _selecionar_fotos(images, ia.fotos("groq"))
         prompt_texto = _prompt_compacto(imovel, len(fotos_selecionadas))
 
         content = [{"type": "text", "text": prompt_texto}]
@@ -1636,7 +1484,7 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
                 response_format={"type": "json_object"},
             )
 
-        response = _executar(client)
+        response = ia.com_regra_429(lambda: _executar(client), "Ag3 groq")
         texto_resp = response.choices[0].message.content or ""
         resultado = _validar_saida_llm(_parse_json_obj(texto_resp))
         if not resultado:
@@ -1648,61 +1496,41 @@ def _analisar_imovel_vision_groq(imovel: dict) -> dict:
         return resultado
 
     except Exception as e:
-        err_str = str(e)
-        if "429" in err_str:
+        if ia.analisar_limite(e)[0]:
             _provider_state["groq"]["erros_429"] += 1
-            retry_after = _extrair_retry_after_segundos(err_str)
-            logger.warning(
-                "[Ag3][Groq] 429 | retry_after="
-                + (f"{retry_after:.2f}s" if retry_after is not None else "nao_informado")
-            )
-
-            if retry_after is not None and retry_after <= 15:
-                wait = retry_after + 1
-                _provider_state["groq"].setdefault("tempo_espera_total", 0.0)
-                _provider_state["groq"]["tempo_espera_total"] += wait
-                logger.info(f"[Ag3][Groq] aguardando {wait:.1f}s (retry_after curto)")
-                time.sleep(wait)
-                try:
-                    client2 = Groq(api_key=api_key, max_retries=0)
-                    response2 = _executar(client2)
-                    texto_resp2 = response2.choices[0].message.content or ""
-                    resultado2 = _validar_saida_llm(_parse_json_obj(texto_resp2))
-                    if resultado2:
-                        resultado2["fotos_analisadas"] = len(fotos_selecionadas)
-                        resultado2["llm_usada"] = f"groq/{ia.modelo('GROQ_MODELO_VISAO')}"
-                        return resultado2
-                except Exception as retry_error:
-                    logger.warning(f"[Ag3][Groq] retry falhou: {retry_error}")
-
-            logger.info("[Ag3][Groq] 429 nao resolvido — devolvendo controle ao roteador")
-            return {}
-
-        logger.error(f"[Ag3][Groq] falhou: {e}")
+        logger.warning(f"[Ag3][Groq] falhou: {e}")
         return {}
 
 
 def _analisar_imovel_vision_nvidia(imovel: dict) -> dict:
+    return _analisar_imovel_vision_openai(imovel, "nvidia")
+
+
+def _analisar_imovel_vision_openai(imovel: dict, provedor: str = "nvidia") -> dict:
     """
-    NVIDIA NIM: 1 foto + prompt ultra-compacto para forcar JSON.
-    max_tokens=450 para evitar que o modelo divague em Markdown.
+    NVIDIA (ou Z.AI): FOTOS_NVIDIA / FOTOS_ZAI fotos (padrao 1) + prompt
+    ultra-compacto para forcar JSON. max_tokens=450 para evitar que o modelo
+    divague em Markdown.
     """
-    _provider_state["nvidia"]["chamadas"] += 1
+    estado = _provider_state.setdefault(provedor, {"chamadas": 0, "sucessos": 0, "erros": 0})
+    estado["chamadas"] += 1
+    rotulo = provedor.upper()
 
     try:
-        api_key = os.getenv("NVIDIA_API_KEY", "")
+        variavel = ia.PROVEDORES_OPENAI[provedor]["chave"]
+        api_key = ia.obter_config(variavel)
         if not api_key:
-            logger.warning("[Ag3][NVIDIA] NVIDIA_API_KEY nao configurada")
+            logger.warning(f"[Ag3][{rotulo}] {variavel} nao configurada")
             return {}
 
         # Sem timeout, o cliente espera ate 10 min e repete 2x: num teste, duas
         # chamadas travaram ~5 min cada ate o servidor devolver 504. Mesmo padrao
         # do Ag2/Ag4: desiste em 60s e o roteador segue para o proximo provedor
         # (timeout e max_retries=0 em services/ia.chamar_openai_compativel).
-        nome_modelo = ia.modelo("NVIDIA_MODELO_VISAO")
+        nome_modelo = ia.modelo_visao(provedor)
 
         images = imovel.get("images", []) or []
-        fotos_selecionadas = _selecionar_fotos(images, MAX_FOTOS_NVIDIA)
+        fotos_selecionadas = _selecionar_fotos(images, ia.fotos(provedor))
 
         descricao = imovel.get("description", "") or imovel.get("descricao", "") or ""
         tipo = imovel.get("propertyType", "") or imovel.get("tipo", "") or ""
@@ -1742,25 +1570,23 @@ Nao escreva explicacoes fora do JSON.
 """
 
         content = [{"type": "text", "text": prompt_texto}]
-        if fotos_selecionadas:
-            content.append(
-                {"type": "image_url", "image_url": {"url": fotos_selecionadas[0]}}
-            )
+        for url in fotos_selecionadas:
+            content.append({"type": "image_url", "image_url": {"url": url}})
 
-        texto_resp = ia.chamar_openai_compativel(
-            "nvidia", nome_modelo, [{"role": "user", "content": content}],
+        texto_resp = ia.com_regra_429(lambda: ia.chamar_openai_compativel(
+            provedor, nome_modelo, [{"role": "user", "content": content}],
             max_tokens=450, temperature=0, timeout_s=60.0, chave=api_key,
-        )
-        logger.info(f"[Ag3][NVIDIA] resposta bruta ({len(texto_resp)} chars): {texto_resp[:500]}")
+        ), f"Ag3 {provedor}")
+        logger.info(f"[Ag3][{rotulo}] resposta bruta ({len(texto_resp)} chars): {texto_resp[:500]}")
         bruto = _parse_json_obj(texto_resp)
         if not bruto:
             # Fallback: tenta parsear Markdown estruturado
             bruto = _parse_markdown_nvidia(texto_resp)
             if bruto:
-                logger.info("[Ag3][NVIDIA] parseado via fallback Markdown")
+                logger.info(f"[Ag3][{rotulo}] parseado via fallback Markdown")
         if not bruto:
-            logger.warning(f"[Ag3][NVIDIA] nao retornou JSON nem Markdown utilizavel | resposta: {texto_resp[:500]}")
-            _provider_state["nvidia"]["erros"] += 1
+            logger.warning(f"[Ag3][{rotulo}] nao retornou JSON nem Markdown utilizavel | resposta: {texto_resp[:500]}")
+            estado["erros"] += 1
             return {}
 
         # Mapeia campos do prompt simplificado para o contrato padrao
@@ -1775,16 +1601,16 @@ Nao escreva explicacoes fora do JSON.
 
         resultado_nim = _validar_saida_llm(bruto)
         if not resultado_nim:
-            logger.warning("[Ag3][NVIDIA] resposta nao passou na validacao")
-            _provider_state["nvidia"]["erros"] += 1
+            logger.warning(f"[Ag3][{rotulo}] resposta nao passou na validacao")
+            estado["erros"] += 1
             return {}
 
         resultado_nim["fotos_analisadas"] = len(fotos_selecionadas)
-        resultado_nim["llm_usada"] = f"nvidia/{nome_modelo}"
-        _provider_state["nvidia"]["sucessos"] += 1
+        resultado_nim["llm_usada"] = f"{provedor}/{nome_modelo}"
+        estado["sucessos"] += 1
 
         logger.info(
-            "[Ag3][NVIDIA] resposta | "
+            f"[Ag3][{rotulo}] resposta | "
             f"estado={resultado_nim.get('estado_conservacao')} | "
             f"padrao={resultado_nim.get('padrao_acabamento')} | "
             f"confianca={resultado_nim.get('confianca_extracao')} | "
@@ -1793,8 +1619,8 @@ Nao escreva explicacoes fora do JSON.
         return resultado_nim
 
     except Exception as e:
-        _provider_state["nvidia"]["erros"] += 1
-        logger.error(f"[Ag3][NVIDIA] erro ao chamar NIM: {e}")
+        estado["erros"] += 1
+        logger.error(f"[Ag3][{rotulo}] erro na chamada: {e}")
         return {}
 
 

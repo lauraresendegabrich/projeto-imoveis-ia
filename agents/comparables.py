@@ -90,13 +90,13 @@ FLUXO COMPLETO:
       - nao existe limite total de candidatos para a LLM
       - o score numerico serve apenas para ordenar a sequencia dos lotes
 
-    Cadeia de fallback (clustering):
-      1. Qwen3-VL-8B — Google Colab
-      2. Groq (GROQ_API_KEY) — openai/gpt-oss-120b
-      3. Groq (GROQ_API_KEY_2) — openai/gpt-oss-120b
-      4. Gemini — gemini-3.5-flash-lite
-      5. NVIDIA NIM — openai/gpt-oss-20b
-      6. Toda resposta e validada integralmente antes de ser aceita.
+    Cadeia de fallback (clustering), ORDEM_COMPARAVEIS no .env (services/ia.py):
+      1. Groq (GROQ_API_KEY, depois GROQ_API_KEY_2) — GROQ_MODELO_TEXTO_GRANDE
+      2. Gemini — GEMINI_MODELO
+      3. NVIDIA — NVIDIA_MODELO_TEXTO
+      4. Z.AI — ZAI_MODELO_TEXTO
+      5. Toda resposta e validada integralmente antes de ser aceita.
+      6. Erro 429: por minuto ate 30 s espera e tenta 1x; por dia, proxima IA.
       7. Se NENHUM candidato for julgado por LLM, usa top TOP_N_FALLBACK_PYTHON (20)
          do ranking Python como fallback.
 
@@ -106,7 +106,7 @@ FLUXO COMPLETO:
   ETAPA 5 — ZONA HOMOGENEA
   ─────────────────────────
     Geocodificacao do alvo, imagem de satelite (hybrid) e analise visual da zona
-    por LLM de visao (cadeia Qwen3-VL-8B Colab -> Gemini -> Groq -> NVIDIA), que
+    por LLM de visao (ORDEM_ZONA: Gemini -> Groq -> NVIDIA), que
     escolhe um raio livre (limitado por sanidade a RAIO_MINIMO/MAXIMO_SEGURANCA:
     100..3000 m). Cada comparavel e classificado por distancia Haversine:
     na_zona / fora_zona / zona_nao_verificada (geocodificado so por bairro).
@@ -1768,40 +1768,7 @@ def _chamar_llm(prompt: str, candidatos: list[dict]) -> dict | None:
     """
     import time as t_mod
 
-    tentativas = []
-
-    qwen_url = _obter_secret("QWEN_API_URL")
-    if qwen_url:
-        tentativas.append((
-            "qwen_colab", "Qwen3-VL-8B", "QWEN_API_KEY",
-            lambda: _chamar_qwen_colab(prompt, max_new_tokens=1600),
-        ))
-
-    modelo_groq = ia.modelo("GROQ_MODELO_TEXTO_GRANDE")
-    tentativas.append((
-        "groq", modelo_groq, "GROQ_API_KEY",
-        lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY", ""), model=modelo_groq),
-    ))
-
-    if os.getenv("GROQ_API_KEY_2", ""):
-        tentativas.append((
-            "groq", modelo_groq, "GROQ_API_KEY_2",
-            lambda: _chamar_groq(prompt, os.getenv("GROQ_API_KEY_2", ""), model=modelo_groq),
-        ))
-
-    google_key = os.getenv("GOOGLE_API_KEY_2", "") or os.getenv("GOOGLE_API_KEY", "")
-    if google_key:
-        tentativas.append((
-            "gemini", ia.modelo("GEMINI_MODELO"), "GOOGLE_API_KEY_2/GOOGLE_API_KEY",
-            lambda: _chamar_gemini(prompt, google_key),
-        ))
-
-    nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-    if nvidia_key:
-        tentativas.append((
-            "nvidia", ia.modelo("NVIDIA_MODELO_TEXTO"), "NVIDIA_API_KEY",
-            lambda: _chamar_nvidia(prompt, nvidia_key),
-        ))
+    tentativas = _tentativas_clustering(prompt)
 
     for provider, modelo, conta, chamar in tentativas:
         logger.info(f"[Ag2][Clustering] Tentando {provider} / {modelo}...")
@@ -1836,6 +1803,57 @@ def _chamar_llm(prompt: str, candidatos: list[dict]) -> dict | None:
     logger.warning("[Ag2][Clustering] Todos os providers falharam ou retornaram JSON invalido")
     return None
 
+def _tentativas_clustering(prompt: str) -> list[tuple]:
+    """
+    (provider, modelo, conta, chamar) na ordem de ORDEM_COMPARAVEIS (services/ia.py).
+    IA sem chave configurada fica de fora.
+    """
+    tentativas = []
+    for nome in ia.ordem("ORDEM_COMPARAVEIS"):
+        if nome in ("groq1", "groq2"):
+            chave = ia.chave_groq(nome)
+            if chave:
+                conta = "GROQ_API_KEY_2" if nome == "groq2" else "GROQ_API_KEY"
+                tentativas.append(("groq", ia.modelo("GROQ_MODELO_TEXTO_GRANDE"), conta,
+                                   lambda c=chave: _chamar_groq(prompt, c)))
+        elif nome == "gemini":
+            chave = ia.chave_gemini()
+            if chave:
+                tentativas.append(("gemini", ia.modelo("GEMINI_MODELO"), "GOOGLE_API_KEY_2/GOOGLE_API_KEY",
+                                   lambda c=chave: _chamar_gemini(prompt, c)))
+        elif nome in ("nvidia", "zai"):
+            variavel = ia.PROVEDORES_OPENAI[nome]["chave"]
+            if ia.obter_config(variavel):
+                tentativas.append((nome, ia.modelo_texto(nome), variavel,
+                                   lambda p=nome: _chamar_openai_texto(prompt, p)))
+        elif nome == "qwen":
+            if _obter_secret("QWEN_API_URL"):
+                tentativas.append(("qwen_colab", "Qwen3-VL-8B", "QWEN_API_KEY",
+                                   lambda: _chamar_qwen_colab(prompt, max_new_tokens=1600)))
+    return tentativas
+
+
+def _chamar_openai_texto(prompt: str, provedor: str, api_key: str | None = None) -> str:
+    """NVIDIA ou Z.AI (modelo de texto do .env), "pensar" desligado. Retorna "" se falhar."""
+    nome_modelo = ia.modelo_texto(provedor)
+    try:
+        texto = ia.com_regra_429(lambda: ia.chamar_openai_compativel(
+            provedor, nome_modelo,
+            [
+                {"role": "system", "content": "Responda SOMENTE com JSON valido, sem markdown, sem texto extra."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=4096, temperature=0.1, timeout_s=30.0 if provedor == "nvidia" else 60.0,
+            chave=api_key,
+        ), f"Ag2 {provedor}")
+        if texto:
+            logger.info(f"    [LLM] {provedor} {nome_modelo} respondeu OK")
+        return texto
+    except Exception as e:
+        logger.warning(f"    [LLM] {provedor} {nome_modelo} falhou: {e}")
+        return ""
+
+
 def _chamar_nvidia(prompt: str, api_key: str) -> str:
     """Chama NVIDIA NIM (NVIDIA_MODELO_TEXTO). Timeout 30s, sem retries longos.
 
@@ -1844,22 +1862,7 @@ def _chamar_nvidia(prompt: str, api_key: str) -> str:
     """
     if not api_key:
         return ""
-    nome_modelo = ia.modelo("NVIDIA_MODELO_TEXTO")
-    try:
-        texto = ia.chamar_openai_compativel(
-            "nvidia", nome_modelo,
-            [
-                {"role": "system", "content": "Responda SOMENTE com JSON valido, sem markdown, sem texto extra."},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=4096, temperature=0.1, timeout_s=30.0, chave=api_key,
-        )
-        if texto:
-            logger.info(f"    [LLM] NVIDIA NIM {nome_modelo} respondeu OK")
-        return texto
-    except Exception as e:
-        logger.warning(f"    [LLM] NVIDIA NIM falhou: {e}")
-        return ""
+    return _chamar_openai_texto(prompt, "nvidia", api_key)
 
 
 def _chamar_groq(prompt: str, api_key: str, model: str | None = None) -> str:
@@ -1869,9 +1872,10 @@ def _chamar_groq(prompt: str, api_key: str, model: str | None = None) -> str:
     model = model or ia.modelo("GROQ_MODELO_TEXTO_GRANDE")
     try:
         from groq import Groq
-        client = Groq(api_key=api_key)
+        # max_retries=0: quem decide repetir e a regra do 429 (services/ia.py).
+        client = Groq(api_key=api_key, max_retries=0)
 
-        response = client.chat.completions.create(
+        response = ia.com_regra_429(lambda: client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             reasoning_effort="low",
@@ -1906,7 +1910,7 @@ def _chamar_groq(prompt: str, api_key: str, model: str | None = None) -> str:
                 }
             },
             max_completion_tokens=2500,
-        )
+        ), "Ag2 groq")
 
         texto = response.choices[0].message.content or ""
         if texto:
@@ -1925,14 +1929,14 @@ def _chamar_gemini(prompt: str, api_key: str) -> str:
         from google import genai
         from google.genai import types
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
+        response = ia.com_regra_429(lambda: client.models.generate_content(
             model=ia.modelo("GEMINI_MODELO"),
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(
                 temperature=0,
                 response_mime_type="application/json",
             ),
-        )
+        ), "Ag2 gemini")
         logger.info(f"    [LLM] Gemini {ia.modelo('GEMINI_MODELO')} respondeu OK")
         return response.text or ""
     except Exception as e:
@@ -2473,22 +2477,12 @@ def _obter_imagem_satelite(endereco: str, lat: float = None, lon: float = None, 
 
 def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
     """
-    Analisa visualmente a zona. Providers de visao:
-      1. Qwen3-VL-8B Colab
-      2. Gemini gemini-3.5-flash-lite
-      3. Groq qwen/qwen3.8-27b
-      4. NVIDIA meta/llama-3.2-11b-vision-instruct
-      5. fallback unico RAIO_FALLBACK_METROS
+    Analisa visualmente a zona. IAs de visao na ordem de ORDEM_ZONA (services/ia.py;
+    padrao: Gemini -> Groq (1a chave) -> NVIDIA). Se nenhuma responder: raio
+    RAIO_FALLBACK_METROS.
     """
     import base64
     import time as t_zona
-
-    nvidia_key = os.getenv("NVIDIA_API_KEY", "")
-    google_key = os.getenv("GOOGLE_API_KEY", "")
-    groq_key = os.getenv("GROQ_API_KEY", "")
-    qwen_url = _obter_secret("QWEN_API_URL")
-    qwen_key = _obter_secret("QWEN_API_KEY")
-    qwen_disponivel = bool(qwen_url and qwen_key)
 
     fallback = {
         "raio_metros": RAIO_FALLBACK_METROS,
@@ -2497,7 +2491,22 @@ def _analisar_zona_homogenea(imagem_bytes: bytes, endereco_alvo: str) -> dict:
         "confianca": "baixa",
         "provider_visao": "fallback",
     }
-    if not qwen_disponivel and not google_key and not groq_key and not nvidia_key:
+
+    def _chave(nome: str) -> str:
+        if nome in ("groq1", "groq2"):
+            return ia.chave_groq(nome)
+        if nome == "gemini":
+            # A zona usa a GOOGLE_API_KEY (as outras tarefas preferem a _2).
+            return ia.obter_config("GOOGLE_API_KEY") or ia.obter_config("GOOGLE_API_KEY_2")
+        if nome in ia.PROVEDORES_OPENAI:
+            return ia.obter_config(ia.PROVEDORES_OPENAI[nome]["chave"])
+        if nome == "qwen":
+            return "ok" if (_obter_secret("QWEN_API_URL") and _obter_secret("QWEN_API_KEY")) else ""
+        return ""
+
+    ordem = [(nome, _chave(nome)) for nome in ia.ordem("ORDEM_ZONA")]
+    ordem = [(nome, chave) for nome, chave in ordem if chave]
+    if not ordem:
         logger.warning("Nenhum provider de visao configurado — usando raio fallback")
         return fallback
 
@@ -2540,52 +2549,45 @@ RESPONDA SOMENTE JSON:
   "confianca": "alta | media | baixa"
 }}"""
 
-    if qwen_disponivel:
+    for nome, chave in ordem:
         t0 = t_zona.time()
-        resposta = _chamar_qwen_colab(prompt=prompt, imagem_bytes=imagem_bytes, max_new_tokens=1024)
-        if resposta:
-            _log_resposta_llm("Qwen3-VL-8B Colab - Zona Homogenea", resposta)
-            resultado = _parsear_json_zona(resposta)
-            if resultado:
-                resultado["provider_visao"] = "qwen_colab"
-                resultado["modelo_visao"] = "Qwen3-VL-8B"
-                logger.info(f"[Ag2][Zona] Qwen em {t_zona.time()-t0:.1f}s")
-                return resultado
-
-    if google_key:
-        resultado = _chamar_gemini_visao(prompt, imagem_bytes, google_key)
+        resultado = None
+        if nome == "qwen":
+            resposta = _chamar_qwen_colab(prompt=prompt, imagem_bytes=imagem_bytes, max_new_tokens=1024)
+            if resposta:
+                _log_resposta_llm("Qwen3-VL-8B Colab - Zona Homogenea", resposta)
+                resultado = _parsear_json_zona(resposta)
+        elif nome == "gemini":
+            resultado = _chamar_gemini_visao(prompt, imagem_bytes, chave)
+        elif nome in ("groq1", "groq2"):
+            resultado = _chamar_groq_visao(prompt, img_b64, img_mime, chave)
+        elif nome in ia.PROVEDORES_OPENAI:
+            resultado = _chamar_openai_visao(prompt, img_b64, img_mime, nome, chave)
         if resultado:
-            resultado["provider_visao"] = "gemini"
-            resultado["modelo_visao"] = ia.modelo("GEMINI_MODELO")
-            return resultado
-
-    if groq_key:
-        resultado = _chamar_groq_visao(prompt, img_b64, img_mime, groq_key)
-        if resultado:
-            resultado["provider_visao"] = "groq"
-            resultado["modelo_visao"] = ia.modelo("GROQ_MODELO_VISAO")
-            return resultado
-
-    if nvidia_key:
-        resultado = _chamar_nvidia_visao(prompt, img_b64, img_mime, nvidia_key)
-        if resultado:
-            resultado["provider_visao"] = "nvidia"
-            resultado["modelo_visao"] = ia.modelo("NVIDIA_MODELO_VISAO")
+            resultado["provider_visao"] = "qwen_colab" if nome == "qwen" else ia.provedor_de(nome)
+            resultado["modelo_visao"] = ia.modelo_visao(nome)
+            logger.info(f"[Ag2][Zona] {nome} em {t_zona.time()-t0:.1f}s")
             return resultado
 
     return fallback
 
 def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -> dict | None:
-    """Chama NVIDIA NIM (NVIDIA_MODELO_VISAO) para analise visual.
+    """Chama NVIDIA NIM (NVIDIA_MODELO_VISAO) para analise visual."""
+    return _chamar_openai_visao(prompt, img_b64, img_mime, "nvidia", api_key)
 
-    Antes: google/gemma-4-31b-it e meta/llama-3.2-11b-vision-instruct, ambos
+
+def _chamar_openai_visao(prompt: str, img_b64: str, img_mime: str, provedor: str,
+                         api_key: str | None = None) -> dict | None:
+    """NVIDIA ou Z.AI com a imagem de satelite (modelo de visao do .env).
+
+    NVIDIA antes: google/gemma-4-31b-it e meta/llama-3.2-11b-vision-instruct, ambos
     desativados. Hoje o nemotron de visao, com o "pensar" desligado. Timeout 60s:
     com a imagem de satelite ele leva ~25s (24/11/2026), e 30s cortava a resposta.
     """
-    nome_modelo = ia.modelo("NVIDIA_MODELO_VISAO")
+    nome_modelo = ia.modelo_visao(provedor)
     try:
-        texto = ia.chamar_openai_compativel(
-            "nvidia", nome_modelo,
+        texto = ia.com_regra_429(lambda: ia.chamar_openai_compativel(
+            provedor, nome_modelo,
             [
                 {
                     "role": "user",
@@ -2599,13 +2601,13 @@ def _chamar_nvidia_visao(prompt: str, img_b64: str, img_mime: str, api_key: str)
                 }
             ],
             max_tokens=1024, temperature=0.1, timeout_s=60.0, chave=api_key,
-        )
-        logger.info(f"NVIDIA NIM ({nome_modelo}) respondeu ({len(texto)} chars)")
+        ), f"Ag2 zona {provedor}")
+        logger.info(f"{provedor} ({nome_modelo}) respondeu ({len(texto)} chars)")
 
         return _validar_zona_llm(texto)
 
     except Exception as e:
-        logger.warning(f"    [LLM] NVIDIA NIM visao falhou: {e}")
+        logger.warning(f"    [LLM] {provedor} visao falhou: {e}")
         return None
 
 
@@ -2617,9 +2619,9 @@ def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -
     """
     try:
         from groq import Groq
-        client = Groq(api_key=api_key)
+        client = Groq(api_key=api_key, max_retries=0)
 
-        response = client.chat.completions.create(
+        response = ia.com_regra_429(lambda: client.chat.completions.create(
             model=ia.modelo("GROQ_MODELO_VISAO"),
             messages=[
                 {
@@ -2659,7 +2661,7 @@ def _chamar_groq_visao(prompt: str, img_b64: str, img_mime: str, api_key: str) -
                     },
                 },
             },
-        )
+        ), "Ag2 zona groq")
 
         texto = response.choices[0].message.content or ""
         logger.info(f"Groq Vision ({ia.modelo('GROQ_MODELO_VISAO')}) respondeu ({len(texto)} chars)")
@@ -2684,14 +2686,14 @@ def _chamar_gemini_visao(prompt: str, imagem_bytes: bytes, api_key: str) -> dict
             types.Part.from_bytes(data=imagem_bytes, mime_type="image/png"),
         ]
 
-        response = client.models.generate_content(
+        response = ia.com_regra_429(lambda: client.models.generate_content(
             model=ia.modelo("GEMINI_MODELO"),
             contents=[types.Content(role="user", parts=parts)],
             config=types.GenerateContentConfig(
                 temperature=0,
                 response_mime_type="application/json",
             ),
-        )
+        ), "Ag2 zona gemini")
         texto = response.text or ""
         logger.info(f"Gemini visao respondeu ({len(texto)} chars)")
 

@@ -38,9 +38,10 @@ ou copie o `.env.example` e preencha.
 | `TOMTOM_API_KEY` | Geocodificação |
 | `GEOAPIFY_API_KEY` | Pontos de interesse do entorno (Agente 4) |
 | `NVIDIA_API_KEY` | IA de reserva dos Agentes 2, 3 e 4 (nemotron) |
-| `ZAI_API_KEY` | Z.AI (GLM), reserva de texto |
+| `ZAI_API_KEY` | Z.AI (GLM), última reserva de texto (Agentes 2 e 4) |
 | `QWEN_API_URL`, `QWEN_API_KEY` | Qwen no Colab. **Desligado** (linhas comentadas; ver `docs/MODELOS_LLM.md`) |
 | `*_MODELO_*` | Nomes dos modelos de IA (opcional; ver `.env.example` e `docs/MODELOS_LLM.md`) |
+| `ORDEM_*`, `FOTOS_*` | Ordem das IAs em cada tarefa e fotos por chamada no Agente 3 (opcional; ver `docs/MODELOS_LLM.md`) |
 
 No Streamlit Cloud, as mesmas chaves ficam em Settings → Secrets.
 
@@ -92,9 +93,9 @@ Entrada → Agente 1 (Coleta) → Agente 2 (Comparáveis e zona) → Agentes 3 +
 | Agente | Função | Fontes |
 |--------|--------|--------|
 | 1 - Coletor | Busca anúncios da rua, do bairro ou da cidade; tira leilões e repetidos | Amazon Athena (principal), Apify (reserva) |
-| 2 - Comparáveis | Filtra e classifica os parecidos; zona homogênea no mapa | IA (Groq, Gemini, NVIDIA), Google/TomTom/Nominatim, imagem de satélite |
-| 3 - Analisador | Estado e padrão pelas fotos e pela descrição | IA (Qwen Colab, Gemini, Groq, NVIDIA) |
-| 4 - Infraestrutura | Pontos de interesse do entorno | Geoapify, Google Places, IA (Qwen Colab, Gemini, Groq, NVIDIA) |
+| 2 - Comparáveis | Filtra e classifica os parecidos; zona homogênea no mapa | IA (Groq, Gemini, NVIDIA, Z.AI), Google/TomTom/Nominatim, imagem de satélite |
+| 3 - Analisador | Estado e padrão pelas fotos e pela descrição | IA (Gemini, Groq, NVIDIA) |
+| 4 - Infraestrutura | Pontos de interesse do entorno | Geoapify, Google Places, IA (Gemini, Groq, NVIDIA, Z.AI) |
 | 5 - Preço/Liquidez | Valor de mercado (planilha do professor) e liquidez (90%) | Cálculo local |
 
 **Leilão CAIXA:** a venda é o valor de liquidez. Custos antes da venda de 33% da

@@ -3516,6 +3516,65 @@ def _chamar_qwen_colab_infra(prompt: str) -> dict:
         return {}
 
 
+def _interpretar_regiao_com(nome: str, prompt: str) -> dict:
+    """Pede a interpretacao da regiao a uma IA ('gemini', 'groq1', 'nvidia', ...).
+    Devolve o JSON com _provider_llm/_modelo_llm, ou {} (sem chave, erro ou sem JSON)."""
+    import time as t_infra
+
+    if nome == "qwen":
+        return _chamar_qwen_colab_infra(prompt) or {}
+
+    t0 = t_infra.time()
+    try:
+        if nome == "gemini":
+            chave = ia.chave_gemini()
+            if not chave:
+                return {}
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=chave)
+            response = ia.com_regra_429(lambda: client.models.generate_content(
+                model=ia.modelo("GEMINI_MODELO"),
+                contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+                config=types.GenerateContentConfig(temperature=0),
+            ), "Ag4 gemini")
+            conteudo, rotulo, nome_modelo = response.text or "", "Gemini", ia.modelo("GEMINI_MODELO")
+        elif nome in ("groq1", "groq2"):
+            chave = ia.chave_groq(nome)
+            if not chave:
+                return {}
+            from groq import Groq
+            client_groq = Groq(api_key=chave, max_retries=0)
+            nome_modelo = ia.modelo("GROQ_MODELO_TEXTO_PEQUENO")
+            response = ia.com_regra_429(lambda: client_groq.chat.completions.create(
+                model=nome_modelo,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_completion_tokens=1500,
+            ), "Ag4 groq")
+            conteudo, rotulo = response.choices[0].message.content or "", "Groq"
+        elif nome in ia.PROVEDORES_OPENAI:
+            if not ia.obter_config(ia.PROVEDORES_OPENAI[nome]["chave"]):
+                return {}
+            # Modelo de texto do .env, "pensar" desligado (services/ia.py).
+            nome_modelo = ia.modelo_texto(nome)
+            conteudo = ia.com_regra_429(lambda: ia.chamar_openai_compativel(
+                nome, nome_modelo, [{"role": "user", "content": prompt}],
+                max_tokens=1500, temperature=0, timeout_s=60.0,
+            ), f"Ag4 {nome}")
+            rotulo = {"nvidia": "NVIDIA", "zai": "Z.AI"}[nome]
+        else:
+            return {}
+
+        m = re.search(r'\{[\s\S]+\}', conteudo)
+        if m:
+            logger.info(f"LLM interpretou ({rotulo}) em {t_infra.time()-t0:.1f}s")
+            return {**json.loads(m.group(0)), "_provider_llm": rotulo, "_modelo_llm": nome_modelo}
+    except Exception as e:
+        logger.warning(f"{nome} falhou: {e}")
+    return {}
+
+
 def _analisar_infra_llm(
     pois_por_faixa: dict,
     scores: dict,
@@ -3706,267 +3765,14 @@ Retorne JSON:
 
 
     # ----------------------------------------------------------------
-    # QWEN3-VL-8B — GOOGLE COLAB (PRIMEIRA OPCAO)
+    # IAs na ordem de ORDEM_REGIAO (services/ia.py; padrao Gemini -> Groq
+    # (1a chave) -> NVIDIA -> Z.AI). A primeira que devolver JSON vale.
     # ----------------------------------------------------------------
 
-    resultado_qwen = _chamar_qwen_colab_infra(prompt)
-
-    if resultado_qwen:
-        return resultado_qwen
-
-    # ----------------------------------------------------------------
-    # GEMINI — FALLBACK 1
-    # ----------------------------------------------------------------
-
-    import time as t_infra
-
-
-    t0 = t_infra.time()
-
-
-    try:
-
-
-        from google import genai
-
-        from google.genai import types
-
-
-        google_key = (
-
-            os.getenv(
-                "GOOGLE_API_KEY_2",
-                ""
-            )
-
-            or os.getenv(
-                "GOOGLE_API_KEY",
-                ""
-            )
-        )
-
-
-        if google_key:
-
-
-            client = genai.Client(
-                api_key=google_key
-            )
-
-
-            response = (
-                client.models.generate_content(
-
-                    model=
-                    ia.modelo("GEMINI_MODELO"),
-
-                    contents=[
-
-                        types.Content(
-
-                            role="user",
-
-                            parts=[
-
-                                types.Part.from_text(
-                                    text=prompt
-                                )
-                            ]
-                        )
-                    ],
-
-                    config=
-                    types.GenerateContentConfig(
-                        temperature=0
-                    ),
-                )
-            )
-
-
-            conteudo = (
-                response.text
-                or ""
-            )
-
-
-            m = re.search(
-                r'\{[\s\S]+\}',
-                conteudo
-            )
-
-
-            if m:
-
-
-                logger.info(
-
-                    f"LLM interpretou "
-                    f"(Gemini) em "
-                    f"{t_infra.time()-t0:.1f}s"
-                )
-
-
-                return {**json.loads(m.group(0)), "_provider_llm": "Gemini",
-                        "_modelo_llm": ia.modelo("GEMINI_MODELO")}
-
-
-    except Exception as e:
-
-
-        logger.warning(
-            f"Gemini falhou: {e}"
-        )
-
-
-    # ----------------------------------------------------------------
-    # GROQ — FALLBACK 2
-    # ----------------------------------------------------------------
-
-    t0 = t_infra.time()
-
-
-    try:
-
-
-        from groq import Groq
-
-
-        groq_key = os.getenv(
-            "GROQ_API_KEY",
-            ""
-        )
-
-
-        if groq_key:
-
-
-            client_groq = Groq(
-                api_key=groq_key
-            )
-
-
-            response = (
-                client_groq
-                .chat
-                .completions
-                .create(
-
-                    model=
-                    ia.modelo("GROQ_MODELO_TEXTO_PEQUENO"),
-
-                    messages=[{
-                        "role":
-                        "user",
-
-                        "content":
-                        prompt
-                    }],
-
-                    temperature=0,
-
-                    max_completion_tokens=1500,
-                )
-            )
-
-
-            conteudo = (
-                response
-                .choices[0]
-                .message
-                .content
-                or ""
-            )
-
-
-            m = re.search(
-                r'\{[\s\S]+\}',
-                conteudo
-            )
-
-
-            if m:
-
-
-                logger.info(
-
-                    f"LLM interpretou "
-                    f"(Groq) em "
-                    f"{t_infra.time()-t0:.1f}s"
-                )
-
-
-                return {**json.loads(m.group(0)), "_provider_llm": "Groq",
-                        "_modelo_llm": ia.modelo("GROQ_MODELO_TEXTO_PEQUENO")}
-
-
-    except Exception as e:
-
-
-        logger.warning(
-            f"Groq falhou: {e}"
-        )
-
-
-    # ----------------------------------------------------------------
-    # NVIDIA — FALLBACK 3
-    # ----------------------------------------------------------------
-
-    t0 = t_infra.time()
-
-
-    try:
-
-
-        nvidia_key = os.getenv(
-            "NVIDIA_API_KEY",
-            ""
-        )
-
-
-        if nvidia_key:
-
-
-            # NVIDIA_MODELO_TEXTO (o gpt-oss-20b da NVIDIA saiu do ar em 18/11/2026;
-            # o do Groq, acima, continua). "Pensar" desligado em services/ia.py.
-            conteudo = ia.chamar_openai_compativel(
-                "nvidia",
-                ia.modelo("NVIDIA_MODELO_TEXTO"),
-                [{"role": "user", "content": prompt}],
-                max_tokens=1500,
-                temperature=0,
-                timeout_s=60.0,
-                chave=nvidia_key,
-            )
-
-
-            m = re.search(
-                r'\{[\s\S]+\}',
-                conteudo
-            )
-
-
-            if m:
-
-
-                logger.info(
-
-                    f"LLM interpretou "
-                    f"(NVIDIA) em "
-                    f"{t_infra.time()-t0:.1f}s"
-                )
-
-
-                return {**json.loads(m.group(0)), "_provider_llm": "NVIDIA",
-                        "_modelo_llm": ia.modelo("NVIDIA_MODELO_TEXTO")}
-
-
-    except Exception as e:
-
-
-        logger.warning(
-            f"NVIDIA falhou: {e}"
-        )
-
+    for nome in ia.ordem("ORDEM_REGIAO"):
+        resultado = _interpretar_regiao_com(nome, prompt)
+        if resultado:
+            return resultado
 
     # ----------------------------------------------------------------
     # FALLBACK DETERMINISTICO
