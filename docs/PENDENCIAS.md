@@ -258,8 +258,28 @@ variação de 5% entre rodadas é aceitável para o trabalho.
 - **Qwen (Colab) lento para tarefas reais → desligado** (24/11/2026). Desde 06/10/2026
   nenhuma tarefa real terminava no limite (60–90 s), e em 24/11 o Colab estava fora do ar.
   `QWEN_API_URL` e `QWEN_API_KEY` estão comentadas no `.env`; sem elas, o código pula o
-  Qwen. **Para religar:** descomentar as duas linhas (e, no Streamlit Cloud, colocá-las nos
-  Secrets).
+  Qwen. **Para religar:** descomentar as duas linhas, pôr `qwen` no começo das `ORDEM_*`
+  desejadas (`docs/MODELOS_LLM.md`) e, no Streamlit Cloud, colocar tudo nos Secrets.
+- **Lote do Agente 2: 15 ou 8 candidatos por chamada? → mantido em 15** (medido em
+  24/11/2026, decisão da equipe). Medição com os 15 primeiros candidatos reais de Arapongas
+  (casa de 70 m²), sem mudar o código:
+  - **Histórico:** em 65 avaliações gravadas, o Groq (`gpt-oss-120b`) classificou 2.430
+    candidatos em lotes de 15; só 1 foi para uma reserva (Qwen, 10/10/2026). Nenhum lote
+    ficou sem classificação por tamanho.
+  - **Tokens:** lote de 15 ≈ 4.000 de entrada + 800 de saída (limite do Groq: 8.000 por
+    minuto por conta). Lote de 8 ≈ 2.550 + 730. Cada lote repete ~820 tokens de
+    instruções fixas: com 30 candidatos, lotes de 8 gastam ~35% mais tokens (≈ 12.800 contra
+    9.400), o que pesa no limite diário do Groq.
+  - **Reservas com 15:** Gemini (5 s), NVIDIA (7 s) e Z.AI (22 s) devolveram classificação
+    completa e válida.
+  - **Efeito no resultado:** o mesmo grupo de 15, classificado 3 vezes em cada formato:
+    "A" em lote de 15 = 15, 14, 15; em 8 + 7 = 13, 14, 13. Em lote menor a IA fica um pouco
+    mais exigente; os que caíram para "B" foram quase sempre os mesmos (55 m² e 2 quartos;
+    88 m² em outro bairro). Variação natural com o mesmo lote: 1 candidato oscilando.
+  - **Conclusão:** lote de 8 gasta mais, muda um pouco quem entra na conta e não resolve
+    nenhuma falha observada. Fica 15 (`TAMANHO_LOTE` em `identificar_comparaveis`). Só
+    reavaliar se o Groq passar a recusar lotes de 15 (erro de tamanho ou 429 por minuto
+    frequente no Ag.2) ou se as reservas passarem a devolver lotes incompletos.
 - **`DATABASE_URL` nos Secrets do Streamlit Cloud** (confirmado em 24/11/2026): o app
   publicado grava as avaliações no banco.
 

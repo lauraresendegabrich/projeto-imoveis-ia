@@ -2253,6 +2253,8 @@ def identificar_comparaveis(
     for ranking_pre, im in enumerate(elegiveis, 1):
         im["ranking_pre_llm"] = ranking_pre
 
+    # 15 por chamada: medido contra 8 em 24/11/2026 (docs/PENDENCIAS.md, Resolvido).
+    # Mudar o tamanho muda um pouco quem a IA classifica como A.
     TAMANHO_LOTE = 15
     llm_tentados = 0
     llm_classificados = 0
