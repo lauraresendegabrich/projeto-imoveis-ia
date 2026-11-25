@@ -450,7 +450,15 @@ def executar_avaliacao(
             t2z = time.time()
             zona_resultado = analisar_zona_homogenea(
                 endereco_alvo=f"{a.get('rua')}, {a.get('numero')}, {a.get('bairro')}, {a.get('cidade')}, {a.get('estado')}",
-                imoveis=[c for c in comparaveis if c.get("cluster") == "A"] + terrenos,
+                imoveis=[c for c in comparaveis if c.get("cluster") == "A"],
+                # Terrenos entregues direto (25/11/2026): sem eles a zona relia
+                # imoveis_comparaveis_ag2.json do disco sem conferir o id_execucao (com duas
+                # avaliacoes ao mesmo tempo, podiam entrar terrenos de outro imovel) e marcava
+                # a distancia nas copias do disco, nao nos terrenos que a tela mostra (funil).
+                terrenos=terrenos,
+                # Sem o bairro, a zona estendida no mesmo bairro (ate 2,5 km; decisao da
+                # usuaria, 29/10/2026) nunca rodava: _completar_mesmo_bairro desiste sem ele.
+                bairro_alvo=a.get("bairro") or "",
                 cidade=a.get("cidade"),
                 estado=a.get("estado"),
                 lat_alvo_precomp=a.get("lat"),

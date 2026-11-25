@@ -194,6 +194,21 @@ variação de 5% entre rodadas é aceitável para o trabalho.
 
 ## Agente 2 — Zona homogênea (`agents/comparables.py`)
 
+- [ ] **Lote diferente entra sem desconto do terreno (infla o valor; decidir com a usuária
+  e depois do lote em andamento).** O Agente 2 deixa de eliminar casas pelo tamanho do lote
+  quando há 5 ou mais terrenos **coletados** (`MIN_TERRENOS_TERRENO_NAO_ELIMINA`) e avisa a
+  IA que "o valor do terreno é descontado no cálculo". O Agente 5 só desconta com 5 ou mais
+  terrenos válidos **na zona** (`MIN_AMOSTRAS_CONFIAVEL`). Com 5+ na região e menos de 5 na
+  zona, casas de lote muito maior entram pelo m² total, sem correção.
+  - Proposta (25/11/2026): no Agente 5, quando o terreno não for descontado e o imóvel tiver
+    terreno informado, tirar do cálculo as casas com lote mais de 30% maior **ou menor** que o
+    do imóvel (sempre 30%, sem o relaxamento de 45%); casa sem lote no anúncio continua.
+  - Efeito esperado: algumas avaliações caem de valor e outras viram "Sem estimativa".
+    Antes de ligar, refazer a conta do Agente 5 nas avaliações gravadas para medir.
+  - Não é a causa de Cambé (Jardim do Café 2, 10/11/2026): lá o terreno foi descontado e as
+    casas tinham lote parecido. O valor alto veio de casas maiores/novas (3 quartos, até
+    R$ 6.800/m²) e dos terrenos de 250–335 m² de outros bairros (+R$ 55 mil no desconto).
+
 - [ ] **Socorro do Agente 5 com o alvo localizado (levar ao professor; não mexer
   antes da decisão sobre raio e socorro).** Quando a zona não confirma nenhum
   comparável, o Agente 5 usa todo o Cluster A do Agente 2 ("sem validação"),

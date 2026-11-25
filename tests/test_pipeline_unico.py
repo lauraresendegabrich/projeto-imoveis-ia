@@ -115,7 +115,11 @@ def test_fluxo_chama_os_agentes_como_a_tela():
     kw = dict(CHAMADAS)
     # O que o terminal antigo nao fazia:
     assert kw["coletar"]["lat_alvo"] == -23.4 and kw["coletar"]["nivel_geo_alvo"] == "rua_numero"
-    assert {"id": 9, "propertyType": "Terrenos"} in kw["zona"]["imoveis"]        # terrenos junto, como na tela
+    # Terrenos pelo parametro proprio (sem ele a zona relia o disco sem id_execucao).
+    assert kw["zona"]["terrenos"] == [{"id": 9, "propertyType": "Terrenos"}]
+    assert not any(c.get("propertyType") == "Terrenos" for c in kw["zona"]["imoveis"])
+    # Sem o bairro, a zona estendida no mesmo bairro (ate 2,5 km) nao roda.
+    assert kw["zona"]["bairro_alvo"] == "Centro"
     assert kw["ag3"]["imovel_alvo"]["rua"] == "Rua X"                            # Agente 3 recebe o imovel
     assert kw["ag5"]["imovel_alvo_extra"]["escopo_busca"] == "rua+bairro+proximidade"
     assert eventos[0] == "inicio" and eventos[-1] == "fim" and "zona_fim" in eventos
