@@ -54,6 +54,84 @@ Pontos de atenção do teste do Leilão SFI (10 imóveis, nov/2026; planilha
   da avaliação (é a dívida do antigo dono). O sistema calcula certo e mostra o ROI das duas
   etapas. Fica para explicar na apresentação.
 
+## Pipeline e repetibilidade
+
+- [ ] **Levar ao professor: o mesmo imóvel muda de valor de uma rodada para outra por
+  causa do raio da zona.** Detalhes e exemplos na seção "Para o professor: o raio da zona
+  muda o valor", logo abaixo.
+
+### Para o professor: o raio da zona muda o valor
+
+**Resumo:** avaliando o mesmo imóvel duas vezes, com o mesmo código, o valor pode mudar
+5% a 30%. A causa principal é o raio da zona homogênea. Ele começa com um número escolhido
+pela IA, que varia um pouco de uma rodada para outra, e depois é ampliado em saltos de 50%.
+Uma diferença pequena no começo (400 m ou 450 m) faz o raio parar em lugares bem
+diferentes (1.012 m ou 1.350 m), e a amostra de comparáveis muda.
+
+**Como o raio é escolhido hoje** (`agents/comparables.py`):
+
+1. A IA de visão (Gemini, `temperature=0`) olha a imagem de satélite e sugere um raio
+   "visualmente homogêneo". Valores de 100 m a 3.000 m são aceitos.
+2. Conta quantos comparáveis parecidos (Cluster A do Agente 2) ficam dentro desse raio.
+3. Se forem menos de 5, o raio cresce **×1,5 por passo** (`FATOR_AMPLIACAO_RAIO`) até ter
+   5 ou chegar a 1.500 m (`RAIO_PROXIMIDADE_M`). Para na **primeira** vez que chega a 5.
+   Casas e terrenos são ampliados separadamente.
+4. Se ainda faltar, entram os do mesmo bairro até 2.500 m e, por último, os sem distância
+   verificada (com aviso de confiança baixa).
+
+Os passos dependem do número inicial:
+
+| Raio da IA | Passos da ampliação |
+|---|---|
+| 350 m | 525 → 787 → 1.181 → 1.500 |
+| 400 m | 600 → 900 → 1.350 → 1.500 |
+| 450 m | 675 → 1.012 → 1.500 |
+
+Mesmo com `temperature=0`, a IA não devolve sempre o mesmo número. Nos exemplos abaixo,
+ela alternou entre 350, 400 e 450 m para o mesmo endereço.
+
+**Exemplos reais (mesmo imóvel, mesmo código de cálculo):**
+
+| Imóvel | Rodada | Raio da IA | Raio final | Casas usadas | Terrenos usados | Valor |
+|---|---|---|---|---|---|---|
+| Arapongas, Jd. Interlagos (casa 70 m², terreno 128 m²) | 23/11, tela | 450 m | 1.012 m | 5 | 0 | R$ 299.122 |
+| | 24/11, tela | 400 m | 1.350 m | 11 | 8 | R$ 314.244 (+5%) |
+| Alvorada do Sul, Jd. Novo Ideal | 28/10 16:58 | 350 m | 1.500 m (terrenos 1.181 m) | 0 | 11 | sem estimativa |
+| | 28/10 17:14 | 400 m | 1.500 m (terrenos 1.350 m) | 0 | 25 | sem estimativa |
+| Palhoça, Praia do Sonho (Ens. Brito) | 20/10 22:16 | — | 1.500 m | 1 | 9 | R$ 1.200.000 (não confiável) |
+| | 20/10 23:34 | — | 750 m | 4 | 11 | R$ 1.565.714 (não confiável, +30%) |
+
+Em Palhoça as duas rodadas ficaram abaixo do mínimo de 5 (valor mostrado como não
+confiável). O raio da IA não era gravado em outubro.
+
+O que aconteceu em Arapongas, passo a passo:
+- Em 23/11 a IA disse 450 m. Com 675 m ainda faltavam casas; com 1.012 m chegou a 5 e
+  parou. A zona confirmou 5 terrenos em 675 m, mas o Agente 5 não usou nenhum (falta
+  conferir por quê). Resultado: o valor saiu do m² total de 5 casas, sem separar o terreno.
+- Em 24/11 a IA disse 400 m. Com 600 m e 900 m faltavam casas; o passo seguinte foi
+  1.350 m, que pegou 11 casas de uma vez. Os terrenos foram até 900 m e entraram 8, um
+  deles de R$ 2,3 milhões. Resultado: o valor saiu com o terreno separado.
+- A diferença não veio da IA que escolhe os comparáveis nem das fotos. Veio de onde o raio
+  parou.
+
+**Onde a variação pesa mais:** com amostra grande, quase não muda (São José do Rio Preto,
+outubro: 35 a 47 casas na zona, R$ 542 mil e R$ 548 mil). Pesa nas cidades pequenas e
+bairros com poucos anúncios, que são justamente a maioria dos imóveis da CAIXA.
+
+**Caminhos possíveis (para o professor escolher, nada foi mudado):**
+1. **Raio fixo ou por faixas** (ex.: 500 m, 1 km, 1,5 km), sem a IA decidir o número.
+   A IA de visão continuaria só como observação.
+2. **Os N mais próximos:** em vez de raio, usar os 5 (ou 8, ou 10) comparáveis parecidos
+   mais próximos do imóvel, a qualquer distância até um limite. A amostra fica sempre do
+   mesmo tamanho.
+3. **Passos menores na ampliação** (ex.: +100 m em vez de ×1,5), para o raio parar perto
+   do mínimo necessário.
+4. **Mínimo maior que 5** comparáveis, para que um imóvel a mais ou a menos pese menos.
+5. **Repetir a escolha do raio** 3 vezes e usar a mediana.
+
+Pergunta para ele: qual desses (ou outro) é o mais correto pelo método da planilha, e se a
+variação de 5% entre rodadas é aceitável para o trabalho.
+
 ## Leilão e telas
 
 - [ ] **Cronômetro dos leilões** (`app/cronometro.py`) usa `st.components.v1.html`. O
@@ -64,17 +142,8 @@ Pontos de atenção do teste do Leilão SFI (10 imóveis, nov/2026; planilha
 
 ## Infraestrutura e segurança
 
-- [ ] **`DATABASE_URL` nos Secrets do Streamlit Cloud** (Settings → Secrets). Sem
-  ela o app publicado funciona, mas não grava as avaliações no banco.
 - [ ] **Trocar a chave do Qwen e a senha do banco Neon**, que circularam em
   conversa; atualizar `.env` e Secrets.
-- [ ] **Qwen (Colab) lento para tarefas reais.** Em 06/10/2026 respondia "OK" em
-  3 s, mas nenhuma tarefa real terminou dentro do limite (60–90 s) e os pedidos
-  abandonados ficaram em fila no Colab, travando-o; a avaliação do Sion foi de
-  7,2 para 13,2 min. Enquanto não houver solução, deixar `QWEN_API_URL`/
-  `QWEN_API_KEY` comentadas no `.env`. Opções: checar o Colab no início da
-  avaliação e pular o Qwen se ele demorar; fazer o notebook cancelar pedidos
-  abandonados; GPU mais forte.
 
 ## Agente 1 — Repetidos entre portais (`agents/identidade.py`)
 
@@ -158,12 +227,10 @@ Pontos de atenção do teste do Leilão SFI (10 imóveis, nov/2026; planilha
 
 ## Agente 3 — Analisador qualitativo (`agents/text_analyzer.py`)
 
-- [ ] **Modelo de visão da NVIDIA desativado** (`meta/llama-3.2-11b-vision-instruct`,
-  erro 410 desde 05/11/2026). Não muda o valor, mas a reserva do Agente 3 para fotos
-  precisa de outro modelo do NVIDIA NIM, ou a NVIDIA sai da cadeia.
-- [ ] **Créditos do Apify acabaram** (erro 403). O Apify é só reserva do Agente 1 (a
-  Athena é a fonte principal). Sem ele, cidade com menos de 10 anúncios na Athena fica sem
-  o socorro do VivaReal.
+- [ ] **Apify: confirmar que voltou.** Os créditos tinham acabado (erro 403), mas em
+  24/11/2026 a conta mostrava US$ 0,63 usados de US$ 5 no mês (renovou). Confirmar numa
+  avaliação de cidade pequena. O Apify é só reserva do Agente 1 (a Athena é a fonte
+  principal).
 
 - [ ] **Ordem dos provedores para comparáveis.** Hoje Groq → NVIDIA → Gemini. No
   teste: Groq recusou 7 de 11 por limite de uso (429, modelo qwen3.8-27b); NVIDIA
@@ -172,6 +239,29 @@ Pontos de atenção do teste do Leilão SFI (10 imóveis, nov/2026; planilha
   gratuito.
 
 ## Resolvido
+
+- **Terminal desatualizado em relação à tela → fluxo único** (24/11/2026). O `app/graph.py`
+  não mudava desde 07/10 e tinha fluxo próprio. Ele não localizava o alvo antes da coleta,
+  mandava os terrenos para a zona por outro caminho, não passava o imóvel ao Agente 3 e não
+  avaliava o leilão. Em Arapongas, deu R$ 338 mil, contra R$ 299 mil pela tela, com o mesmo
+  raio. Agora a tela e o terminal chamam `services/pipeline.executar_avaliacao`. Conferido
+  no mesmo imóvel: o terminal, com a IA escolhendo 450 m, deu exatamente R$ 299.121,75,
+  igual à tela em 23/11. `tests/test_pipeline_unico.py` falha se alguém voltar a chamar os
+  agentes direto da tela ou do terminal.
+
+- **Modelos da NVIDIA desativados** (24/11/2026). O `llama-3.2-11b-vision-instruct` (erro
+  410 desde 05/11) e o `gpt-oss-20b` (saiu do ar em 18/11) foram trocados pelo
+  `nemotron-3.5-super-vl-120b-a12b` (visão) e pelo `nemotron-3.5-lightning-30b-a3b`
+  (texto), com o "pensar" desligado. A chave da NVIDIA também foi trocada: a antiga dava
+  403 em todos os modelos. Os nomes dos modelos agora ficam no `.env` (`services/ia.py`,
+  `docs/MODELOS_LLM.md`).
+- **Qwen (Colab) lento para tarefas reais → desligado** (24/11/2026). Desde 06/10/2026
+  nenhuma tarefa real terminava no limite (60–90 s), e em 24/11 o Colab estava fora do ar.
+  `QWEN_API_URL` e `QWEN_API_KEY` estão comentadas no `.env`; sem elas, o código pula o
+  Qwen. **Para religar:** descomentar as duas linhas (e, no Streamlit Cloud, colocá-las nos
+  Secrets).
+- **`DATABASE_URL` nos Secrets do Streamlit Cloud** (confirmado em 24/11/2026): o app
+  publicado grava as avaliações no banco.
 
 - **Conferência na tela, avisos de repetidos e do próprio anúncio** (21/10/2026; branch
   `conferencia-e-avisos`).

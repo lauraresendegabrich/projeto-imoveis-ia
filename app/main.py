@@ -1,71 +1,97 @@
 """
-Pipeline Multiagente de Precificação Imobiliária
-=================================================
+Avaliacao pelo terminal — o MESMO fluxo da tela
+================================================
 
-COMO RODAR:
-    .venv/Scripts/python.exe app/main.py
+COMO RODAR (da raiz do projeto):
+    .venv/Scripts/python.exe -m app.main            # nao grava no banco
+    .venv/Scripts/python.exe -m app.main --gravar   # grava no banco, como a tela
 
-FLUXO:
-    Agente 1 (coleta) → Agente 2 (comparáveis + zona) → Agente 3 + 4 (paralelo) → Agente 5 (preço)
+Preencha IMOVEL e, se for leilao, LEILAO abaixo, com os mesmos campos do formulario
+da pagina "Avaliacao de imovel". O imovel e montado pela mesma funcao da tela
+(services/pipeline.montar_imovel_alvo) e avaliado pelo mesmo fluxo
+(services/pipeline.executar_avaliacao): tela e terminal dao o mesmo resultado.
 """
-
 import logging
-from app.graph import executar_pipeline
+import sys
 
+from dotenv import load_dotenv
+
+load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # =============================================================================
-# IMOVEL ALVO — altere aqui para avaliar outro imóvel
+# IMOVEL — campos do formulario (tipo: "Casa" ou "Apartamento")
 # =============================================================================
 
-IMOVEL_ALVO = {
-    # Localização (obrigatório para Agente 1)
-    "rua":           "Rua Doutor Liraucio Gomes",
-    "numero":        "119",
-    "bairro":        "Cambuí",
-    "cidade":        "Campinas",
-    "estado":        "SP",
-    "localizacao":   "Campinas, SP",
-
-    # Tipo (obrigatório para Agente 1)
-    "tipo":          "apartment",   # "house" (casas + terrenos) ou "apartment"
-
-    # Características do imóvel (para Agente 2 — score de similaridade)
-    "propertyType":  "Apartamentos",
-    "area":          89,
-    "area_terreno":  0,
-    "bedrooms":      2,
-    "bathrooms":     3,
-    "parkingSpaces": 2,
-    "neighborhood":  "Cambuí",
-    "street":        "Rua Doutor Liraucio Gomes",
-    "description":   "Apartamento com 2 quartos, 3 banheiros, 2 vagas, 89m². Cambuí, Campinas/SP.",
-    "images": [],
+IMOVEL = {
+    "rua": "Rua Chirito Mascarado",
+    "numero": "116",
+    "bairro": "Jardim Interlagos",
+    "cidade": "Arapongas",
+    "estado": "PR",
+    "tipo": "Casa",
+    "area": 69.97,
+    "area_terreno": 128.17,
+    "quartos": 2,
+    "banheiros": 1,
+    "vagas": 1,
+    "descricao": "",
+    "fotos": [],              # links diretos das fotos, ate 8
+    "link_anuncio": "",       # anuncio do proprio imovel num portal, se houver
+    "em_condominio": False,
+    "preco": 0.0,             # preco anunciado (opcional)
 }
 
-# =============================================================================
-# EXECUÇÃO
-# =============================================================================
+# Leilao: textos como no formulario (None = nao e leilao). Campos por modalidade em
+# services/leilao.campos_da_modalidade.
+LEILAO = {
+    "banco": "CAIXA",
+    "modalidade": "Leilão SFI",
+    "textos": {
+        "valor_minimo_1": "157000,00", "data_1_leilao": "24/11/2026 10:00",
+        "valor_minimo_2": "144.637,65", "data_2_leilao": "30/11/2026 10:00",
+        "numero_imovel": "8444412088380",
+    },
+}
 
-if __name__ == "__main__":
-    resultado = executar_pipeline(IMOVEL_ALVO)
+
+def main(gravar: bool = False) -> dict:
+    from services.leilao import ler_formulario_leilao
+    from services.pipeline import ObservadorLog, executar_avaliacao, montar_imovel_alvo
+
+    dados_leilao = None
+    if LEILAO:
+        dados_leilao, erros = ler_formulario_leilao(LEILAO["textos"], LEILAO["banco"], LEILAO["modalidade"])
+        if erros:
+            raise SystemExit("Campos do leilao invalidos: " + "; ".join(erros))
+
+    imovel_alvo = montar_imovel_alvo(**IMOVEL)
+    saida = executar_avaliacao(
+        imovel_alvo, dados_leilao=dados_leilao, obs=ObservadorLog(), gravar=gravar,
+        entrada_usuario={**IMOVEL, "origem": "terminal (app/main.py)"},
+        tela_resultado={k: IMOVEL[k] for k in ("rua", "numero", "bairro", "cidade", "estado", "tipo",
+                                               "quartos", "banheiros", "vagas")},
+    )
+    resultado = saida["resultado"] or {}
+    pe = resultado.get("preco_estimado") or {}
+    ap = pe.get("avaliacao_planilha") or {}
+    usados = pe.get("comparaveis_usados") or {}
+    leilao = resultado.get("leilao") or {}
 
     print("\n" + "=" * 60)
-    print("RESULTADO DO PIPELINE")
+    print("RESULTADO (mesmo fluxo da tela)")
     print("=" * 60)
-    print(f"Status:          {resultado['status']}")
-    print(f"Imóvel alvo:     {resultado['imovel_alvo']}")
+    print(f"Parada:          {saida['parada'] or 'nenhuma (avaliacao completa)'}")
+    print(f"Valor medio:     {ap.get('valor_medio_imovel')}")
+    print(f"Liquidez:        {ap.get('valor_liquidez')}")
+    print(f"Status Ag5:      {pe.get('status_avaliacao')} | confiavel: {pe.get('avaliacao_confiavel')}")
+    print(f"Usados:          {len(usados.get('construcao') or [])} construidos, {len(usados.get('terreno') or [])} terrenos")
+    if leilao:
+        print(f"Leilao:          {leilao.get('decisao')} | ROI {leilao.get('roi')} | etapa {leilao.get('etapa')}")
+    print(f"Falhas:          {resultado.get('falhas') or 'nenhuma'}")
+    print(f"Gravado no banco: {'sim' if gravar else 'nao'}")
+    return saida
 
-    resumo = resultado.get("resumo", {})
-    print(f"Comparáveis:     {resumo.get('cluster_a', '?')} similares | {resumo.get('cluster_b', '?')} não similares")
-    print(f"Terrenos:        {resumo.get('terrenos_excluidos', '?')}")
 
-    ag3 = resultado.get("analise_qualitativa", {})
-    if ag3:
-        print(f"Score qualit.:   {ag3.get('resumo', {}).get('score_qualitativo_medio', '?')}")
-
-    ag4 = resultado.get("infraestrutura", {})
-    if ag4:
-        print(f"Score infra:     {ag4.get('scores', {}).get('score_final', '?')}")
-
-    print(f"Preço estimado:  {resultado.get('preco_estimado') or 'pendente (Agente 5)'}")
+if __name__ == "__main__":
+    main(gravar="--gravar" in sys.argv)

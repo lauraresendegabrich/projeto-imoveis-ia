@@ -24,7 +24,8 @@ python -m venv .venv
 
 ### Arquivo `.env`
 
-Fica na raiz e **nunca vai para o GitHub**. Peça o arquivo para quem já trabalha no projeto.
+Fica na raiz e **nunca vai para o GitHub**. Peça o arquivo para quem já trabalha no projeto,
+ou copie o `.env.example` e preencha.
 
 | Chave | Para quê |
 |---|---|
@@ -36,8 +37,10 @@ Fica na raiz e **nunca vai para o GitHub**. Peça o arquivo para quem já trabal
 | `GOOGLE_MAPS_KEY` | Geocodificação, imagem de satélite e Google Places |
 | `TOMTOM_API_KEY` | Geocodificação |
 | `GEOAPIFY_API_KEY` | Pontos de interesse do entorno (Agente 4) |
-| `NVIDIA_API_KEY` | IA de reserva dos Agentes 2, 3 e 4. **O modelo de visão do Agente 3 foi desativado em 05/11/2026.** |
-| `QWEN_API_URL`, `QWEN_API_KEY` | Qwen no Colab (Agentes 3 e 4). Lento: deixar comentado (ver `docs/PENDENCIAS.md`) |
+| `NVIDIA_API_KEY` | IA de reserva dos Agentes 2, 3 e 4 (nemotron) |
+| `ZAI_API_KEY` | Z.AI (GLM), reserva de texto |
+| `QWEN_API_URL`, `QWEN_API_KEY` | Qwen no Colab. **Desligado** (linhas comentadas; ver `docs/MODELOS_LLM.md`) |
+| `*_MODELO_*` | Nomes dos modelos de IA (opcional; ver `.env.example` e `docs/MODELOS_LLM.md`) |
 
 No Streamlit Cloud, as mesmas chaves ficam em Settings → Secrets.
 
@@ -55,6 +58,16 @@ Abra http://localhost:8501. O menu tem duas páginas:
   avaliação leva de 4 a 10 minutos.
 - **Leilões ativos:** um card por imóvel de leilão já avaliado, com a decisão, o ROI, o
   cronômetro, a avaliação completa e a **calculadora de simulação** no menu lateral.
+
+### Terminal
+
+Avalia um imóvel sem abrir o site, com **o mesmo fluxo da tela** (`services/pipeline.py`).
+Os campos ficam no topo de `app/main.py`.
+
+```bash
+.venv\Scripts\python.exe -m app.main            # não grava no banco
+.venv\Scripts\python.exe -m app.main --gravar   # grava, como a tela
+```
 
 ### Testes
 
@@ -110,8 +123,8 @@ projeto-imoveis-ia/
 │   ├── calculadora.py        # Calculadora de simulação (menu lateral)
 │   ├── resultado_tela.py     # Tela do resultado
 │   ├── cronometro.py         # Contagem regressiva do leilão
-│   ├── graph.py              # Orquestrador do pipeline
-│   └── main.py               # Execução via terminal
+│   ├── graph.py              # Terminal: chama o fluxo de services/pipeline.py
+│   └── main.py               # Avaliação pelo terminal (mesmo fluxo da tela)
 ├── agents/
 │   ├── collector.py          # Agente 1
 │   ├── identidade.py         # Agente 1: mesmo imóvel em vários anúncios
@@ -120,6 +133,8 @@ projeto-imoveis-ia/
 │   ├── infra_evaluator.py    # Agente 4
 │   └── price_liquidity.py    # Agente 5
 ├── services/
+│   ├── pipeline.py           # O fluxo da avaliação (tela e terminal)
+│   ├── ia.py                 # Modelos de IA e chamada aos provedores
 │   ├── leilao.py             # Conta do ROI, decisão e etapas do leilão
 │   ├── caixa_pagina.py       # Leitura da página da CAIXA
 │   ├── leiloes_ativos.py     # Lista de leilões do banco

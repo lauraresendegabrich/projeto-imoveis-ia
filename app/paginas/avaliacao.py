@@ -19,13 +19,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from app.calculadora import mostrar_calculadora, pedir_simulacao, sugestao_da_avaliacao
 from app.resultado_tela import mostrar_resultado
 from services.cep import buscar_cep, limpar_cep, texto_endereco_cep
-from services.detalhe_leilao import resultado_para_gravar
 from services.formatos import ler_numero_br
-from services.verificacoes import verificar_execucao
-from services.textos_tela import anuncios_do_alvo_na_zona, contagem, texto_comparaveis_na_zona, texto_sem_anuncios
+from services.pipeline import Observador, executar_avaliacao, montar_imovel_alvo, montar_resultado_final
+from services.textos_tela import anuncios_do_alvo_na_zona, contagem, texto_comparaveis_na_zona
 from services.leilao import (
-    FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA, avaliar_imovel_leilao, contar_status_zona,
-    campos_da_modalidade, ler_formulario_leilao, texto_aviso_raio, texto_aviso_zona,
+    FORMAS_PAGAMENTO_CAIXA, MODALIDADES_CAIXA, ORIGEM_CAIXA,
+    campos_da_modalidade, ler_formulario_leilao, texto_aviso_raio,
     MODALIDADE_LICITACAO, MODALIDADE_SFI, MODALIDADE_VENDA_ONLINE, TEXTO_GRAVAME,
 )
 from services.caixa_pagina import ler_pagina_caixa, valores_para_formulario
@@ -121,143 +120,8 @@ def mostrar_resumo_caixa(lida):
         st.error(f"⚠️ {lida['campos'].get('gravame_texto') or TEXTO_GRAVAME}")
 
 
-def montar_resultado_final(ctx, resultado_ag5, id_registro=None):
-    """
-    Fim da avaliacao, depois do Agente 5: aviso da zona, avaliacao de leilao,
-    resultado da tela, verificacoes e registro no banco (em segundo plano).
-
-    ctx: o que os agentes 1 a 4 produziram (montado no fluxo e guardado na sessao).
-    id_registro: id da linha no banco; outro quando o calculo e refeito pela resposta
-    "Este anuncio e do seu imovel?" (os arquivos dos agentes continuam com o id da avaliacao).
-    """
-    import logging as _log_resumo
-    id_execucao = ctx["id_execucao"]
-    escopo_busca = ctx["escopo_busca"]
-    tempos = ctx["tempos"]
-
-    # ── RESUMO DA EXECUCAO (log para auditoria) ───────────────────
-    _lr = _log_resumo.getLogger("pipeline")
-    _lr.info("")
-    _lr.info("=" * 55)
-    _lr.info("  RESUMO DA EXECUCAO")
-    _lr.info("=" * 55)
-    _lr.info(f"  Agente 1 (coleta): {tempos['agente1']:.1f}s")
-    _lr.info(f"  Agente 2 (clustering): {tempos['agente2']:.1f}s")
-    _lr.info(f"  Agente 3+4 (paralelo): {tempos['agentes3e4']:.1f}s")
-    _lr.info(f"  Tempo total: {tempos['total']:.1f}s")
-    # Comparaveis usados por situacao da zona (os nao verificados contam para o minimo).
-    contagem_zona = contar_status_zona(resultado_ag5)
-    aviso_zona = texto_aviso_zona(contagem_zona, escopo_busca)
-    _lr.info(
-        f"  Usados no calculo: {contagem_zona['confirmado']} confirmados | "
-        f"{contagem_zona['fallback']} zona_nao_verificada (contam para o minimo de 5) | "
-        f"{contagem_zona['sem_validacao']} sem_validacao (socorro) | escopo_busca={escopo_busca}"
-    )
-    _lr.info("=" * 55)
-
-    # Avaliacao de leilao: so depois do Agente 5, com os valores do formulario
-    # (nunca passaram por nenhum agente). A etapa atual (1o/2o leilao) sai pela data.
-    dados_leilao = ctx["dados_leilao"]
-    leilao_entrada = leilao = None
-    if dados_leilao:
-        leilao_entrada = {**dados_leilao, "origem": dados_leilao["banco"],
-                          "codigo_caixa": dados_leilao.get("numero_imovel")}
-        leilao = avaliar_imovel_leilao(resultado_ag5, dados_leilao)
-    if leilao is not None:
-        leilao["aviso_zona"] = aviso_zona
-        # Endereco nao localizado com precisao de rua/bairro: o calculo segue, mas o
-        # aviso fica junto da decisao para nao passar despercebido.
-        leilao["alvo_sem_localizacao"] = ctx["alvo_sem_localizacao"]
-
-    imoveis_coletados = ctx["imoveis_coletados"]
-    resultado = {
-        "status": "completo",
-        "id_execucao": id_execucao,
-        "aviso_zona": aviso_zona,
-        "aviso_raio": texto_aviso_raio(ctx["zona_resultado"]),
-        "leilao_entrada": leilao_entrada,
-        "leilao": leilao,
-        "duplicatas_descartadas": ctx["duplicatas_descartadas"],
-        "comparaveis": ctx["comparaveis"],
-        "terrenos": ctx["terrenos"],
-        "zona_homogenea": ctx["zona_resultado"],
-        "analise_qualitativa": ctx["resultado_ag3"],
-        "infraestrutura": ctx["resultado_ag4"],
-        "preco_estimado": resultado_ag5,
-        "resumo": ctx["resumo"],
-        # Para as verificacoes automaticas (services/verificacoes.py).
-        "imovel_alvo": ctx["imovel_alvo"],
-        # Situacao de cada fonte e contagens da coleta (Agente 1).
-        "resumo_coleta": (imoveis_coletados[0].get("resumo_coleta") if imoveis_coletados
-                          else ctx.get("resumo_coleta")),
-        "falhas": ctx["falhas"],
-        "localizacao_alvo": ctx["localizacao_alvo"],
-    }
-    # Verificacoes automaticas: leem o resultado de cada agente e conferem regras
-    # (nao mudam nenhum calculo). Tela (modo conferencia), banco e Excel.
-    resultado["verificacoes"] = verificar_execucao(resultado)
-
-    # Grava a avaliacao no banco (Neon) em segundo plano: a tela nao espera e uma
-    # falha do banco so vira aviso no log (services/banco.py).
-    try:
-        from services.registro_execucao import montar_registro
-        from services.banco import gravar_em_segundo_plano
-        entrada_usuario = ctx["entrada_usuario"]
-        if id_registro:
-            # Calculo refeito pela resposta da pessoa: linha nova no banco, ligada a original.
-            entrada_usuario = {**(entrada_usuario or {}), "refeita_de": id_execucao,
-                               "anuncios_do_alvo_pela_usuaria": resultado_ag5.get("anuncios_do_alvo_pela_usuaria")}
-        registro_execucao, registro_comparaveis = montar_registro(
-            id_execucao=id_registro or id_execucao,
-            imovel_alvo=ctx["imovel_alvo"],
-            leilao_entrada=leilao_entrada,
-            leilao=leilao,
-            imoveis_coletados=imoveis_coletados,
-            resultado_ag2=ctx["resultado_ag2"],
-            zona_resultado=ctx["zona_resultado"],
-            resultado_ag3=ctx["resultado_ag3"],
-            resultado_ag4=ctx["resultado_ag4"],
-            resultado_ag5=resultado_ag5,
-            tempos=tempos,
-            falhas=ctx["falhas"],
-            localizacao_alvo=ctx["localizacao_alvo"],
-            entrada_usuario=entrada_usuario,
-        )
-        # Guardado no resultado (sessao) para o botao de exportar Excel: mesmo
-        # conteudo gravado no banco.
-        registro_execucao["verificacoes"] = resultado["verificacoes"]
-        # Para o "Ver avaliacao completa" da pagina "Leiloes ativos" (migracao 006).
-        registro_execucao["resultado_completo"] = resultado_para_gravar(resultado, ctx["tela_resultado"])
-        resultado["registro"] = {"execucao": registro_execucao, "comparaveis": registro_comparaveis}
-        gravar_em_segundo_plano(registro_execucao, registro_comparaveis)
-    except Exception as e:
-        _log_resumo.getLogger("pipeline").warning(f"[Banco] registro nao montado: {type(e).__name__}: {e}")
-    return resultado
-
-
-def resultado_sem_anuncios(motivo):
-    """Resultado do Agente 5 quando a coleta nao trouxe nenhum anuncio (nao ha o que comparar)."""
-    return {"status_avaliacao": "sem_amostra", "avaliacao_confiavel": False, "sem_anuncios": True,
-            "zona_calculada_nesta_avaliacao": False, "avisos": [motivo],
-            "comparaveis_usados": {"construcao": [], "terreno": []}}
-
-
-def contexto_sem_anuncios(*, id_execucao, imovel_alvo, dados_leilao, alvo_sem_localizacao, falhas,
-                          localizacao_alvo, entrada_usuario, tela_resultado, tempo_ag1, tempo_total):
-    """Contexto de montar_resultado_final sem anuncios: agentes 2 a 4 nao rodaram."""
-    from agents.collector import resumo_da_coleta
-    return {
-        "id_execucao": id_execucao, "imovel_alvo": imovel_alvo, "imoveis_coletados": [],
-        "escopo_busca": None, "resumo": {"total_coletados": 0, "tempo_coleta_s": round(tempo_ag1, 1)},
-        "duplicatas_descartadas": [], "dados_leilao": dados_leilao, "alvo_sem_localizacao": alvo_sem_localizacao,
-        "comparaveis": [], "terrenos": [], "zona_resultado": {}, "resultado_ag2": {}, "resultado_ag3": {},
-        "resultado_ag4": {}, "falhas": falhas, "localizacao_alvo": localizacao_alvo,
-        "entrada_usuario": entrada_usuario, "tela_resultado": tela_resultado,
-        # Quantos anuncios o banco trouxe e por que nenhum sobrou (agents/collector.py).
-        "resumo_coleta": resumo_da_coleta(id_execucao),
-        "tempos": {"total": round(tempo_total, 1), "agente1": round(tempo_ag1, 1), "agente2": 0.0,
-                   "zona": 0.0, "agentes3e4": 0.0},
-    }
+# montar_resultado_final, resultado_sem_anuncios e contexto_sem_anuncios estao em
+# services/pipeline.py (o mesmo fluxo da tela e do terminal).
 
 
 def _marcar_anuncio_do_alvo_na_tela(ctx, url, e_do_alvo):
@@ -616,317 +480,150 @@ with area_principal.container():
             },
         }
 
-        # Monta o dict do imóvel alvo
-        tipo_map = {"Casa": "house", "Apartamento": "apartment"}
-        property_type_map = {"Casa": "Casas", "Apartamento": "Apartamentos"}
+        # Imovel alvo e fluxo completo: os mesmos do terminal (services/pipeline.py).
+        imovel_alvo = montar_imovel_alvo(
+            rua=rua, numero=numero, bairro=bairro, cidade=cidade, estado=estado, tipo=tipo,
+            area=area, area_terreno=area_terreno, quartos=quartos, banheiros=banheiros, vagas=vagas,
+            descricao=descricao, fotos=(fotos_texto or "").splitlines(), link_anuncio=link_anuncio,
+            em_condominio=em_condominio, preco=preco_anunciado,
+        )
+        if not imovel_alvo["images"]:
+            import logging as _log_fotos
+            _log_fotos.getLogger(__name__).info("  [fotos] Imovel alvo sem imagens — analise visual nao sera realizada")
 
-        imovel_alvo = {
-            "rua": rua,
-            "numero": numero,
-            "bairro": bairro,
-            "cidade": cidade,
-            "estado": estado,
-            "localizacao": f"{cidade}, {estado}",
-            "tipo": tipo_map[tipo],
-            "propertyType": property_type_map[tipo],
-            "area": area,
-            "area_terreno": area_terreno if area_terreno > 0 else None,
-            "bedrooms": quartos,
-            "bathrooms": banheiros,
-            "parkingSpaces": vagas,
-            "neighborhood": bairro,
-            "street": rua,
-            "description": descricao or (
-                f"{tipo} com {area}m², {quartos} quartos, {banheiros} banheiros"
-                + (f", {vagas} vagas" if vagas is not None else "") + f" - {bairro}, {cidade}/{estado}"
-            ),
-            # Texto generico gerado acima: nao serve de prova de identidade no Ag2.
-            "descricao_gerada": not descricao,
-            "images": [],
-            # Prova mais forte de que um comparavel e o anuncio do proprio imovel (Ag2).
-            "link_anuncio": link_anuncio.strip() or None,
-            # Casa em condominio fechado (formulario): Ag2 nao tira os comparaveis de condominio.
-            "em_condominio": bool(em_condominio) if tipo == "Casa" else None,
-        }
-
-        # Processa fotos: links diretos informados pelo usuario
-        import logging as _log_fotos
-        _logger = _log_fotos.getLogger(__name__)
-
-        fotos_informadas = [url.strip() for url in fotos_texto.strip().split("\n") if url.strip()] if fotos_texto.strip() else []
-        _logger.info(f"  [fotos] URLs informadas pelo usuario: {len(fotos_informadas)}")
-
-        # Valida URLs (deve começar com http)
-        fotos_validas = [url for url in fotos_informadas if url.startswith("http")][:8]
-        _logger.info(f"  [fotos] URLs validas: {len(fotos_validas)}")
-
-        imovel_alvo["images"] = fotos_validas
-        _logger.info(f"  [fotos] Fotos selecionadas: {len(fotos_validas)}")
-
-        if not fotos_validas:
-            _logger.info("  [fotos] Imovel alvo sem imagens — analise visual nao sera realizada")
-
-        if preco_anunciado > 0:
-            imovel_alvo["price"] = preco_anunciado
-            imovel_alvo["pricePerSqm"] = preco_anunciado / area if area > 0 else 0
-
-        # Importa os agentes
-        import os
         import time
-        import threading
-        from agents.collector import _mesma_rua, coletar_imoveis
-        from agents.comparables import identificar_comparaveis, analisar_zona_homogenea
-        from agents.text_analyzer import analisar_comparaveis
-        from agents.infra_evaluator import avaliar_infraestrutura
-        from agents.price_liquidity import estimar_preco
-        from agents.execucao import novo_id_execucao
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        # Identifica esta avaliacao nos JSONs que os agentes trocam: os Agentes 3/4/5
-        # ignoram arquivos de avaliacoes anteriores (ver agents/execucao.py).
-        id_execucao = novo_id_execucao()
-        # Limite de chamadas da TomTom (ultima tentativa de geocodificacao) e por avaliacao.
-        from agents.comparables import reiniciar_contagem_tomtom
-        reiniciar_contagem_tomtom()
-        # Falhas desta avaliacao, gravadas no banco (a tela continua mostrando os avisos).
-        falhas_execucao = []
-
-        # ==============================================================
-        # GEOCODIFICAÇÃO ÚNICA DO ALVO (persistida pra todos os agentes)
-        # ==============================================================
-        # Mesma geocodificacao do Agente 2: tenta endereco completo -> rua+numero -> rua
-        # -> bairro e recusa resultados com precisao de cidade (o Google/Nominatim
-        # devolvem o centro da cidade quando nao acham a rua; antes isso era aceito).
-        alvo_sem_localizacao = False
-        # Gravado no banco para contar depois quantas avaliacoes ficaram sem localizacao.
-        localizacao_alvo = "coordenada_informada"
-        if not imovel_alvo.get("lat") or not imovel_alvo.get("lon"):
-            from agents.comparables import _geocodificar_com_fallback
-            endereco_geo = ", ".join(p for p in (rua, numero, bairro, cidade, estado, "Brasil") if p)
-            _logger.info(f"[Geo][Alvo] endereco={endereco_geo}")
-            _lat, _lon, _nivel_geo, _endereco_usado = _geocodificar_com_fallback(
-                endereco_principal=endereco_geo, rua=rua, numero=numero, bairro=bairro,
-                cidade=cidade, estado=estado, permitir_cidade=False,
-            )
-            if _lat is not None and _lon is not None:
-                imovel_alvo["lat"] = _lat
-                imovel_alvo["lon"] = _lon
-                imovel_alvo["geocodificacao_nivel"] = _nivel_geo
-                localizacao_alvo = _nivel_geo
-                _logger.info(
-                    f"[Geo][Alvo] lat={_lat:.6f} | lon={_lon:.6f} | nivel={_nivel_geo} | "
-                    f"endereco_usado={_endereco_usado!r} | geocodificacao_nova=true"
-                )
-            else:
-                alvo_sem_localizacao = True
-                localizacao_alvo = "nao_localizado"
-                _logger.warning("[Geo][Alvo] Nao foi possivel localizar o alvo com precisao de rua ou bairro")
-        else:
-            _logger.info(f"[Geo][Alvo] lat={imovel_alvo['lat']} | lon={imovel_alvo['lon']} | geocodificacao_nova=false (ja existente)")
+        from agents.collector import _mesma_rua
 
         st.divider()
         # Trocados ao terminar ou ao interromper: nao ficam junto do resultado.
         cabecalho = st.empty()
-        cabecalho.subheader("⏳ Avaliação em andamento")
         aviso_cancelar = st.empty()
-        aviso_cancelar.caption("Para cancelar, pressione F5.")
-
-        progress = st.progress(0)
+        progress = st.empty()
         status_box = st.empty()
         log_area = st.container()
-        if tipo == "Casa" and not area_terreno:
-            with log_area:
-                st.info("ℹ️ Sem a área do terreno, o cálculo usa só o m² total das casas e fica menos preciso.")
-        if alvo_sem_localizacao:
-            with log_area:
-                st.warning(
-                    "⚠️ Não foi possível localizar o endereço no mapa com precisão de rua ou bairro. "
-                    "A distância dos comparáveis até o imóvel não será verificada, e o valor fica menos preciso."
-                )
 
-        inicio_total = time.time()
+        class ObservadorTela(Observador):
+            """Mensagens e barra de progresso de cada etapa do fluxo (nao mudam o calculo)."""
 
-        # ==============================================================
-        # ETAPA 1 — Coleta de imóveis na região (~2 min)
-        # ==============================================================
-        with log_area:
-            st.write(f"**Agente Coletor** — Pesquisando imóveis à venda perto do seu, em **{bairro}, {cidade}/{estado}**...")
+            def etapa(self, nome, **d):
+                getattr(self, f"_{nome}", lambda **_: None)(**d)
 
-        # Roda coleta em thread separada para poder atualizar o contador
-        resultado_coleta = [None]
-        def _coletar():
-            resultado_coleta[0] = coletar_imoveis(
-                localizacao=imovel_alvo["localizacao"],
-                tipo_imovel=imovel_alvo["tipo"],
-                bairro=imovel_alvo.get("bairro", ""),
-                rua=imovel_alvo.get("rua", ""),
-                # Coordenada e precisao da localizacao feita acima: com rua ou bairro,
-                # o Agente 1 traz tambem os anuncios mais proximos do imovel.
-                lat_alvo=imovel_alvo.get("lat"),
-                lon_alvo=imovel_alvo.get("lon"),
-                nivel_geo_alvo=imovel_alvo.get("geocodificacao_nivel"),
-                # Gravado em cada anuncio (verificacoes: dados desta execucao).
-                id_execucao=id_execucao,
-            )
+            # ── inicio e coleta ──
+            def _inicio(self, alvo_sem_localizacao, **_):
+                cabecalho.subheader("⏳ Avaliação em andamento")
+                aviso_cancelar.caption("Para cancelar, pressione F5.")
+                progress.progress(0)
+                if tipo == "Casa" and not area_terreno:
+                    with log_area:
+                        st.info("ℹ️ Sem a área do terreno, o cálculo usa só o m² total das casas e fica menos preciso.")
+                if alvo_sem_localizacao:
+                    with log_area:
+                        st.warning(
+                            "⚠️ Não foi possível localizar o endereço no mapa com precisão de rua ou bairro. "
+                            "A distância dos comparáveis até o imóvel não será verificada, e o valor fica menos preciso."
+                        )
 
-        t1 = time.time()
-        thread_coleta = threading.Thread(target=_coletar)
-        thread_coleta.start()
+            def _coleta_inicio(self, **_):
+                with log_area:
+                    st.write(f"**Agente Coletor** — Pesquisando imóveis à venda perto do seu, em **{bairro}, {cidade}/{estado}**...")
 
-        # Contador regressivo enquanto coleta
-        tempo_estimado_ag1 = 120  # ~2 minutos
-        while thread_coleta.is_alive():
-            elapsed = time.time() - t1
-            restante = max(0, tempo_estimado_ag1 - elapsed)
-            pct = min(18, int(5 + (elapsed / tempo_estimado_ag1) * 15))
-            progress.progress(pct)
-            if restante > 0:
-                if restante > 90:
-                    status_box.info(f"🔍 **Agente Coletor de Dados** | Consultando a base de dados de anúncios... Faltam ~{int(restante)}s")
-                elif restante > 60:
-                    status_box.info(f"🔍 **Agente Coletor de Dados** | Lendo anúncios de casas e terrenos... Faltam ~{int(restante)}s")
-                elif restante > 30:
-                    status_box.info(f"🔍 **Agente Coletor de Dados** | Extraindo preços, áreas e fotos... Faltam ~{int(restante)}s")
-                else:
-                    status_box.info(f"🔍 **Agente Coletor de Dados** | Organizando imóveis encontrados... Faltam ~{int(restante)}s")
-            else:
-                status_box.info("🔍 **Agente Coletor de Dados** | Finalizando... quase pronto!")
-            time.sleep(2)
+            def aguardar(self, nome, terminou, situacao=None):
+                if nome == "coleta":
+                    self._aguardar_coleta(terminou)
+                elif nome == "agentes34":
+                    self._aguardar_agentes34(terminou, situacao)
 
-        thread_coleta.join()
-        imoveis_coletados = resultado_coleta[0] or []
-        tempo_ag1 = time.time() - t1
+            def _aguardar_coleta(self, terminou):
+                t1 = time.time()
+                tempo_estimado_ag1 = 120  # ~2 minutos
+                while not terminou():
+                    elapsed = time.time() - t1
+                    restante = max(0, tempo_estimado_ag1 - elapsed)
+                    progress.progress(min(18, int(5 + (elapsed / tempo_estimado_ag1) * 15)))
+                    if restante > 0:
+                        if restante > 90:
+                            status_box.info(f"🔍 **Agente Coletor de Dados** | Consultando a base de dados de anúncios... Faltam ~{int(restante)}s")
+                        elif restante > 60:
+                            status_box.info(f"🔍 **Agente Coletor de Dados** | Lendo anúncios de casas e terrenos... Faltam ~{int(restante)}s")
+                        elif restante > 30:
+                            status_box.info(f"🔍 **Agente Coletor de Dados** | Extraindo preços, áreas e fotos... Faltam ~{int(restante)}s")
+                        else:
+                            status_box.info(f"🔍 **Agente Coletor de Dados** | Organizando imóveis encontrados... Faltam ~{int(restante)}s")
+                    else:
+                        status_box.info("🔍 **Agente Coletor de Dados** | Finalizando... quase pronto!")
+                    time.sleep(2)
 
-        if not imoveis_coletados:
-            # Feijo/AC (31/10/2026): a base so tinha um galpao e fazendas. "Tente outro
-            # bairro" nao serve para imovel de leilao (o endereco e fixo); o cartao do
-            # leilao aparece mesmo assim, com a resposta "Sem estimativa".
-            status_box.empty()
-            progress.empty()
-            aviso_cancelar.empty()
-            cabecalho.subheader("❌ Sem estimativa: nenhum anúncio para comparar")
-            motivo_sem_anuncios = texto_sem_anuncios(tipo, cidade, estado)
-            st.error(motivo_sem_anuncios)
-            # Gravada no banco como as outras (Atalaia/PR, 02/11/2026): aparece nos leiloes
-            # ativos como "Sem estimativa" e conta nas estatisticas. Agentes 2 a 5 vazios.
-            resultado = montar_resultado_final(
-                contexto_sem_anuncios(
-                    id_execucao=id_execucao, imovel_alvo=imovel_alvo, dados_leilao=dados_leilao,
-                    alvo_sem_localizacao=alvo_sem_localizacao, falhas=falhas_execucao,
-                    localizacao_alvo=localizacao_alvo, entrada_usuario=entrada_usuario,
-                    tela_resultado=tela_resultado, tempo_ag1=tempo_ag1, tempo_total=time.time() - inicio_total,
-                ),
-                resultado_sem_anuncios(motivo_sem_anuncios),
-            )
-            if resultado.get("leilao"):
-                from app.resultado_tela import mostrar_avaliacao_leilao
-                mostrar_avaliacao_leilao(resultado["leilao"])
-            st.stop()
+            def _sem_anuncios(self, motivo, resultado, **_):
+                # Feijo/AC (31/10/2026): "Tente outro bairro" nao serve para imovel de
+                # leilao (o endereco e fixo); o cartao do leilao aparece mesmo assim.
+                status_box.empty()
+                progress.empty()
+                aviso_cancelar.empty()
+                cabecalho.subheader("❌ Sem estimativa: nenhum anúncio para comparar")
+                st.error(motivo)
+                if resultado.get("leilao"):
+                    from app.resultado_tela import mostrar_avaliacao_leilao
+                    mostrar_avaliacao_leilao(resultado["leilao"])
 
-        progress.progress(20)
-        # O Ag1 junta o mesmo imovel anunciado em varios portais/imobiliarias: cada
-        # representante guarda os anuncios descartados em "duplicatas".
-        duplicatas_descartadas = [
-            {
-                "Mantido": im.get("source") or "-",
-                "Preço": im.get("price") or im.get("preco"),
-                "Área": im.get("area") or im.get("area_construida"),
-                "Anúncio mantido": im.get("url") or "",
-                "Descartado": dup.get("source") or dup.get("portal") or "-",
-                "Anúncio descartado": dup.get("url") or "",
-                "Motivo": str(dup.get("motivo") or "").split("(")[0],
-            }
-            for im in imoveis_coletados
-            for dup in (im.get("duplicatas") or [])
-        ]
-        with log_area:
-            st.success(f"✅ {contagem(len(imoveis_coletados), 'imóvel à venda encontrado', 'imóveis à venda encontrados')} na região")
-            if duplicatas_descartadas:
-                st.caption(
-                    f"ℹ️ {contagem(len(duplicatas_descartadas), 'anúncio repetido', 'anúncios repetidos')} do mesmo imóvel "
-                    f"(em outro portal ou por outra imobiliária) "
-                    f"{'foi descartado' if len(duplicatas_descartadas) == 1 else 'foram descartados'}."
-                )
-            # Mostra o que a busca (Agente 1) realmente fez: o escopo vem dela, e a
-            # contagem na rua usa a mesma comparacao da busca (sem acento/maiusculas).
-            # Antes a tela comparava os nomes letra por letra e dizia "cidade toda"
-            # quando o bairro so estava escrito sem acento (ITAJUBA x Itajubá).
-            escopo_busca = imoveis_coletados[0].get("escopo_busca")
-            n_proximidade = sum(1 for im in imoveis_coletados if im.get("origem_busca") == "proximidade")
-            if n_proximidade:
-                st.caption(
-                    f"ℹ️ {contagem(n_proximidade, 'anúncio veio', 'anúncios vieram')} por proximidade (até 1,5 km do "
-                    f"imóvel, fora da rua e do bairro). Só entram no cálculo se estiverem dentro da zona do imóvel."
-                )
-            n_resto_cidade = sum(1 for im in imoveis_coletados if im.get("origem_busca") == "cidade")
-            if n_resto_cidade:
-                st.caption(
-                    f"ℹ️ {contagem(n_resto_cidade, 'anúncio veio', 'anúncios vieram')} do resto da cidade (poucos "
-                    f"anúncios perto do imóvel). Só entram no cálculo se estiverem dentro da zona do imóvel."
-                )
-            if (rua or bairro) and escopo_busca == "cidade":
-                local = " / ".join(x for x in (rua, bairro) if x)
-                st.caption(f"ℹ️ Nenhum imóvel encontrado em {local}. Usando imóveis da cidade toda.")
-            elif rua and escopo_busca in ("rua+bairro", "rua+bairro+proximidade"):
-                na_rua = sum(1 for im in imoveis_coletados if _mesma_rua(im.get("street") or im.get("rua"), rua))
-                if na_rua > 0:
-                    st.caption(f"ℹ️ {contagem(na_rua, 'imóvel encontrado', 'imóveis encontrados')} na mesma rua ({rua})")
-                elif bairro:
-                    st.caption(f"ℹ️ Nenhum imóvel encontrado na mesma rua ({rua}). Usando imóveis do bairro {bairro}.")
+            def _coleta_fim(self, imoveis_coletados, duplicatas, escopo_busca, **_):
+                progress.progress(20)
+                with log_area:
+                    st.success(f"✅ {contagem(len(imoveis_coletados), 'imóvel à venda encontrado', 'imóveis à venda encontrados')} na região")
+                    if duplicatas:
+                        st.caption(
+                            f"ℹ️ {contagem(len(duplicatas), 'anúncio repetido', 'anúncios repetidos')} do mesmo imóvel "
+                            f"(em outro portal ou por outra imobiliária) "
+                            f"{'foi descartado' if len(duplicatas) == 1 else 'foram descartados'}."
+                        )
+                    # Mostra o que a busca (Agente 1) realmente fez: o escopo vem dela, e a
+                    # contagem na rua usa a mesma comparacao da busca (sem acento/maiusculas).
+                    n_proximidade = sum(1 for im in imoveis_coletados if im.get("origem_busca") == "proximidade")
+                    if n_proximidade:
+                        st.caption(
+                            f"ℹ️ {contagem(n_proximidade, 'anúncio veio', 'anúncios vieram')} por proximidade (até 1,5 km do "
+                            f"imóvel, fora da rua e do bairro). Só entram no cálculo se estiverem dentro da zona do imóvel."
+                        )
+                    n_resto_cidade = sum(1 for im in imoveis_coletados if im.get("origem_busca") == "cidade")
+                    if n_resto_cidade:
+                        st.caption(
+                            f"ℹ️ {contagem(n_resto_cidade, 'anúncio veio', 'anúncios vieram')} do resto da cidade (poucos "
+                            f"anúncios perto do imóvel). Só entram no cálculo se estiverem dentro da zona do imóvel."
+                        )
+                    if (rua or bairro) and escopo_busca == "cidade":
+                        local = " / ".join(x for x in (rua, bairro) if x)
+                        st.caption(f"ℹ️ Nenhum imóvel encontrado em {local}. Usando imóveis da cidade toda.")
+                    elif rua and escopo_busca in ("rua+bairro", "rua+bairro+proximidade"):
+                        na_rua = sum(1 for im in imoveis_coletados if _mesma_rua(im.get("street") or im.get("rua"), rua))
+                        if na_rua > 0:
+                            st.caption(f"ℹ️ {contagem(na_rua, 'imóvel encontrado', 'imóveis encontrados')} na mesma rua ({rua})")
+                        elif bairro:
+                            st.caption(f"ℹ️ Nenhum imóvel encontrado na mesma rua ({rua}). Usando imóveis do bairro {bairro}.")
 
-        # ==============================================================
-        # ETAPA 2 — Identificação dos comparáveis (~30s)
-        # ==============================================================
-        status_box.info("📊 **Etapa 2/5 — Agente Identificador de Comparáveis** | Tempo estimado: ~30 segundos")
-        progress.progress(25)
-        with log_area:
-            st.write("**Agente Identificador** — Comparando os imóveis encontrados com o seu para identificar os mais parecidos...")
+            # ── Agente 2 e zona ──
+            def _comparaveis_inicio(self, **_):
+                status_box.info("📊 **Etapa 2/5 — Agente Identificador de Comparáveis** | Tempo estimado: ~30 segundos")
+                progress.progress(25)
+                with log_area:
+                    st.write("**Agente Identificador** — Comparando os imóveis encontrados com o seu para identificar os mais parecidos...")
 
-        t2 = time.time()
-        resultado_ag2 = identificar_comparaveis(
-            imovel_alvo=imovel_alvo,
-            imoveis_coletados=imoveis_coletados,
-            usar_llm=True,
-            id_execucao=id_execucao,
-        )
-        tempo_ag2_cluster = time.time() - t2
+            def _comparaveis_fim(self, cluster_a, **_):
+                with log_area:
+                    st.success(f"✅ {contagem(cluster_a, 'imóvel parecido', 'imóveis parecidos')} com o seu (mesma faixa de área e quartos)")
 
-        comparaveis = resultado_ag2.get("comparaveis", [])
-        terrenos = resultado_ag2.get("terrenos", [])
-        resumo = resultado_ag2.get("resumo", {})
+            def _sem_comparaveis(self, **_):
+                status_box.error("❌ Nenhum imóvel comparável encontrado. O bairro pode ter poucos anúncios.")
+                cabecalho.subheader("❌ Avaliação interrompida")
+                aviso_cancelar.empty()
 
-        with log_area:
-            st.success(f"✅ {contagem(resumo.get('cluster_a', 0), 'imóvel parecido', 'imóveis parecidos')} com o seu (mesma faixa de área e quartos)")
+            def _zona_inicio(self, **_):
+                status_box.info("📊 **Etapa 2/5 — Agente Identificador de Comparáveis** | Validando localização...")
+                progress.progress(35)
+                with log_area:
+                    st.write("**Agente Identificador** — Verificando quais estão na mesma vizinhança (zona homogênea)...")
 
-        if not comparaveis:
-            status_box.error("❌ Nenhum imóvel comparável encontrado. O bairro pode ter poucos anúncios.")
-            cabecalho.subheader("❌ Avaliação interrompida")
-            aviso_cancelar.empty()
-            st.stop()
-
-        # Zona homogênea (~30s)
-        zona_resultado = None
-        if os.getenv("GOOGLE_MAPS_KEY"):
-            status_box.info("📊 **Etapa 2/5 — Agente Identificador de Comparáveis** | Validando localização...")
-            progress.progress(35)
-            with log_area:
-                st.write("**Agente Identificador** — Verificando quais estão na mesma vizinhança (zona homogênea)...")
-            try:
-                t2z = time.time()
-                endereco = f"{rua}, {numero}, {bairro}, {cidade}, {estado}"
-                zona_resultado = analisar_zona_homogenea(
-                    endereco_alvo=endereco,
-                    imoveis=[c for c in comparaveis if c.get("cluster") == "A"] + terrenos,
-                    cidade=cidade,
-                    estado=estado,
-                    lat_alvo_precomp=imovel_alvo.get("lat"),
-                    lon_alvo_precomp=imovel_alvo.get("lon"),
-                    id_execucao=id_execucao,
-                )
+            def _zona_fim(self, zona_resultado, comparaveis, terrenos, **_):
                 confirmados = zona_resultado.get("comparaveis_confirmados", [])
                 fora = zona_resultado.get("fora_zona", [])
-                tempo_zona = time.time() - t2z
-                total_analisados_zona = len(confirmados) + len(fora)
                 raio_usado = (
                     zona_resultado.get("raio_final_m")
                     or zona_resultado.get("zona_homogenea", {}).get("raio_sugerido_metros")
@@ -950,67 +647,43 @@ with area_principal.container():
                         st.caption(f"ℹ️ {texto_aviso_raio(zona_resultado)}")
                     if len(fora) > len(confirmados):
                         st.caption("ℹ️ Muitos imóveis foram descartados porque estão longe. O sistema só usa imóveis próximos para garantir que o valor reflete a sua vizinhança.")
-            except Exception as e:
-                falhas_execucao.append(f"zona_homogenea: {type(e).__name__}: {e}")
+
+            def _zona_falhou(self, erro, **_):
                 with log_area:
-                    st.warning(f"⚠️ Validação geográfica indisponível — continuando sem ela ({type(e).__name__}: {e})")
+                    st.warning(f"⚠️ Validação geográfica indisponível — continuando sem ela ({type(erro).__name__}: {erro})")
 
-        progress.progress(45)
+            # ── Agentes 3 e 4 ──
+            def _agentes34_inicio(self, **_):
+                progress.progress(50)
+                with log_area:
+                    st.write("**Agente Analisador** — Avaliando qualidade dos imóveis (fotos e descrição)")
+                    st.write("**Agente Avaliador de Infraestrutura** — Mapeando o que tem perto (escolas, hospitais, comércio, transporte)")
 
-        # ==============================================================
-        # ETAPAS 3 e 4 — Análise de qualidade + infraestrutura (~3 min)
-        # ==============================================================
-        progress.progress(50)
-        with log_area:
-            st.write("**Agente Analisador** — Avaliando qualidade dos imóveis (fotos e descrição)")
-            st.write("**Agente Avaliador de Infraestrutura** — Mapeando o que tem perto (escolas, hospitais, comércio, transporte)")
-
-        resultado_ag3 = {}
-        resultado_ag4 = {}
-        ag4_pronto = [False]
-        ag3_pronto = [False]
-
-        t34 = time.time()
-        tempo_estimado_ag34 = 180  # ~3 minutos
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_ag3 = executor.submit(analisar_comparaveis, imovel_alvo, id_execucao=id_execucao)
-            future_ag4 = executor.submit(avaliar_infraestrutura, id_execucao=id_execucao)
-
-            # Contador enquanto espera
-            while not (future_ag3.done() and future_ag4.done()):
-                elapsed = time.time() - t34
-                restante = max(0, tempo_estimado_ag34 - elapsed)
-                pct = min(84, int(50 + (elapsed / tempo_estimado_ag34) * 35))
-                progress.progress(pct)
-
-                msgs = []
-                if future_ag4.done() and not ag4_pronto[0]:
-                    ag4_pronto[0] = True
-                if future_ag3.done() and not ag3_pronto[0]:
-                    ag3_pronto[0] = True
-
-                if ag4_pronto[0] and not ag3_pronto[0]:
-                    if restante > 60:
-                        status_box.info(f"🔄 Infraestrutura ✅ | **Agente Analisador** analisando fotos dos imóveis... Faltam ~{int(restante)}s")
+            def _aguardar_agentes34(self, terminou, situacao):
+                t34 = time.time()
+                tempo_estimado_ag34 = 180  # ~3 minutos
+                while not terminou():
+                    elapsed = time.time() - t34
+                    restante = max(0, tempo_estimado_ag34 - elapsed)
+                    progress.progress(min(84, int(50 + (elapsed / tempo_estimado_ag34) * 35)))
+                    ag3_pronto, ag4_pronto = situacao()
+                    if ag4_pronto and not ag3_pronto:
+                        if restante > 60:
+                            status_box.info(f"🔄 Infraestrutura ✅ | **Agente Analisador** analisando fotos dos imóveis... Faltam ~{int(restante)}s")
+                        else:
+                            status_box.info(f"🔄 Infraestrutura ✅ | **Agente Analisador** avaliando acabamento e conservação... Faltam ~{int(restante)}s")
+                    elif not ag4_pronto and not ag3_pronto:
+                        if restante > 120:
+                            status_box.info(f"🔄 **Agente Analisador + Agente Avaliador** | Buscando escolas, hospitais e comércio no entorno... Faltam ~{int(restante)}s")
+                        elif restante > 60:
+                            status_box.info(f"🔄 **Agente Analisador + Agente Avaliador** | Analisando fotos e descrições dos imóveis... Faltam ~{int(restante)}s")
+                        else:
+                            status_box.info(f"🔄 **Agente Analisador + Agente Avaliador** | Calculando scores de qualidade e infraestrutura... Faltam ~{int(restante)}s")
                     else:
-                        status_box.info(f"🔄 Infraestrutura ✅ | **Agente Analisador** avaliando acabamento e conservação... Faltam ~{int(restante)}s")
-                elif not ag4_pronto[0] and not ag3_pronto[0]:
-                    if restante > 120:
-                        status_box.info(f"🔄 **Agente Analisador + Agente Avaliador** | Buscando escolas, hospitais e comércio no entorno... Faltam ~{int(restante)}s")
-                    elif restante > 60:
-                        status_box.info(f"🔄 **Agente Analisador + Agente Avaliador** | Analisando fotos e descrições dos imóveis... Faltam ~{int(restante)}s")
-                    else:
-                        status_box.info(f"🔄 **Agente Analisador + Agente Avaliador** | Calculando scores de qualidade e infraestrutura... Faltam ~{int(restante)}s")
-                else:
-                    break
+                        break
+                    time.sleep(3)
 
-                time.sleep(3)
-
-            # Coleta resultados
-            try:
-                resultado_ag4 = future_ag4.result()
-                score_infra = resultado_ag4.get("scores", {}).get("score_final", 0)
+            def _agente4_fim(self, resultado_ag4, **_):
                 classif = resultado_ag4.get("scores", {}).get("classificacao_infraestrutura", "?")
                 with log_area:
                     if resultado_ag4.get("status") == "endereco_nao_localizado":
@@ -1019,103 +692,55 @@ with area_principal.container():
                         st.success(f"✅ Mapeou escolas, hospitais, comércio e transporte no entorno. Classificação: **{classif}**")
                     if classif == "insuficiente":
                         st.caption("ℹ️ Classificação insuficiente indica pouco comércio, transporte ou serviços no raio de 1500m. Comum em bairros residenciais afastados.")
-            except Exception as e:
-                falhas_execucao.append(f"agente4: {type(e).__name__}: {e}")
+
+            def _agente4_falhou(self, **_):
                 with log_area:
                     st.warning("⚠️ Agente Avaliador de Infraestrutura indisponível")
 
-            try:
-                resultado_ag3 = future_ag3.result()
-                score_qual = resultado_ag3.get("resumo", {}).get("score_qualitativo_medio", 0)
+            def _agente3_fim(self, resultado_ag3, **_):
                 total_analisados = resultado_ag3.get("resumo", {}).get("total_analisados", 0)
                 with log_area:
                     st.success(f"✅ Avaliou fotos e descrição de **{contagem(total_analisados, 'imóvel', 'imóveis')}** (estado de conservação, padrão de acabamento)")
                     if total_analisados <= 3:
                         st.caption("ℹ️ Poucos imóveis avaliados — o bairro tem poucos anúncios próximos ao seu endereço. O valor estimado pode ser menos preciso.")
-            except Exception as e:
-                falhas_execucao.append(f"agente3: {type(e).__name__}: {e}")
+
+            def _agente3_falhou(self, **_):
                 with log_area:
                     st.warning("⚠️ Agente Analisador indisponível")
 
-        tempo_ag34 = time.time() - t34
-        progress.progress(85)
+            # ── Agente 5 e fim ──
+            def _preco_inicio(self, **_):
+                progress.progress(85)
+                status_box.info("💰 **Etapa 5/5 — Agente Estimador de Preço e Liquidez** | Finalizando...")
+                progress.progress(90)
+                with log_area:
+                    st.write("**Agente Estimador de Preço** — Calculando o valor do seu imóvel com base nos preços da vizinhança...")
 
-        # ==============================================================
-        # ETAPA 5 — Cálculo do preço (instantâneo)
-        # ==============================================================
-        status_box.info("💰 **Etapa 5/5 — Agente Estimador de Preço e Liquidez** | Finalizando...")
-        progress.progress(90)
-        with log_area:
-            st.write("**Agente Estimador de Preço** — Calculando o valor do seu imóvel com base nos preços da vizinhança...")
+            def _preco_fim(self, resultado_ag5, **_):
+                with log_area:
+                    if resultado_ag5.get("avaliacao_confiavel", True):
+                        st.success("✅ Preço calculado")
+                    else:
+                        st.warning("⚠️ Sem anúncios suficientes para um valor confiável (veja o motivo no resultado)")
 
-        resultado_ag5 = {}
-        escopo_busca = imoveis_coletados[0].get("escopo_busca") if imoveis_coletados else None
-        imovel_alvo["escopo_busca"] = escopo_busca   # so para o log do Agente 5
-        try:
-            resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo, id_execucao=id_execucao)
-            valor = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_medio_imovel", 0)
-            liquidez_val = (resultado_ag5.get("avaliacao_planilha") or resultado_ag5.get("avaliacao", {})).get("valor_liquidez_arredondado", 0)
-            tempo_venda = (resultado_ag5.get("liquidez_experimental") or resultado_ag5.get("liquidez", {})).get("tempo_estimado", "?")
-            with log_area:
-                if resultado_ag5.get("avaliacao_confiavel", True):
-                    st.success("✅ Preço calculado")
-                else:
-                    st.warning("⚠️ Sem anúncios suficientes para um valor confiável (veja o motivo no resultado)")
-        except Exception as e:
-            falhas_execucao.append(f"agente5: {type(e).__name__}: {e}")
-            with log_area:
-                st.warning(f"⚠️ Agente Estimador indisponível")
+            def _preco_falhou(self, **_):
+                with log_area:
+                    st.warning("⚠️ Agente Estimador indisponível")
 
-        tempo_total = time.time() - inicio_total
-        # Fim: o cabecalho vira "concluida" e saem a barra, o status e o aviso do F5.
-        progress.empty()
-        status_box.empty()
-        aviso_cancelar.empty()
-        cabecalho.subheader(f"✅ Avaliação concluída em {tempo_total:.0f} segundos")
+            def _fim(self, tempo_total, **_):
+                # O cabecalho vira "concluida" e saem a barra, o status e o aviso do F5.
+                progress.empty()
+                status_box.empty()
+                aviso_cancelar.empty()
+                cabecalho.subheader(f"✅ Avaliação concluída em {tempo_total:.0f} segundos")
 
-        # Monta resultado para exibição
-        # Enriquece resumo com dados da coleta
-        resumo["total_coletados"] = len(imoveis_coletados)
-        resumo["tempo_coleta_s"] = round(tempo_ag1, 1)
-        # Conta portais (normaliza nomes)
-        portais_count = {}
-        for im in imoveis_coletados:
-            # Os agentes gravam a origem em "source"; nenhum produz "portal".
-            origem = str(im.get("source") or "").strip() or "Banco próprio"
-            origem_lower = origem.lower()
-            if "vivareal" in origem_lower or "viva real" in origem_lower:
-                origem = "VivaReal"
-            elif "lugar" in origem_lower:
-                origem = "LugarCerto"
-            elif "athena" in origem_lower or "s3" in origem_lower:
-                origem = "Banco próprio"
-            portais_count[origem] = portais_count.get(origem, 0) + 1
-        resumo["portais"] = portais_count
-        # Conta na rua vs bairro
-        na_rua_count = sum(1 for im in imoveis_coletados if rua and rua.lower() in (im.get("street") or im.get("rua") or "").lower())
-        resumo["na_rua"] = na_rua_count
-
-        resumo["duplicatas_descartadas"] = len(duplicatas_descartadas)
-
-        # Tudo o que o fim do fluxo usa (resultado, leilao, verificacoes, banco). Fica na
-        # sessao: roda de novo quando a pessoa responde "Este anuncio e do seu imovel?".
-        contexto = {
-            "id_execucao": id_execucao, "imovel_alvo": imovel_alvo, "imoveis_coletados": imoveis_coletados,
-            "escopo_busca": escopo_busca, "resumo": resumo, "duplicatas_descartadas": duplicatas_descartadas,
-            "dados_leilao": dados_leilao, "alvo_sem_localizacao": alvo_sem_localizacao,
-            "comparaveis": comparaveis, "terrenos": terrenos, "zona_resultado": zona_resultado,
-            "resultado_ag2": resultado_ag2, "resultado_ag3": resultado_ag3, "resultado_ag4": resultado_ag4,
-            "falhas": falhas_execucao, "localizacao_alvo": localizacao_alvo,
-            "entrada_usuario": entrada_usuario, "tela_resultado": tela_resultado,
-            "tempos": {
-                "total": round(tempo_total, 1),
-                "agente1": round(tempo_ag1, 1),
-                "agente2": round(tempo_ag2_cluster, 1),
-                "zona": round(locals().get("tempo_zona", 0.0), 1),
-                "agentes3e4": round(tempo_ag34, 1),
-            },
-        }
-        resultado = montar_resultado_final(contexto, resultado_ag5)
+        saida = executar_avaliacao(
+            imovel_alvo, dados_leilao=dados_leilao, entrada_usuario=entrada_usuario,
+            tela_resultado=tela_resultado, obs=ObservadorTela(),
+        )
+        if saida["parada"]:
+            st.stop()
+        resultado, contexto = saida["resultado"], saida["contexto"]
 
         # Salva no session_state pra não perder no rerun
         st.session_state["resultado"] = resultado

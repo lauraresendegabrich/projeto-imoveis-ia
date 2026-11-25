@@ -3,9 +3,9 @@ Orquestrador do Pipeline Multiagente
 ======================================
 
 RESPONSABILIDADE:
-    Conecta e orquestra os agentes implementados do pipeline.
-    Recebe o imóvel alvo e retorna os comparáveis ranqueados
-    com análise qualitativa e de infraestrutura.
+    Avaliacao pelo terminal. Chama o MESMO fluxo da tela (services/pipeline.py):
+    nao tem fluxo proprio desde 24/11/2026. A descricao abaixo e dos agentes; os
+    modelos de IA estao em docs/MODELOS_LLM.md.
 
 PIPELINE:
     Agente 1 — Coletor (sequencial)
@@ -21,14 +21,14 @@ PIPELINE:
         → Separa terrenos do clustering
         → Pré-classificação determinística + score numérico de similaridade
         → Clustering via LLM (cadeia Qwen3-VL-8B Colab → Groq openai/gpt-oss-120b
-          → Groq_2 → Gemini gemini-3.5-flash-lite → NVIDIA openai/gpt-oss-20b)
+          → Groq_2 → Gemini → NVIDIA nemotron; nomes no .env)
         → Zona homogênea (Google Maps + LLM de visão sobre imagem de satélite)
         ↓  data/imoveis_comparaveis_ag2.json
         ↓  data/zona_homogenea_ag2.json
 
     Agente 3 — Analisador Qualitativo (PARALELO, depende do Ag. 2)
         → Analisa texto + fotos (multimodal). Cadeia: Qwen3-VL-8B Colab → Groq
-          → NVIDIA meta/llama-3.2-11b-vision-instruct → Gemini
+          → NVIDIA nemotron-vl → Gemini
         → Fotos por provider: Qwen 4, Gemini 4, Groq 2, NVIDIA 1 (interface aceita até 8)
         → Score qualitativo determinístico por imóvel (+ score_llm comparativo)
         ↓  data/imoveis_analisados_ag3.json
@@ -69,8 +69,8 @@ COMO USAR:
     })
 """
 
-import time
 import logging
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -78,292 +78,58 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-def executar_pipeline(imovel_alvo: dict) -> dict:
+def executar_pipeline(imovel_alvo: dict, dados_leilao: dict | None = None, gravar: bool = False) -> dict:
     """
-    Executa o pipeline completo para o imóvel alvo.
+    Avaliacao completa pelo terminal: o MESMO fluxo da tela (services/pipeline.py).
 
-    Parâmetros
-    ----------
-    imovel_alvo : dict
-        Campos obrigatórios: localizacao, tipo, bairro, rua, cidade, estado
-        Campos para Agente 2: area, bedrooms, bathrooms, parkingSpaces,
-                              pricePerSqm, propertyType
+    Ate 24/11/2026 este arquivo tinha o proprio fluxo, que ficou para tras da tela
+    (nao localizava o alvo antes da coleta, mandava os terrenos para a zona por outro
+    caminho, nao passava o imovel ao Agente 3 nem avaliava o leilao). Agora so chama
+    o fluxo unico; nao mexa nos agentes por aqui.
 
-    Retorna
-    -------
-    dict com (no sucesso, Agentes 1 a 5 executados):
-        status              : "completo — ..." ou "parcial — N falha(s): ..."
-        imovel_alvo         : identificação do imóvel (rua — bairro)
-        comparaveis         : lista ranqueada (Cluster A + B)
-        terrenos            : terrenos separados (para zona homogênea)
-        zona_homogenea      : resultado da validação geográfica (ou None)
-        analise_qualitativa : saída do Agente 3
-        infraestrutura      : saída do Agente 4
-        preco_estimado      : saída do Agente 5 (avaliação + liquidez)
-        resumo              : totais e método usado
+    imovel_alvo: no formato dos agentes (tipo "house"/"apartment"); para montar a
+        partir dos campos do formulario, use services.pipeline.montar_imovel_alvo.
+    dados_leilao: o de services.leilao.ler_formulario_leilao (opcional).
+    gravar: False (padrao) = nao grava no banco; True = grava como a tela.
 
-    Em erro precoce (Ag. 1 sem imóveis ou Ag. 2 sem comparáveis), retorna um
-    dict reduzido com status de erro e preco_estimado=None.
+    Retorna as chaves de sempre (status, comparaveis, terrenos, zona_homogenea,
+    analise_qualitativa, infraestrutura, preco_estimado, resumo) e mais as da tela
+    (leilao, verificacoes, falhas...), em "resultado_completo".
     """
+    from services.pipeline import ObservadorLog, executar_avaliacao
+
+    imovel_alvo = dict(imovel_alvo)
+    imovel_alvo.setdefault("localizacao", f"{imovel_alvo.get('cidade')}, {imovel_alvo.get('estado')}")
+    imovel_alvo.setdefault("neighborhood", imovel_alvo.get("bairro"))
+    imovel_alvo.setdefault("street", imovel_alvo.get("rua"))
+    imovel_alvo.setdefault("images", [])
+    rotulo = f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}"
     logger.info("=" * 55)
-    logger.info("PIPELINE MULTIAGENTE — PRECIFICAÇÃO IMOBILIÁRIA")
+    logger.info("PIPELINE MULTIAGENTE — PRECIFICAÇÃO IMOBILIÁRIA (fluxo da tela)")
     logger.info("=" * 55)
-    logger.info(
-        f"Alvo: {imovel_alvo.get('rua')} — "
-        f"{imovel_alvo.get('bairro')}, "
-        f"{imovel_alvo.get('cidade')}/{imovel_alvo.get('estado')}"
-    )
+    logger.info(f"Alvo: {rotulo}, {imovel_alvo.get('cidade')}/{imovel_alvo.get('estado')}")
 
-    t_pipeline_start = time.time()
-
-    # Identifica esta avaliacao nos JSONs que os agentes trocam: os Agentes 3/4/5
-    # ignoram arquivos de avaliacoes anteriores (ver agents/execucao.py).
-    from agents.execucao import novo_id_execucao
-    id_execucao = novo_id_execucao()
-
-    # ------------------------------------------------------------------
-    # AGENTE 1 — Coleta de imóveis comparáveis
-    # Athena (fonte principal) → fallback Apify/ocrad (VivaReal + LugarCerto)
-    # Enriquece com publishedAt e description via requests.get
-    # ------------------------------------------------------------------
-    from agents.collector import coletar_imoveis
-
-    logger.info("Agente 1: coletando imóveis...")
-    t_ag1_start = time.time()
-    imoveis_coletados = coletar_imoveis(
-        localizacao=imovel_alvo["localizacao"],
-        tipo_imovel=imovel_alvo["tipo"],
-        bairro=imovel_alvo.get("bairro", ""),
-        rua=imovel_alvo.get("rua", ""),
-    )
-    t_ag1 = time.time() - t_ag1_start
-    logger.info(f"Agente 1 concluído: {len(imoveis_coletados)} imóveis coletados")
-
-    if not imoveis_coletados:
-        logger.warning("Agente 1 não retornou imóveis — verifique APIFY_TOKEN_2 no .env")
-        return {
-            "status":         "erro — Agente 1 sem resultados",
-            "imovel_alvo":    f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
-            "comparaveis":    [],
-            "terrenos":       [],
-            "zona_homogenea": None,
-            "resumo":         {},
-            "preco_estimado": None,
-            "liquidez":       None,
-        }
-
-    # ------------------------------------------------------------------
-    # AGENTE 2 — Identificação de comparáveis
-    # Score numérico + clustering LLM + zona homogênea
-    # ------------------------------------------------------------------
-    from agents.comparables import identificar_comparaveis, analisar_zona_homogenea
-    import os
-
-    logger.info("Agente 2: identificando comparáveis...")
-
-    comparaveis = []
-    terrenos = []
-    resumo = {}
-    zona_resultado = None
-    t_ag2_clustering = 0.0
-    t_ag2_zona = 0.0
-
-    try:
-        t_ag2_start = time.time()
-        resultado_ag2 = identificar_comparaveis(
-            imovel_alvo=imovel_alvo,
-            imoveis_coletados=imoveis_coletados,
-            usar_llm=True,
-            id_execucao=id_execucao,
-        )
-        t_ag2_clustering = time.time() - t_ag2_start
-
-        comparaveis = resultado_ag2.get("comparaveis", [])
-        terrenos    = resultado_ag2.get("terrenos", [])
-        resumo      = resultado_ag2.get("resumo", {})
-        logger.info(
-            f"Agente 2 concluído: "
-            f"{resumo.get('cluster_a', 0)} similares | "
-            f"{resumo.get('cluster_b', 0)} não similares | "
-            f"{resumo.get('terrenos_excluidos', 0)} terrenos"
-        )
-    except Exception as e:
-        logger.error(f"Agente 2 falhou: {e}")
-        return {
-            "status":         f"erro — Agente 2 falhou: {str(e)}",
-            "imovel_alvo":    f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
-            "comparaveis":    [],
-            "terrenos":       [],
-            "zona_homogenea": None,
-            "resumo":         {},
-            "preco_estimado": None,
-        }
-
-    if not comparaveis:
-        logger.warning("Agente 2 não encontrou comparáveis — pipeline não pode continuar")
-        return {
-            "status":         "erro — Agente 2 sem comparáveis (LLM não classificou nenhum como similar)",
-            "imovel_alvo":    f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
-            "comparaveis":    [],
-            "terrenos":       terrenos,
-            "zona_homogenea": None,
-            "resumo":         resumo,
-            "preco_estimado": None,
-        }
-    # Zona homogênea (opcional — requer GOOGLE_MAPS_KEY)
-    zona_resultado = None
-    if os.getenv("GOOGLE_MAPS_KEY"):
-        try:
-            logger.info("Agente 2 — Zona homogênea: validando geograficamente...")
-            t_zona_start = time.time()
-            endereco = (
-                f"{imovel_alvo.get('rua', '')}, "
-                f"{imovel_alvo.get('numero', '')}, "
-                f"{imovel_alvo.get('bairro', '')}, "
-                f"{imovel_alvo.get('cidade', '')}, "
-                f"{imovel_alvo.get('estado', '')}"
-            )
-            # Só envia Cluster A (Cluster B já foi descartado pela LLM). Os terrenos
-            # vão no parâmetro dedicado `terrenos=` — NÃO podem ser misturados em
-            # `imoveis`, senão a zona os processa como comparáveis construídos E
-            # os recarrega do disco, contando-os duas vezes.
-            cluster_a = [c for c in comparaveis if c.get("cluster") == "A"]
-            zona_resultado = analisar_zona_homogenea(
-                endereco_alvo=endereco,
-                imoveis=cluster_a,
-                terrenos=terrenos,
-                cidade=imovel_alvo.get("cidade", ""),
-                estado=imovel_alvo.get("estado", ""),
-                # O Ag2 ja geocodificou o alvo por rua+numero (teste de identidade).
-                lat_alvo_precomp=imovel_alvo.get("lat"),
-                lon_alvo_precomp=imovel_alvo.get("lon"),
-                id_execucao=id_execucao,
-            )
-            t_ag2_zona = time.time() - t_zona_start
-            confirmados = zona_resultado.get("comparaveis_confirmados", [])
-            fora        = zona_resultado.get("fora_zona", [])
-            logger.info(f"Zona homogênea: {len(confirmados)} na zona | {len(fora)} fora")
-        except Exception as e:
-            logger.error(f"Zona homogênea falhou: {e} — continuando sem ela")
-            zona_resultado = None
+    saida = executar_avaliacao(imovel_alvo, dados_leilao=dados_leilao, obs=ObservadorLog(), gravar=gravar)
+    resultado = saida["resultado"] or {}
+    if saida["parada"] == "sem_comparaveis":
+        status = "erro — Agente 2 sem comparáveis (LLM não classificou nenhum como similar)"
+    elif saida["parada"] == "sem_anuncios":
+        status = "erro — Agente 1 sem resultados"
+    elif resultado.get("falhas"):
+        status = f"parcial — {len(resultado['falhas'])} falha(s): {'; '.join(resultado['falhas'])}"
     else:
-        logger.info("GOOGLE_MAPS_KEY não configurada — zona homogênea pulada")
-
-    # ------------------------------------------------------------------
-    # AGENTES 3 e 4 — PARALELO (ambos dependem do Ag. 2, não entre si)
-    # ------------------------------------------------------------------
-    from agents.text_analyzer import analisar_comparaveis
-    from agents.infra_evaluator import avaliar_infraestrutura
-    from concurrent.futures import ThreadPoolExecutor
-
-    logger.info("Agentes 3 e 4: rodando em paralelo...")
-
-    resultado_ag3 = {}
-    resultado_ag4 = {}
-    falhas = []
-    t_ag3 = 0.0
-    t_ag4 = 0.0
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        # Agente 3 — Análise qualitativa (texto + fotos)
-        t_ag3_start = time.time()
-        future_ag3 = executor.submit(analisar_comparaveis, id_execucao=id_execucao)
-
-        # Agente 4 — Infraestrutura (POIs do entorno)
-        t_ag4_start = time.time()
-        future_ag4 = executor.submit(avaliar_infraestrutura, id_execucao=id_execucao)
-
-        # Coleta resultado do Agente 3 com tratamento de erro
-        try:
-            resultado_ag3 = future_ag3.result()
-            t_ag3 = time.time() - t_ag3_start
-            if not resultado_ag3:
-                falhas.append("Agente 3 retornou vazio — analise qualitativa indisponivel")
-                logger.warning("Agente 3 retornou resultado vazio")
-            else:
-                logger.info(f"Agente 3 concluído: score médio = {resultado_ag3.get('resumo', {}).get('score_qualitativo_medio', '?')}")
-        except Exception as e:
-            falhas.append(f"Agente 3 falhou: {str(e)}")
-            logger.error(f"Agente 3 falhou com erro: {e}")
-            t_ag3 = time.time() - t_ag3_start
-
-        # Coleta resultado do Agente 4 com tratamento de erro
-        try:
-            resultado_ag4 = future_ag4.result()
-            t_ag4 = time.time() - t_ag4_start
-            if not resultado_ag4:
-                falhas.append("Agente 4 retornou vazio — analise de infraestrutura indisponivel")
-                logger.warning("Agente 4 retornou resultado vazio")
-            else:
-                logger.info(f"Agente 4 concluído: score infra = {resultado_ag4.get('scores', {}).get('score_final', '?')}")
-        except Exception as e:
-            falhas.append(f"Agente 4 falhou: {str(e)}")
-            logger.error(f"Agente 4 falhou com erro: {e}")
-            t_ag4 = time.time() - t_ag4_start
-
-    # ------------------------------------------------------------------
-    # AGENTE 5 — Estimativa de preço e liquidez
-    # Depende dos Ag. 3 e 4, mas funciona com dados parciais
-    # ------------------------------------------------------------------
-    from agents.price_liquidity import estimar_preco
-
-    resultado_ag5 = {}
-    t_ag5 = 0.0
-    try:
-        logger.info("Agente 5: estimando preço e liquidez...")
-        t_ag5_start = time.time()
-        resultado_ag5 = estimar_preco(imovel_alvo_extra=imovel_alvo, id_execucao=id_execucao)
-        t_ag5 = time.time() - t_ag5_start
-        logger.info(
-            f"Agente 5 concluído: valor médio = R$ {resultado_ag5.get('avaliacao_planilha', {}).get('valor_medio_imovel', '?'):,.2f}"
-        )
-    except Exception as e:
-        falhas.append(f"Agente 5 falhou: {str(e)}")
-        logger.error(f"Agente 5 falhou com erro: {e}")
-        t_ag5 = time.time() - t_ag5_start
-
-    # ------------------------------------------------------------------
-    # RESUMO DA EXECUCAO
-    # ------------------------------------------------------------------
-    t_total = time.time() - t_pipeline_start
-    logger.info("")
-    logger.info("=" * 50)
-    logger.info(" RESUMO DA EXECUCAO ")
-    logger.info("=" * 50)
-    logger.info(f"Agente 1: {t_ag1:.1f}s")
-    logger.info(f"Agente 2 clustering: {t_ag2_clustering:.1f}s")
-    logger.info(f"Agente 2 zona: {t_ag2_zona:.1f}s")
-    logger.info(f"Agente 3: {t_ag3:.1f}s")
-    logger.info(f"Agente 4: {t_ag4:.1f}s")
-    logger.info(f"Agente 5: {t_ag5:.1f}s")
-    logger.info(f"Tempo total: {t_total:.1f}s")
-    logger.info("=" * 50)
-
-    # ------------------------------------------------------------------
-    # RESULTADO FINAL
-    # ------------------------------------------------------------------
-    if falhas:
-        logger.warning(f"Pipeline concluído com {len(falhas)} falha(s):")
-        for f in falhas:
-            logger.warning(f"  - {f}")
-
-    # Anuncios do mesmo imovel descartados pelo Ag1 (detalhe em
-    # data/duplicatas_descartadas_ag1.json e em comparaveis[i]["duplicatas"]).
-    resumo["duplicatas_descartadas"] = sum(len(im.get("duplicatas") or []) for im in imoveis_coletados)
-
-    status = "completo — Agentes 1 a 5 executados"
-    if falhas:
-        status = f"parcial — {len(falhas)} falha(s): {'; '.join(falhas)}"
-
+        status = "completo — Agentes 1 a 5 executados"
     return {
-        "status":              status,
-        "id_execucao":         id_execucao,
-        "imovel_alvo":         f"{imovel_alvo.get('rua')} — {imovel_alvo.get('bairro')}",
-        "comparaveis":         comparaveis,
-        "terrenos":            terrenos,
-        "zona_homogenea":      zona_resultado,
-        "analise_qualitativa": resultado_ag3,
-        "infraestrutura":      resultado_ag4,
-        "preco_estimado":      resultado_ag5,
-        "resumo":              resumo,
+        "status": status,
+        "id_execucao": resultado.get("id_execucao"),
+        "imovel_alvo": rotulo,
+        "comparaveis": resultado.get("comparaveis", []),
+        "terrenos": resultado.get("terrenos", []),
+        "zona_homogenea": resultado.get("zona_homogenea"),
+        "analise_qualitativa": resultado.get("analise_qualitativa", {}),
+        "infraestrutura": resultado.get("infraestrutura", {}),
+        "preco_estimado": resultado.get("preco_estimado"),
+        "resumo": resultado.get("resumo", {}),
+        "leilao": resultado.get("leilao"),
+        "resultado_completo": resultado,
     }

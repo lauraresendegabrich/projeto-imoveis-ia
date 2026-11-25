@@ -4,7 +4,35 @@
 
 O orquestrador é o componente que **conecta e coordena os 5 agentes** do sistema. Ele decide a ordem de execução, passa dados entre os agentes, e trata falhas.
 
-Arquivo: `app/graph.py`
+Arquivo: **`services/pipeline.py`** (`executar_avaliacao`). É o **mesmo** para a tela e para o terminal:
+
+| Quem chama | Como |
+|---|---|
+| Página "Avaliação de imóvel" (`app/paginas/avaliacao.py`) | `executar_avaliacao(..., obs=ObservadorTela())`: a tela só mostra as mensagens e a barra de cada etapa |
+| Terminal (`app/main.py`, `app/graph.executar_pipeline`) | `executar_avaliacao(..., obs=ObservadorLog(), gravar=False)`: cada etapa vira uma linha no log |
+
+**Por que um arquivo só:** até 24/11/2026, a tela e o `app/graph.py` tinham cada um o
+seu fluxo, e o do terminal ficou para trás. Ele não localizava o alvo antes da coleta,
+mandava os terrenos para a zona por outro caminho, não passava o imóvel ao Agente 3 e
+não avaliava o leilão. No mesmo imóvel (Arapongas), deu R$ 338 mil, contra R$ 299–314
+mil pela tela. **Mudança no fluxo entra só em `services/pipeline.py`.** O teste
+`tests/test_pipeline_unico.py` falha se a tela ou o terminal voltarem a chamar os agentes
+direto.
+
+**Etapas** (o observador recebe cada uma, na ordem): localizar o alvo (geocodificação
+única, sem aceitar só a cidade) → Agente 1 (com a coordenada, para a busca por
+proximidade) → Agente 2 → zona homogênea (Cluster A + terrenos) → Agentes 3 e 4 juntos →
+Agente 5 → fim (`montar_resultado_final`: leilão, verificações e banco).
+
+**Terminal:**
+```
+.venv\Scripts\python.exe -m app.main            # não grava no banco
+.venv\Scripts\python.exe -m app.main --gravar   # grava, como a tela
+```
+Os campos do imóvel e do leilão ficam no topo de `app/main.py`, com os mesmos nomes do formulário.
+
+> O diagrama e as seções abaixo descrevem os agentes. Tempos e fontes podem estar
+> desatualizados; o fluxo em si está em `services/pipeline.py`.
 
 ---
 
